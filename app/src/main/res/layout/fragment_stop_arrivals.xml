@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="8dp">
+
+    <!-- Header with selected stop name -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:gravity="center_vertical">
+
+        <TextView android:id="@+id/tvStopName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:accessibilityHeading="true"/>
+
+        <ProgressBar android:id="@+id/pbLoading"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:visibility="gone"
+            android:importantForAccessibility="no"/>
+
+        <Button android:id="@+id/btnRefresh"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:text="Обнови"
+            android:contentDescription="Обнови списъка с пристигания"
+            android:layout_marginStart="8dp"
+            style="@style/Widget.Material3.Button.TextButton"/>
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Превозни средства, спиращи на тази спирка:"
+        android:textSize="14sp"
+        android:paddingHorizontal="12dp"
+        android:paddingBottom="8dp"
+        android:alpha="0.7"/>
+
+    <!-- Debug / empty state — small, capped height, scrollable -->
+    <ScrollView
+        android:id="@+id/svEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxHeight="200dp"
+        android:visibility="gone">
+
+        <TextView android:id="@+id/tvEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:fontFamily="monospace"
+            android:padding="12dp"
+            android:textIsSelectable="true"/>
+    </ScrollView>
+
+    <!-- Arrivals list — gets all remaining vertical space via weight=1 -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvArrivals"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+</LinearLayout>

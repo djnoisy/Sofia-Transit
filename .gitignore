@@ -1,0 +1,19 @@
+# Built artifacts
+*.apk
+*.aab
+build/
+.gradle/
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+
+# Keystore (for release builds)
+*.jks
+*.keystore
+
+# OS
+.DS_Store
+Thumbs.db

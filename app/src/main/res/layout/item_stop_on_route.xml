@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="horizontal" android:padding="16dp" android:minHeight="56dp"
+    android:gravity="center_vertical"
+    android:background="?attr/selectableItemBackground" android:focusable="true">
+
+    <TextView android:id="@+id/tvSequence"
+        android:layout_width="40dp" android:layout_height="wrap_content"
+        android:textSize="13sp" android:alpha="0.5" android:gravity="center"
+        android:importantForAccessibility="no"/>
+
+    <TextView android:id="@+id/tvStopName"
+        android:layout_width="0dp" android:layout_height="wrap_content"
+        android:layout_weight="1" android:textSize="16sp" android:layout_marginStart="8dp"/>
+
+    <TextView android:id="@+id/tvTime"
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textSize="14sp" android:textColor="#1976D2"/>
+</LinearLayout>

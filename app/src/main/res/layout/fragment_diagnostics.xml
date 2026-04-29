@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Диагностика на API"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:paddingBottom="8dp"
+        android:accessibilityHeading="true"/>
+
+    <Button android:id="@+id/btnRun"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Обща проверка"
+        android:contentDescription="Стартирай обща диагностична проверка"
+        style="@style/Widget.Material3.Button"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#E0E0E0"
+        android:layout_marginVertical="16dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Проверка на конкретна спирка:"
+        android:textSize="14sp"
+        android:paddingBottom="4dp"/>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="напр. A0170"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etStopId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textCapCharacters"
+            android:maxLines="1"
+            android:contentDescription="Въведете stop_id за проверка"/>
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <Button android:id="@+id/btnLookup"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Провери спирка"
+        android:contentDescription="Провери дали въведената спирка има пристигания"
+        android:layout_marginTop="8dp"
+        style="@style/Widget.Material3.Button.OutlinedButton"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#E0E0E0"
+        android:layout_marginVertical="16dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:weightSum="2">
+
+        <Button android:id="@+id/btnShareLog"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:text="Сподели лог"
+            android:contentDescription="Сподели текущия лог файл"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+
+        <Button android:id="@+id/btnClearLog"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="Изчисти лог"
+            android:contentDescription="Изтрий текущия лог файл"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+    </LinearLayout>
+
+    <ProgressBar android:id="@+id/pbProgress"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="center"
+        android:layout_marginTop="16dp"
+        android:visibility="gone"
+        android:importantForAccessibility="no"/>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginTop="16dp">
+
+        <TextView android:id="@+id/tvReport"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:fontFamily="monospace"
+            android:textIsSelectable="true"
+            android:padding="8dp"/>
+    </ScrollView>
+</LinearLayout>

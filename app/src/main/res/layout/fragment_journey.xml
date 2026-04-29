@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="Пътуване" android:textSize="22sp" android:textStyle="bold"
+        android:padding="16dp" android:accessibilityHeading="true"/>
+
+    <!-- Hint when idle -->
+    <TextView android:id="@+id/tvJourneyHint"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textSize="16sp" android:padding="16dp" android:visibility="gone"
+        android:gravity="center"/>
+
+    <!-- Select upcoming trip panel -->
+    <LinearLayout android:id="@+id/panelUpcoming"
+        android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:paddingHorizontal="12dp" android:paddingVertical="8dp">
+
+            <TextView android:id="@+id/tvUpcomingTitle"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="16sp"
+                android:accessibilityHeading="true"/>
+
+            <ProgressBar android:id="@+id/pbRefreshing"
+                android:layout_width="20dp" android:layout_height="20dp"
+                android:visibility="gone"
+                android:importantForAccessibility="no"/>
+
+            <Button android:id="@+id/btnRefresh"
+                android:layout_width="wrap_content" android:layout_height="48dp"
+                android:text="Обнови"
+                android:contentDescription="Обнови списъка с идващи превозни средства"
+                android:layout_marginStart="8dp"
+                style="@style/Widget.Material3.Button.TextButton"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvEmptyMessage"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Няма идващи превозни средства в близост"
+            android:textSize="15sp"
+            android:padding="24dp"
+            android:gravity="center"
+            android:visibility="gone"/>
+
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvUpcoming"
+            android:layout_width="match_parent" android:layout_height="match_parent"/>
+    </LinearLayout>
+
+    <!-- Active journey panel -->
+    <LinearLayout android:id="@+id/panelActiveJourney"
+        android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:orientation="vertical"
+        android:padding="16dp" android:visibility="gone">
+
+        <TextView android:id="@+id/tvJourneyRoute"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="15sp" android:alpha="0.7" android:paddingBottom="16dp"/>
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Текуща спирка" android:textSize="14sp"
+            android:textAllCaps="true" android:alpha="0.6"/>
+        <TextView android:id="@+id/tvCurrentStop"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="26sp" android:textStyle="bold"
+            android:paddingVertical="8dp"/>
+
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#E0E0E0" android:layout_marginVertical="16dp"/>
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Следваща спирка" android:textSize="14sp"
+            android:textAllCaps="true" android:alpha="0.6"/>
+        <TextView android:id="@+id/tvNextStop"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="20sp" android:paddingVertical="8dp"/>
+
+        <TextView android:id="@+id/tvProgress"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="13sp" android:alpha="0.6" android:paddingTop="16dp"/>
+    </LinearLayout>
+
+    <Button android:id="@+id/btnEndJourney"
+        android:layout_width="match_parent" android:layout_height="56dp"
+        android:text="Стоп пътуване"
+        android:contentDescription="Спри следенето на пътуването"
+        android:visibility="gone" android:layout_margin="8dp"
+        style="@style/Widget.Material3.Button.TonalButton"/>
+</LinearLayout>

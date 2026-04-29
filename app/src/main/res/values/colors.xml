@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#1565C0</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="primary_container">#BBDEFB</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="background">#FAFAFA</color>
+    <color name="on_background">#212121</color>
+    <color name="error">#B00020</color>
+    <color name="bus_color">#1976D2</color>
+    <color name="tram_color">#F57C00</color>
+    <color name="trolley_color">#388E3C</color>
+    <color name="metro_color">#7B1FA2</color>
+</resources>

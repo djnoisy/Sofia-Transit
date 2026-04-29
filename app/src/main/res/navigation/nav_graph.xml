@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/nearbyFragment">
+
+    <!-- ── Nearby Stops ── -->
+    <fragment android:id="@+id/nearbyFragment"
+        android:name="bg.sofia.transit.ui.nearby.NearbyStopsFragment"
+        android:label="Спирки"
+        tools:layout="@layout/fragment_nearby_stops">
+
+        <action android:id="@+id/actionNearbyToArrivals"
+            app:destination="@id/stopArrivalsFragment"/>
+
+        <action android:id="@+id/actionNearbyToDiagnostics"
+            app:destination="@id/diagnosticsFragment"/>
+    </fragment>
+
+    <fragment android:id="@+id/diagnosticsFragment"
+        android:name="bg.sofia.transit.ui.diagnostics.DiagnosticsFragment"
+        android:label="Диагностика"
+        tools:layout="@layout/fragment_diagnostics"/>
+
+    <fragment android:id="@+id/stopArrivalsFragment"
+        android:name="bg.sofia.transit.ui.nearby.StopArrivalsFragment"
+        android:label="Пристигания"
+        tools:layout="@layout/fragment_stop_arrivals">
+
+        <argument android:name="stopId"   app:argType="string"/>
+        <argument android:name="stopName" app:argType="string"/>
+    </fragment>
+
+    <!-- ── Lines ── -->
+    <fragment android:id="@+id/linesFragment"
+        android:name="bg.sofia.transit.ui.lines.LinesFragment"
+        android:label="Линии"
+        tools:layout="@layout/fragment_lines">
+
+        <action android:id="@+id/actionLinesToDirections"
+            app:destination="@id/directionsFragment"/>
+    </fragment>
+
+    <fragment android:id="@+id/directionsFragment"
+        android:name="bg.sofia.transit.ui.lines.DirectionsFragment"
+        android:label="Направления"
+        tools:layout="@layout/fragment_directions">
+
+        <argument android:name="routeId"
+            app:argType="string"/>
+        <argument android:name="routeShortName"
+            app:argType="string"/>
+        <argument android:name="routeLongName"
+            app:argType="string" android:defaultValue=""/>
+
+        <action android:id="@+id/actionDirectionsToStopsList"
+            app:destination="@id/stopsListFragment"/>
+    </fragment>
+
+    <fragment android:id="@+id/stopsListFragment"
+        android:name="bg.sofia.transit.ui.lines.StopsListFragment"
+        android:label="Спирки по маршрут"
+        tools:layout="@layout/fragment_stops_list">
+
+        <argument android:name="routeId"    app:argType="string"/>
+        <argument android:name="headsign"   app:argType="string"/>
+        <argument android:name="routeName"  app:argType="string" android:defaultValue=""/>
+
+        <action android:id="@+id/actionStopsListToSchedule"
+            app:destination="@id/scheduleFragment"/>
+    </fragment>
+
+    <fragment android:id="@+id/scheduleFragment"
+        android:name="bg.sofia.transit.ui.lines.ScheduleFragment"
+        android:label="Разписание"
+        tools:layout="@layout/fragment_schedule">
+
+        <argument android:name="routeId"   app:argType="string"/>
+        <argument android:name="routeName" app:argType="string"/>
+        <argument android:name="headsign"  app:argType="string"/>
+        <argument android:name="stopId"    app:argType="string"/>
+        <argument android:name="stopName"  app:argType="string"/>
+    </fragment>
+
+    <!-- ── Journey ── -->
+    <fragment android:id="@+id/journeyFragment"
+        android:name="bg.sofia.transit.ui.journey.JourneyFragment"
+        android:label="Пътуване"
+        tools:layout="@layout/fragment_journey"/>
+
+</navigation>

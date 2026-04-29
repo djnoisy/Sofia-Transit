@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Градски транспорт София</string>
+    <string name="tab_nearby">Спирки</string>
+    <string name="tab_lines">Линии</string>
+    <string name="tab_journey">Пътуване</string>
+    <string name="loading">Зареждане…</string>
+    <string name="no_arrivals">Няма данни за пристигане</string>
+    <string name="stop_label">Спирка: %s</string>
+    <string name="next_stop_label">Следваща спирка: %s</string>
+    <string name="end_of_journey">Крайна спирка. Пристигнахте.</string>
+    <string name="location_permission_needed">Необходим е достъп до местоположение</string>
+    <string name="channel_name">Пътуване</string>
+    <string name="notif_title">Градски транспорт</string>
+    <string name="schedule_title">Разписание</string>
+    <string name="close">Затвори</string>
+    <string name="no_data">Няма данни</string>
+    <string name="metres_format">%d м</string>
+    <string name="km_format">%.1f км</string>
+</resources>

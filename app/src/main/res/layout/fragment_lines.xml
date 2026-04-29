@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="Линии" android:textSize="22sp" android:textStyle="bold"
+        android:padding="16dp" android:accessibilityHeading="true"/>
+
+    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:scrollbars="none">
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:padding="8dp">
+            <Button android:id="@+id/btnAll" android:layout_width="wrap_content"
+                android:layout_height="48dp" android:text="Всички"
+                android:layout_marginEnd="4dp" style="@style/Widget.Material3.Button.OutlinedButton"/>
+            <Button android:id="@+id/btnBus" android:layout_width="wrap_content"
+                android:layout_height="48dp" android:text="🚌 Автобуси"
+                android:layout_marginEnd="4dp" style="@style/Widget.Material3.Button.OutlinedButton"/>
+            <Button android:id="@+id/btnTram" android:layout_width="wrap_content"
+                android:layout_height="48dp" android:text="🚊 Трамваи"
+                android:layout_marginEnd="4dp" style="@style/Widget.Material3.Button.OutlinedButton"/>
+            <Button android:id="@+id/btnTrolley" android:layout_width="wrap_content"
+                android:layout_height="48dp" android:text="🚎 Тролеи"
+                android:layout_marginEnd="4dp" style="@style/Widget.Material3.Button.OutlinedButton"/>
+            <Button android:id="@+id/btnMetro" android:layout_width="wrap_content"
+                android:layout_height="48dp" android:text="🚇 Метро"
+                style="@style/Widget.Material3.Button.OutlinedButton"/>
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <TextView android:id="@+id/tvRouteCount"
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textSize="13sp" android:paddingHorizontal="16dp" android:paddingBottom="4dp"/>
+
+    <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvRoutes"
+        android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1"/>
+</LinearLayout>

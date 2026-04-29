@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:minHeight="48dp"
+    android:gravity="center_vertical">
+
+    <TextView android:id="@+id/tvHour"
+        android:layout_width="56dp"
+        android:layout_height="wrap_content"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="#1976D2"
+        android:gravity="center"
+        android:importantForAccessibility="no"/>
+
+    <TextView android:id="@+id/tvMinutes"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:textSize="16sp"
+        android:layout_marginStart="12dp"
+        android:importantForAccessibility="no"/>
+</LinearLayout>
