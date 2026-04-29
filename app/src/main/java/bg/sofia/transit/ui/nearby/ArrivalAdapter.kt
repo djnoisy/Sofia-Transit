@@ -2,13 +2,28 @@ package bg.sofia.transit.ui.nearby
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
-import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import bg.sofia.transit.data.repository.ArrivalInfo
 import bg.sofia.transit.databinding.ItemArrivalBinding
 
-class ArrivalAdapter : ListAdapter<ArrivalInfo, ArrivalAdapter.VH>(DIFF) {
+/**
+ * Simple RecyclerView adapter for arrival info.
+ *
+ * Originally used ListAdapter with DiffUtil for incremental updates, but
+ * that introduced a race condition where the AsyncListDiffer would silently
+ * drop the first submitList() call if the RecyclerView had not been laid
+ * out yet. Switched to a plain RecyclerView.Adapter with notifyDataSetChanged
+ * for guaranteed visibility.
+ */
+class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
+
+    private val items = mutableListOf<ArrivalInfo>()
+
+    fun submitList(newItems: List<ArrivalInfo>) {
+        items.clear()
+        items.addAll(newItems)
+        notifyDataSetChanged()
+    }
 
     inner class VH(val b: ItemArrivalBinding) : RecyclerView.ViewHolder(b.root) {
         fun bind(info: ArrivalInfo) {
@@ -29,14 +44,7 @@ class ArrivalAdapter : ListAdapter<ArrivalInfo, ArrivalAdapter.VH>(DIFF) {
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =
         VH(ItemArrivalBinding.inflate(LayoutInflater.from(parent.context), parent, false))
 
-    override fun onBindViewHolder(holder: VH, pos: Int) = holder.bind(getItem(pos))
+    override fun onBindViewHolder(holder: VH, pos: Int) = holder.bind(items[pos])
 
-    companion object {
-        val DIFF = object : DiffUtil.ItemCallback<ArrivalInfo>() {
-            override fun areItemsTheSame(a: ArrivalInfo, b: ArrivalInfo) =
-                a.routeId == b.routeId && a.headsign == b.headsign
-            override fun areContentsTheSame(a: ArrivalInfo, b: ArrivalInfo) =
-                a.arrivals == b.arrivals
-        }
-    }
+    override fun getItemCount(): Int = items.size
 }

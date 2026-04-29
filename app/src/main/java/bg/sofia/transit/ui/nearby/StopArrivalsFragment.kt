@@ -92,8 +92,13 @@ class StopArrivalsFragment : Fragment() {
             if (state.loading) View.VISIBLE else View.GONE
         binding.btnRefresh.isEnabled = !state.loading
 
-        adapter.submitList(state.arrivals) {
-            FileLogger.i(TAG, "submitList completed. itemCount=${adapter.itemCount}")
+        adapter.submitList(state.arrivals)
+        FileLogger.i(TAG, "After submitList: itemCount=${adapter.itemCount}")
+        binding.rvArrivals.post {
+            FileLogger.i(TAG, "After post: rv.width=${binding.rvArrivals.width} " +
+                "rv.height=${binding.rvArrivals.height} " +
+                "rv.visibility=${binding.rvArrivals.visibility} " +
+                "rv.childCount=${binding.rvArrivals.childCount}")
         }
 
         // Empty state — only show after loading is done, otherwise it flickers
