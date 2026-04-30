@@ -142,13 +142,9 @@ class GtfsRepository @Inject constructor(
 
     /**
      * Returns real-time arrivals for a stop, with headsigns resolved from
-     * the static DB. The realtime feed often returns empty trip_headsign,
-     * so before calling the realtime helper we pre-build a map of
-     * tripId → headsign from the static Trips table.
-     *
-     * To avoid a double network call, we use the realtime cache: the first
-     * call to lookupStop populates the cache, and the subsequent
-     * getArrivalsForStop reuses it.
+     * the static DB. For routes that have no realtime data (e.g. metro),
+     * falls back to the static schedule for the current day, showing the
+     * next 3 planned arrivals.
      */
     suspend fun getArrivalsForStop(
         stopId: String,
@@ -156,32 +152,88 @@ class GtfsRepository @Inject constructor(
     ): List<ArrivalInfo> {
         FileLogger.i("GtfsRepo", "getArrivalsForStop start, stopId=$stopId")
 
-        // 1. routeId → shortName map (so UI shows "76" instead of "A81")
+        // 1. routeId → shortName + routeType map
         val routes = routeDao.getRoutesForStops(listOf(stopId))
         val routeShortNames = routes.associate { it.routeId to it.routeShortName }
+        val routeTypes      = routes.associate { it.routeId to it.routeType }
         FileLogger.i("GtfsRepo", "Routes serving $stopId: ${routes.size}")
 
-        // 2. Get the trip IDs that touch this stop in the realtime feed.
-        //    lookupStop returns up to 10 future arrivals — but we want every
-        //    trip touching this stop, future-or-past, so we can resolve
-        //    headsigns. The realtime layer will filter out past times.
+        // 2. Resolve headsigns for trips touching this stop in the realtime feed
         val rawTripIds = realtimeRepo.getTripIdsTouchingStop(stopId)
         FileLogger.i("GtfsRepo", "Realtime trips touching $stopId: ${rawTripIds.size}")
-
-        // 3. Resolve headsigns from the static DB
         val staticTrips = tripDao.getByIds(rawTripIds).associateBy { it.tripId }
         val headsignsByTripId = rawTripIds.associateWith { tripId ->
             staticTrips[tripId]?.tripHeadsign ?: "—"
         }
 
-        // 4. Now ask the realtime helper for the actual arrivals (only future ones)
-        val arrivals = realtimeRepo.getArrivalsForStop(
+        // 3. Realtime arrivals (covers buses, trams, trolleybuses)
+        val realtimeArrivals = realtimeRepo.getArrivalsForStop(
             stopId          = stopId,
             routeShortNames = routeShortNames,
             routeHeadsigns  = headsignsByTripId
         )
-        FileLogger.i("GtfsRepo", "getArrivalsForStop returning ${arrivals.size} ArrivalInfo records")
-        return arrivals
+        val realtimeRouteIds = realtimeArrivals.map { it.routeId }.toSet()
+        FileLogger.i("GtfsRepo", "Realtime returned ${realtimeArrivals.size} records " +
+            "covering ${realtimeRouteIds.size} routes")
+
+        // 4. Static fallback for routes the realtime feed doesn't cover.
+        //    Most importantly: metro (route_type = 1) is rarely in the feed.
+        val routeIdsWithoutRealtime = routes
+            .map { it.routeId }
+            .filter { it !in realtimeRouteIds }
+
+        val scheduledArrivals = if (routeIdsWithoutRealtime.isNotEmpty()) {
+            buildScheduledArrivals(stopId, routeIdsWithoutRealtime, routeShortNames, routeTypes)
+        } else emptyList()
+        FileLogger.i("GtfsRepo", "Schedule fallback returned ${scheduledArrivals.size} records")
+
+        // 5. Combine: realtime first, then scheduled fallback
+        val all = realtimeArrivals + scheduledArrivals
+        FileLogger.i("GtfsRepo", "getArrivalsForStop returning ${all.size} ArrivalInfo records total")
+        return all
+    }
+
+    /**
+     * Builds [ArrivalInfo] records for the given routes from the static
+     * schedule, taking only the next 3 future arrivals per (route, headsign).
+     */
+    private suspend fun buildScheduledArrivals(
+        stopId: String,
+        routeIds: List<String>,
+        routeShortNames: Map<String, String>,
+        routeTypes: Map<String, Int>
+    ): List<ArrivalInfo> {
+        // Today's active service_ids (so weekday/weekend/holiday is right)
+        val today = bg.sofia.transit.util.DateHelper.todayString()
+        val activeServices = calendarDateDao.getActiveServicesForDate(today)
+        if (activeServices.isEmpty()) return emptyList()
+
+        // "HH:MM:SS" of current time in local Sofia time
+        val nowStr = java.time.LocalTime.now(java.time.ZoneId.of("Europe/Sofia"))
+            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
+
+        val rows = stopTimeDao.getScheduledArrivalsAtStop(
+            stopId       = stopId,
+            serviceIds   = activeServices,
+            currentTime  = nowStr
+        ).filter { it.routeId in routeIds }
+
+        // Group by (routeId, headsign) and take first 3 times
+        return rows
+            .groupBy { it.routeId to (it.headsign ?: "—") }
+            .map { (key, list) ->
+                val (routeId, headsign) = key
+                ArrivalInfo(
+                    routeId        = routeId,
+                    routeShortName = routeShortNames[routeId] ?: routeId,
+                    headsign       = headsign,
+                    arrivals       = list.take(3).map { hms ->
+                        // Trim "HH:MM:SS" → "HH:MM"
+                        if (hms.length >= 5) hms.substring(0, 5) else hms
+                    }
+                )
+            }
+            .sortedBy { it.routeShortName }
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────────

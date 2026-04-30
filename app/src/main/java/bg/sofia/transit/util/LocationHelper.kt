@@ -1,104 +1,96 @@
 package bg.sofia.transit.util
 
 import bg.sofia.transit.data.db.entity.Stop
-import kotlin.math.*
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
+/**
+ * Distance and bearing helpers based on the equirectangular approximation —
+ * fine for the dense urban scale we operate at (≤ 5 km).
+ */
 object LocationHelper {
 
-    /**
-     * Haversine distance in metres between two lat/lon points.
-     */
+    private const val EARTH_RADIUS_M = 6_371_000.0
+
+    /** Approximate distance in metres between two lat/lon points. */
     fun distanceMetres(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val R = 6_371_000.0
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
-        val a = sin(dLat / 2).pow(2) +
-                cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
-                sin(dLon / 2).pow(2)
-        return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+        val phi1 = Math.toRadians(lat1)
+        val phi2 = Math.toRadians(lat2)
+        val dPhi = Math.toRadians(lat2 - lat1)
+        val dLam = Math.toRadians(lon2 - lon1)
+        val a = sin(dPhi / 2) * sin(dPhi / 2) +
+                cos(phi1) * cos(phi2) * sin(dLam / 2) * sin(dLam / 2)
+        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return EARTH_RADIUS_M * c
     }
 
+    /** A stop together with its computed distance from the user (metres). */
+    data class StopWithDistance(val stop: Stop, val distanceMetres: Double)
+
     /**
-     * Bearing in degrees (0–360) from point 1 → point 2 (clockwise from North).
+     * Returns the nearest [limit] stops from [stops], sorted by distance.
+     * Used by the "Stops" tab to display a clean list of closest stops.
      */
-    fun bearingDegrees(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val dLon = Math.toRadians(lon2 - lon1)
-        val y = sin(dLon) * cos(Math.toRadians(lat2))
-        val x = cos(Math.toRadians(lat1)) * sin(Math.toRadians(lat2)) -
-                sin(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * cos(dLon)
-        return (Math.toDegrees(atan2(y, x)) + 360) % 360
-    }
+    fun nearestStops(
+        stops: List<Stop>,
+        userLat: Double,
+        userLon: Double,
+        limit: Int = 10
+    ): List<StopWithDistance> =
+        stops.map { s ->
+            StopWithDistance(s, distanceMetres(userLat, userLon, s.stopLat, s.stopLon))
+        }
+        .sortedBy { it.distanceMetres }
+        .take(limit)
 
     /**
-     * Converts an absolute bearing to a clock-sector label relative to the
-     * user's current heading (from movement or compass).
+     * Picks one nearest stop per quadrant (N/E/S/W relative to the user).
+     * Used by the "Journey" screen to find candidate boarding stops in
+     * different geographic directions.
      *
-     * Sectors (each 90°):
-     *   330–30  → "12 часа"
-     *    30–120 → "3 часа"
-     *   120–210 → "6 часа"
-     *   210–330 → "9 часа"
+     * Used to be used by the "Stops" tab too with clock-position labels,
+     * but that UI was replaced with a simple sorted list.
      */
-    fun clockLabel(absoluteBearingToStop: Double, userHeading: Double): String {
-        val relative = ((absoluteBearingToStop - userHeading) + 360) % 360
-        return when {
-            relative < 30 || relative >= 330 -> "12 часа"
-            relative < 120 -> "3 часа"
-            relative < 210 -> "6 часа"
-            else           -> "9 часа"
-        }
-    }
-
-    /**
-     * Returns the clock sector index (0=12, 1=3, 2=6, 3=9) for a relative bearing.
-     */
-    fun clockSector(absoluteBearingToStop: Double, userHeading: Double): Int {
-        val relative = ((absoluteBearingToStop - userHeading) + 360) % 360
-        return when {
-            relative < 30 || relative >= 330 -> 0
-            relative < 120 -> 1
-            relative < 210 -> 2
-            else           -> 3
-        }
-    }
-
     data class ClockStop(
         val stop: Stop,
         val distanceMetres: Double,
-        val bearingToStop: Double,
-        val sector: Int,           // 0=12ч, 1=3ч, 2=6ч, 3=9ч
-        val clockLabel: String
+        val clockLabel: String = ""
     )
 
-    /**
-     * Given a list of nearby stops, user position and heading, returns
-     * the single closest stop for each of the 4 clock sectors.
-     * Result list has exactly up to 4 entries (missing if no stops in that sector).
-     */
     fun pickClockStops(
         stops: List<Stop>,
         userLat: Double,
         userLon: Double,
-        userHeading: Double
+        @Suppress("UNUSED_PARAMETER") heading: Double = 0.0
     ): List<ClockStop> {
-        val labels = listOf("12 часа", "3 часа", "6 часа", "9 часа")
-        val bestBySector = Array<ClockStop?>(4) { null }
-
-        for (stop in stops) {
-            val dist = distanceMetres(userLat, userLon, stop.stopLat, stop.stopLon)
-            val bearing = bearingDegrees(userLat, userLon, stop.stopLat, stop.stopLon)
-            val sector = clockSector(bearing, userHeading)
-            val current = bestBySector[sector]
-            if (current == null || dist < current.distanceMetres) {
-                bestBySector[sector] = ClockStop(
-                    stop          = stop,
-                    distanceMetres = dist,
-                    bearingToStop = bearing,
-                    sector        = sector,
-                    clockLabel    = labels[sector]
-                )
+        // Group stops into 4 quadrants by absolute compass bearing
+        val withBearing = stops.map { s ->
+            val dist = distanceMetres(userLat, userLon, s.stopLat, s.stopLon)
+            val brg  = bearingDegrees(userLat, userLon, s.stopLat, s.stopLon)
+            Triple(s, dist, brg)
+        }
+        val quadrants = arrayOfNulls<Triple<Stop, Double, Double>>(4)
+        for (entry in withBearing) {
+            val (_, dist, brg) = entry
+            val q = (((brg + 45) % 360) / 90).toInt().coerceIn(0, 3)
+            val current = quadrants[q]
+            if (current == null || dist < current.second) {
+                quadrants[q] = entry
             }
         }
-        return bestBySector.filterNotNull()
+        return quadrants.filterNotNull().map {
+            ClockStop(it.first, it.second)
+        }
+    }
+
+    private fun bearingDegrees(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val phi1 = Math.toRadians(lat1)
+        val phi2 = Math.toRadians(lat2)
+        val dLam = Math.toRadians(lon2 - lon1)
+        val y = sin(dLam) * cos(phi2)
+        val x = cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(dLam)
+        return (Math.toDegrees(atan2(y, x)) + 360) % 360
     }
 }

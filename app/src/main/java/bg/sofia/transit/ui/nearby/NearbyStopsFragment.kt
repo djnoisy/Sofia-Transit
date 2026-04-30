@@ -33,7 +33,7 @@ class NearbyStopsFragment : Fragment() {
 
     private val vm: NearbyViewModel by viewModels()
     private lateinit var fusedClient: FusedLocationProviderClient
-    private lateinit var clockAdapter: ClockStopAdapter
+    private lateinit var nearbyAdapter: NearbyStopAdapter
 
     private val locPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -56,37 +56,30 @@ class NearbyStopsFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
 
-        binding.rvClockStops.contentDescription = "Спирки около вас"
-
         binding.btnDiagnostics.setOnClickListener {
             findNavController().navigate(
                 NearbyStopsFragmentDirections.actionNearbyToDiagnostics()
             )
         }
 
-        // Tapping a stop opens a separate screen with real-time arrivals
-        clockAdapter = ClockStopAdapter { stop ->
+        nearbyAdapter = NearbyStopAdapter { stopWithDist ->
             findNavController().navigate(
                 NearbyStopsFragmentDirections.actionNearbyToArrivals(
-                    stopId   = stop.stopId,
-                    stopName = stop.stopName
+                    stopId   = stopWithDist.stop.stopId,
+                    stopName = stopWithDist.stop.stopName
                 )
             )
         }
-        binding.rvClockStops.apply {
-            layoutManager = LinearLayoutManager(requireContext())
-            adapter = clockAdapter
-        }
+        binding.rvStops.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvStops.adapter = nearbyAdapter
 
         viewLifecycleOwner.lifecycleScope.launch {
-            vm.clockStops.collectLatest { stops ->
-                clockAdapter.submitList(stops)
+            vm.nearestStops.collectLatest { stops ->
+                nearbyAdapter.submitList(stops)
                 if (stops.isNotEmpty()) {
-                    val desc = stops.joinToString(". ") { cs ->
-                        "${cs.clockLabel}: ${cs.stop.stopName}, " +
-                        "${cs.distanceMetres.toInt()} метра"
-                    }
-                    binding.rvClockStops.announceForAccessibility(desc)
+                    binding.rvStops.announceForAccessibility(
+                        "Намерени ${stops.size} спирки около вас"
+                    )
                 }
             }
         }
@@ -116,11 +109,13 @@ class NearbyStopsFragment : Fragment() {
     @Suppress("MissingPermission")
     private fun startLocationUpdates() {
         fusedClient = LocationServices.getFusedLocationProviderClient(requireContext())
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5_000L)
+        // 30-second interval matches the user's request: refresh only when
+        // the location actually changes (the VM also has its own 20m filter).
+        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 30_000L)
+            .setMinUpdateIntervalMillis(15_000L)
             .setMinUpdateDistanceMeters(15f)
             .build()
         fusedClient.requestLocationUpdates(req, locationCallback, requireActivity().mainLooper)
-        vm.startCompass()
     }
 
     private val locationCallback = object : LocationCallback() {
@@ -129,14 +124,8 @@ class NearbyStopsFragment : Fragment() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        vm.startCompass()
-    }
-
     override fun onPause() {
         super.onPause()
-        vm.stopCompass()
         if (::fusedClient.isInitialized)
             fusedClient.removeLocationUpdates(locationCallback)
     }

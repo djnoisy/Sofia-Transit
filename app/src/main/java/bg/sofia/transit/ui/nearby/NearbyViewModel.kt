@@ -4,13 +4,10 @@ import android.app.Application
 import android.location.Location
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import bg.sofia.transit.data.db.entity.Stop
 import bg.sofia.transit.data.repository.GtfsRepository
-import bg.sofia.transit.util.CompassHelper
 import bg.sofia.transit.util.LocationHelper
-import bg.sofia.transit.util.LocationHelper.ClockStop
+import bg.sofia.transit.util.LocationHelper.StopWithDistance
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -18,70 +15,52 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Provides the 10 nearest stops to the user.
+ *
+ * To avoid distracting screen-reader users with constant updates, the list
+ * is recomputed only when the user has moved at least [MIN_MOVE_METRES] from
+ * the position we last queried. Location callbacks fire freely, but we
+ * silently discard those that don't meet the threshold.
+ */
 @HiltViewModel
 class NearbyViewModel @Inject constructor(
     private val gtfsRepo: GtfsRepository,
     application: Application
 ) : AndroidViewModel(application) {
 
-    private val _clockStops = MutableStateFlow<List<ClockStop>>(emptyList())
-    val clockStops: StateFlow<List<ClockStop>> = _clockStops
+    companion object { private const val MIN_MOVE_METRES = 20.0 }
+
+    private val _nearestStops = MutableStateFlow<List<StopWithDistance>>(emptyList())
+    val nearestStops: StateFlow<List<StopWithDistance>> = _nearestStops
 
     private val _error = MutableSharedFlow<String>()
     val error: SharedFlow<String> = _error
 
-    // Current user state
-    private var userLat = 0.0
-    private var userLon = 0.0
-    private var userHeading = 0f
-    private var movementHeading: Float? = null
-
-    // Cache of nearby stops (re-sorted on heading change without re-querying DB)
-    private var nearbyCache: List<Stop> = emptyList()
-
-    private var headingJob: Job? = null
-
-    fun startCompass() {
-        headingJob?.cancel()
-        headingJob = viewModelScope.launch {
-            CompassHelper.headingFlow(getApplication())
-                .collect { h ->
-                    userHeading = h
-                    recomputeClockStops()
-                }
-        }
-    }
-
-    fun stopCompass() {
-        headingJob?.cancel()
-    }
+    private var lastQueryLat = 0.0
+    private var lastQueryLon = 0.0
+    private var hasQueried = false
 
     fun onLocationUpdate(location: Location) {
-        userLat = location.latitude
-        userLon = location.longitude
+        val lat = location.latitude
+        val lon = location.longitude
 
-        // Use movement bearing if the user is actually walking, else fall
-        // back to compass heading
-        movementHeading = if (location.hasBearing() && location.speed > 0.5f)
-            location.bearing
-        else
-            null
+        if (hasQueried) {
+            val moved = LocationHelper.distanceMetres(lastQueryLat, lastQueryLon, lat, lon)
+            if (moved < MIN_MOVE_METRES) return     // tiny GPS jitter — skip
+        }
 
         viewModelScope.launch {
             try {
-                nearbyCache = gtfsRepo.getNearestStops(userLat, userLon, limit = 20)
-                recomputeClockStops()
+                val candidates = gtfsRepo.getNearestStops(lat, lon, limit = 30)
+                val sorted = LocationHelper.nearestStops(candidates, lat, lon, limit = 10)
+                _nearestStops.value = sorted
+                lastQueryLat = lat
+                lastQueryLon = lon
+                hasQueried = true
             } catch (e: Exception) {
                 _error.emit("Грешка при зареждане на спирки: ${e.message}")
             }
         }
-    }
-
-    private fun recomputeClockStops() {
-        if (nearbyCache.isEmpty()) return
-        val heading = movementHeading ?: userHeading
-        _clockStops.value = LocationHelper.pickClockStops(
-            nearbyCache, userLat, userLon, heading.toDouble()
-        )
     }
 }

@@ -78,9 +78,42 @@ interface StopTimeDao {
         serviceIds: List<String>
     ): List<String>
 
+    /**
+     * For a given stop, returns route + headsign + arrival_time triples
+     * where the trip's service is active on the given date AND the arrival
+     * time is >= the given current_time. Used as a fallback for routes that
+     * don't appear in the realtime feed (e.g. metro).
+     *
+     * Note: arrival_time may be in HH:MM:SS or H:MM:SS format. The string
+     * comparison works for both because we use lex order.
+     */
+    @Query("""
+        SELECT t.routeId AS routeId,
+               t.tripHeadsign AS headsign,
+               st.arrivalTime AS arrivalTime
+        FROM stop_times st
+        JOIN trips t ON t.tripId = st.tripId
+        WHERE st.stopId = :stopId
+          AND t.serviceId IN (:serviceIds)
+          AND st.arrivalTime >= :currentTime
+        ORDER BY t.routeId, t.tripHeadsign, st.arrivalTime
+    """)
+    suspend fun getScheduledArrivalsAtStop(
+        stopId: String,
+        serviceIds: List<String>,
+        currentTime: String
+    ): List<ScheduledArrival>
+
     @Query("SELECT COUNT(*) FROM stop_times")
     suspend fun count(): Int
 
     @Query("DELETE FROM stop_times")
     suspend fun deleteAll()
 }
+
+/** Result row for getScheduledArrivalsAtStop. */
+data class ScheduledArrival(
+    val routeId: String,
+    val headsign: String?,
+    val arrivalTime: String
+)
