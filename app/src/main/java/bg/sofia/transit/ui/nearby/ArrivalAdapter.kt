@@ -14,10 +14,12 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
     private val items = mutableListOf<ArrivalInfo>()
 
     fun submitList(newItems: List<ArrivalInfo>) {
-        FileLogger.i(TAG, "submitList called with ${newItems.size} items")
+        FileLogger.i(TAG, "submitList called with ${newItems.size} items (current=${items.size})")
+        val oldSize = items.size
         items.clear()
+        if (oldSize > 0) notifyItemRangeRemoved(0, oldSize)
         items.addAll(newItems)
-        notifyDataSetChanged()
+        if (newItems.isNotEmpty()) notifyItemRangeInserted(0, newItems.size)
         FileLogger.i(TAG, "submitList done. items.size=${items.size}, getItemCount()=$itemCount")
     }
 

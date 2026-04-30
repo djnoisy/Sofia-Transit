@@ -16,14 +16,10 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-/**
- * Shows real-time arrivals for a single stop.
- * Reached by tapping a stop in NearbyStopsFragment.
- *
- * Auto-refreshes every 20 seconds while visible to keep ETAs current.
- */
 @AndroidEntryPoint
 class StopArrivalsFragment : Fragment() {
+
+    companion object { private const val TAG = "StopArrivalsFrag" }
 
     private var _binding: FragmentStopArrivalsBinding? = null
     private val binding get() = _binding!!
@@ -48,15 +44,13 @@ class StopArrivalsFragment : Fragment() {
             "Спирка ${args.stopName}, идентификатор ${args.stopId}. Списък с пристигания."
 
         adapter = ArrivalAdapter()
-        binding.rvArrivals.apply {
-            layoutManager = LinearLayoutManager(requireContext())
-            this.adapter = adapter
-            contentDescription = "Пристигащи превозни средства"
-        }
+        binding.rvArrivals.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvArrivals.adapter = adapter
+        // Removed contentDescription on the RecyclerView itself — it was making
+        // TalkBack treat the whole list as one element and may have been
+        // suppressing child rendering.
 
-        binding.btnRefresh.setOnClickListener {
-            loadArrivals()
-        }
+        binding.btnRefresh.setOnClickListener { loadArrivals() }
 
         viewLifecycleOwner.lifecycleScope.launch {
             vm.state.collectLatest { state -> renderState(state) }
@@ -71,9 +65,7 @@ class StopArrivalsFragment : Fragment() {
         scheduleAutoRefresh()
     }
 
-    private fun loadArrivals() {
-        vm.loadArrivals(stopId = args.stopId)
-    }
+    private fun loadArrivals() { vm.loadArrivals(stopId = args.stopId) }
 
     private fun scheduleAutoRefresh() {
         refreshJob?.cancel()
@@ -94,27 +86,8 @@ class StopArrivalsFragment : Fragment() {
 
         adapter.submitList(state.arrivals)
         FileLogger.i(TAG, "After submitList: itemCount=${adapter.itemCount}")
-        binding.rvArrivals.post {
-            FileLogger.i(TAG, "After post: rv.width=${binding.rvArrivals.width} " +
-                "rv.height=${binding.rvArrivals.height} " +
-                "rv.visibility=${binding.rvArrivals.visibility} " +
-                "rv.childCount=${binding.rvArrivals.childCount}")
 
-            // Check again 500ms later to see if children get inflated eventually
-            binding.rvArrivals.postDelayed({
-                FileLogger.i(TAG, "After 500ms: rv.childCount=${binding.rvArrivals.childCount} " +
-                    "adapter.itemCount=${adapter.itemCount} " +
-                    "lm=${binding.rvArrivals.layoutManager?.javaClass?.simpleName}")
-                // Force a re-layout to test
-                binding.rvArrivals.requestLayout()
-                binding.rvArrivals.invalidate()
-                binding.rvArrivals.postDelayed({
-                    FileLogger.i(TAG, "After requestLayout: rv.childCount=${binding.rvArrivals.childCount}")
-                }, 200)
-            }, 500)
-        }
-
-        // Empty state — only show after loading is done, otherwise it flickers
+        // Empty / debug state
         val showEmpty = !state.loading && state.arrivals.isEmpty()
         binding.svEmpty.visibility = if (showEmpty) View.VISIBLE else View.GONE
         if (showEmpty) {
@@ -123,20 +96,18 @@ class StopArrivalsFragment : Fragment() {
 
         binding.rvArrivals.visibility =
             if (state.arrivals.isNotEmpty()) View.VISIBLE else View.GONE
+
+        // Diagnostic post-layout check
+        binding.rvArrivals.post {
+            FileLogger.i(TAG, "After post: rv.width=${binding.rvArrivals.width} " +
+                "rv.height=${binding.rvArrivals.height} " +
+                "rv.visibility=${binding.rvArrivals.visibility} " +
+                "rv.childCount=${binding.rvArrivals.childCount}")
+        }
     }
 
-    companion object { private const val TAG = "StopArrivalsFrag" }
-
-    override fun onPause() {
-        super.onPause()
-        refreshJob?.cancel()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (_binding != null) scheduleAutoRefresh()
-    }
-
+    override fun onPause() { super.onPause(); refreshJob?.cancel() }
+    override fun onResume() { super.onResume(); if (_binding != null) scheduleAutoRefresh() }
     override fun onDestroyView() {
         super.onDestroyView()
         refreshJob?.cancel()
