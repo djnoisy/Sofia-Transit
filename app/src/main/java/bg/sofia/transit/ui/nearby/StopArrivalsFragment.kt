@@ -99,6 +99,19 @@ class StopArrivalsFragment : Fragment() {
                 "rv.height=${binding.rvArrivals.height} " +
                 "rv.visibility=${binding.rvArrivals.visibility} " +
                 "rv.childCount=${binding.rvArrivals.childCount}")
+
+            // Check again 500ms later to see if children get inflated eventually
+            binding.rvArrivals.postDelayed({
+                FileLogger.i(TAG, "After 500ms: rv.childCount=${binding.rvArrivals.childCount} " +
+                    "adapter.itemCount=${adapter.itemCount} " +
+                    "lm=${binding.rvArrivals.layoutManager?.javaClass?.simpleName}")
+                // Force a re-layout to test
+                binding.rvArrivals.requestLayout()
+                binding.rvArrivals.invalidate()
+                binding.rvArrivals.postDelayed({
+                    FileLogger.i(TAG, "After requestLayout: rv.childCount=${binding.rvArrivals.childCount}")
+                }, 200)
+            }, 500)
         }
 
         // Empty state — only show after loading is done, otherwise it flickers
