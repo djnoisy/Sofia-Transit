@@ -66,7 +66,8 @@ class NearbyStopsFragment : Fragment() {
             findNavController().navigate(
                 NearbyStopsFragmentDirections.actionNearbyToArrivals(
                     stopId   = stopWithDist.stop.stopId,
-                    stopName = stopWithDist.stop.stopName
+                    stopName = stopWithDist.stop.stopName,
+                    stopCode = stopWithDist.stop.stopCode
                 )
             )
         }

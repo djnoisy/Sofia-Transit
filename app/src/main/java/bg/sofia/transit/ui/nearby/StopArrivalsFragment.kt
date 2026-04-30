@@ -39,9 +39,12 @@ class StopArrivalsFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
 
-        binding.tvStopName.text = "${args.stopName} [${args.stopId}]"
+        // Show "stop_code" (e.g. "0170") rather than internal stop_id ("A0170")
+        // — matches what's printed on physical stop signs and the CGM website.
+        val codeSuffix = args.stopCode?.takeIf { it.isNotBlank() }?.let { " (код $it)" } ?: ""
+        binding.tvStopName.text = "${args.stopName}$codeSuffix"
         binding.tvStopName.contentDescription =
-            "Спирка ${args.stopName}, идентификатор ${args.stopId}. Списък с пристигания."
+            "Спирка ${args.stopName}${codeSuffix.ifEmpty { "" }}. Списък с пристигания."
 
         adapter = ArrivalAdapter()
         binding.rvArrivals.layoutManager = LinearLayoutManager(requireContext())

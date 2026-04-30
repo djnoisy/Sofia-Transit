@@ -26,10 +26,11 @@ class NearbyStopAdapter(
 
     inner class VH(val b: ItemNearbyStopBinding) : RecyclerView.ViewHolder(b.root) {
         fun bind(item: StopWithDistance) {
-            b.tvStopName.text = item.stop.stopName
+            val codeSuffix = item.stop.stopCode?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
+            b.tvStopName.text = "${item.stop.stopName}$codeSuffix"
             b.tvDistance.text = "${item.distanceMetres.toInt()} м"
             b.root.contentDescription =
-                "${item.stop.stopName}, на ${item.distanceMetres.toInt()} метра"
+                "${item.stop.stopName}${if (codeSuffix.isNotEmpty()) ", код ${item.stop.stopCode}" else ""}, на ${item.distanceMetres.toInt()} метра"
             b.root.setOnClickListener { onClick(item) }
         }
     }

@@ -30,6 +30,8 @@
 
         <argument android:name="stopId"   app:argType="string"/>
         <argument android:name="stopName" app:argType="string"/>
+        <argument android:name="stopCode" app:argType="string"
+            app:nullable="true" android:defaultValue="@null"/>
     </fragment>
 
     <!-- ── Lines ── -->
