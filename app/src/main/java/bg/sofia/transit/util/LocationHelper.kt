@@ -30,22 +30,6 @@ object LocationHelper {
     data class StopWithDistance(val stop: Stop, val distanceMetres: Double)
 
     /**
-     * Returns the nearest [limit] stops from [stops], sorted by distance.
-     * Used by the "Stops" tab to display a clean list of closest stops.
-     */
-    fun nearestStops(
-        stops: List<Stop>,
-        userLat: Double,
-        userLon: Double,
-        limit: Int = 10
-    ): List<StopWithDistance> =
-        stops.map { s ->
-            StopWithDistance(s, distanceMetres(userLat, userLon, s.stopLat, s.stopLon))
-        }
-        .sortedBy { it.distanceMetres }
-        .take(limit)
-
-    /**
      * Picks one nearest stop per quadrant (N/E/S/W relative to the user).
      * Used by the "Journey" screen to find candidate boarding stops in
      * different geographic directions.

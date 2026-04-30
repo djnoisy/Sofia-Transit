@@ -52,9 +52,16 @@ class NearbyViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val candidates = gtfsRepo.getNearestStops(lat, lon, limit = 30)
-                val sorted = LocationHelper.nearestStops(candidates, lat, lon, limit = 10)
-                _nearestStops.value = sorted
+                // SQL sorts by physical distance correctly (uses cos(lat) for
+                // longitude scaling), so we ask for exactly the top 10 here.
+                val nearest = gtfsRepo.getNearestStops(lat, lon, limit = 10)
+                val withDistance = nearest.map { stop ->
+                    StopWithDistance(
+                        stop,
+                        LocationHelper.distanceMetres(lat, lon, stop.stopLat, stop.stopLon)
+                    )
+                }
+                _nearestStops.value = withDistance
                 lastQueryLat = lat
                 lastQueryLon = lon
                 hasQueried = true

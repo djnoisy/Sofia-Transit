@@ -25,15 +25,19 @@ interface StopDao {
     /**
      * Returns the nearest [limit] stops within a bounding box around the
      * user, only including stops that are actually served by at least one
-     * trip (stop_times row). This filters out phantom stops in the GTFS
-     * data — entries that exist in stops.txt but no route uses (e.g.
-     * "TB0169" when only "A0169" is real).
+     * trip (stop_times row).
+     *
+     * The distance formula uses an "equirectangular" approximation where
+     * longitude differences are scaled by cos(latitude) so that 1° of
+     * longitude has roughly the same physical length as 1° of latitude
+     * around Sofia (~42.7° N, where cos ≈ 0.735). Without this scaling,
+     * stops slightly displaced in longitude appear deceptively close.
      */
     @SuppressWarnings(RoomWarnings.CURSOR_MISMATCH)
     @Query("""
         SELECT s.*,
             ((:lat - s.stopLat) * (:lat - s.stopLat) +
-             (:lon - s.stopLon) * (:lon - s.stopLon)) AS distSq
+             (:lon - s.stopLon) * (:lon - s.stopLon) * :lonScale * :lonScale) AS distSq
         FROM stops s
         WHERE s.locationType = 0
           AND s.stopLat BETWEEN :minLat AND :maxLat
@@ -43,10 +47,14 @@ interface StopDao {
         LIMIT :limit
     """)
     suspend fun getNearestStopsInBox(
-        lat: Double, lon: Double,
-        minLat: Double, maxLat: Double,
-        minLon: Double, maxLon: Double,
-        limit: Int = 20
+        lat: Double,
+        lon: Double,
+        minLat: Double,
+        maxLat: Double,
+        minLon: Double,
+        maxLon: Double,
+        lonScale: Double,
+        limit: Int
     ): List<Stop>
 
     @Query("SELECT COUNT(*) FROM stops")

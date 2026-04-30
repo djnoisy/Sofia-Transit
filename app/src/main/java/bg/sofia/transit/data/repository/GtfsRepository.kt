@@ -121,12 +121,16 @@ class GtfsRepository @Inject constructor(
     ): List<bg.sofia.transit.data.db.entity.Stop> {
         // Latitude: 1° ≈ 111 km worldwide.
         // Longitude: 1° ≈ 111 km × cos(latitude). At Sofia (≈42.7°N) → 81.6 km.
+        val cosLat = Math.cos(Math.toRadians(lat))
         val dLat = boxKm / 111.0
-        val dLon = boxKm / (111.0 * Math.cos(Math.toRadians(lat)))
+        val dLon = boxKm / (111.0 * cosLat)
         return stopDao.getNearestStopsInBox(
             lat = lat, lon = lon,
             minLat = lat - dLat, maxLat = lat + dLat,
             minLon = lon - dLon, maxLon = lon + dLon,
+            // Scale longitude differences by cos(latitude) so that the
+            // SQL distance calculation matches actual physical distance.
+            lonScale = cosLat,
             limit  = limit
         )
     }
