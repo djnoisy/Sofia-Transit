@@ -227,7 +227,8 @@ class GtfsRepository @Inject constructor(
                     routeId        = routeId,
                     routeShortName = routeShortNames[routeId] ?: routeId,
                     headsign       = headsign,
-                    arrivals       = list.take(3).map { hms ->
+                    arrivals       = list.take(3).map { sched ->
+                        val hms = sched.arrivalTime
                         // Trim "HH:MM:SS" → "HH:MM"
                         if (hms.length >= 5) hms.substring(0, 5) else hms
                     }
