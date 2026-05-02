@@ -18,10 +18,10 @@ import javax.inject.Inject
 /**
  * Provides the 10 nearest stops to the user.
  *
- * To avoid distracting screen-reader users with constant updates, the list
- * is recomputed only when the user has moved at least [MIN_MOVE_METRES] from
- * the position we last queried. Location callbacks fire freely, but we
- * silently discard those that don't meet the threshold.
+ * Location callbacks fire freely, but we silently skip updates that don't
+ * meet [MIN_MOVE_METRES] from the last-queried position to avoid redundant
+ * DB hits. If GTFS data isn't ready yet (first-run import still in progress)
+ * the update is buffered and replayed automatically once data is available.
  */
 @HiltViewModel
 class NearbyViewModel @Inject constructor(
@@ -41,33 +41,62 @@ class NearbyViewModel @Inject constructor(
     private var lastQueryLon = 0.0
     private var hasQueried = false
 
+    /** Holds the most recent location received while data was still loading. */
+    private var pendingLocation: Location? = null
+
+    init {
+        // When the GTFS import finishes (or is confirmed already loaded),
+        // replay any location update that arrived during the loading window.
+        // Also covers the weekly-worker reload while the user is stationary:
+        // re-query against the last known position so the list refreshes
+        // against the new data even without a new GPS callback.
+        viewModelScope.launch {
+            gtfsRepo.dataReady.collect { ready ->
+                if (!ready) return@collect
+                val pending = pendingLocation
+                if (pending != null) {
+                    pendingLocation = null
+                    doQuery(pending.latitude, pending.longitude)
+                } else if (hasQueried) {
+                    doQuery(lastQueryLat, lastQueryLon)
+                }
+            }
+        }
+    }
+
     fun onLocationUpdate(location: Location) {
+        // Don't query with partial data — buffer and wait for the data-ready signal.
+        if (!gtfsRepo.dataReady.value) {
+            pendingLocation = location
+            return
+        }
+
         val lat = location.latitude
         val lon = location.longitude
 
         if (hasQueried) {
             val moved = LocationHelper.distanceMetres(lastQueryLat, lastQueryLon, lat, lon)
-            if (moved < MIN_MOVE_METRES) return     // tiny GPS jitter — skip
+            if (moved < MIN_MOVE_METRES) return
         }
 
-        viewModelScope.launch {
-            try {
-                // SQL sorts by physical distance correctly (uses cos(lat) for
-                // longitude scaling), so we ask for exactly the top 10 here.
-                val nearest = gtfsRepo.getNearestStops(lat, lon, limit = 10)
-                val withDistance = nearest.map { stop ->
-                    StopWithDistance(
-                        stop,
-                        LocationHelper.distanceMetres(lat, lon, stop.stopLat, stop.stopLon)
-                    )
-                }
-                _nearestStops.value = withDistance
-                lastQueryLat = lat
-                lastQueryLon = lon
-                hasQueried = true
-            } catch (e: Exception) {
-                _error.emit("Грешка при зареждане на спирки: ${e.message}")
+        viewModelScope.launch { doQuery(lat, lon) }
+    }
+
+    private suspend fun doQuery(lat: Double, lon: Double) {
+        try {
+            val nearest = gtfsRepo.getNearestStops(lat, lon, limit = 10)
+            val withDistance = nearest.map { stop ->
+                StopWithDistance(
+                    stop,
+                    LocationHelper.distanceMetres(lat, lon, stop.stopLat, stop.stopLon)
+                )
             }
+            _nearestStops.value = withDistance
+            lastQueryLat = lat
+            lastQueryLon = lon
+            hasQueried = true
+        } catch (e: Exception) {
+            _error.emit("Грешка при зареждане на спирки: ${e.message}")
         }
     }
 }

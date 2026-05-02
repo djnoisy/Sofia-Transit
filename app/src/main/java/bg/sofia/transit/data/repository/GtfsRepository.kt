@@ -9,6 +9,8 @@ import bg.sofia.transit.data.parser.GtfsParser
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
@@ -31,6 +33,10 @@ class GtfsRepository @Inject constructor(
         const val EXTERNAL_DIR_NAME = "gtfs"
     }
 
+    private val _dataReady = MutableStateFlow(false)
+    /** Becomes true once all GTFS tables (including stop_times) are fully populated. */
+    val dataReady: StateFlow<Boolean> = _dataReady
+
     /**
      * Returns the directory holding the latest downloaded GTFS files,
      * or null if the worker has never produced one yet (so we should
@@ -46,10 +52,14 @@ class GtfsRepository @Inject constructor(
 
     // ── Initialisation ────────────────────────────────────────────────────
     /**
-     * Returns true if the DB is already populated (skip re-import).
+     * Returns true if the DB is already fully populated (stops + stop_times).
+     * Also sets dataReady so that NearbyViewModel doesn't need to re-check.
      */
-    suspend fun isDatabaseReady(): Boolean =
-        stopDao.count() > 0 && routeDao.count() > 0
+    suspend fun isDatabaseReady(): Boolean {
+        val ready = stopDao.count() > 0 && routeDao.count() > 0 && stopTimeDao.count() > 0
+        if (ready) _dataReady.value = true
+        return ready
+    }
 
     /**
      * Parses all GTFS CSVs and populates Room. Reads from the external
@@ -60,41 +70,57 @@ class GtfsRepository @Inject constructor(
      * source — public API kept as alias below for backward compatibility.
      */
     suspend fun loadStaticData(onProgress: (String) -> Unit = {}) {
-        withContext(Dispatchers.IO) {
-            val dataDir = getActiveDataDir()
-            val source = if (dataDir != null) "downloaded" else "bundled"
-            FileLogger.i(TAG, "Loading static data from $source source")
+        // Mark DB unavailable for the whole reload window, so location-driven
+        // queries buffer their input instead of running against half-empty
+        // tables. Also flips on subsequent reloads (weekly worker), giving
+        // observers a true → false → true edge to re-trigger queries.
+        _dataReady.value = false
+        try {
+            withContext(Dispatchers.IO) {
+                val dataDir = getActiveDataDir()
+                val source = if (dataDir != null) "downloaded" else "bundled"
+                FileLogger.i(TAG, "Loading static data from $source source")
 
-            onProgress("Зареждане на спирки…")
-            val stops = GtfsParser.parseStops(context, dataDir)
-            stopDao.deleteAll()
-            stopDao.insertAll(stops)
+                onProgress("Зареждане на спирки…")
+                val stops = GtfsParser.parseStops(context, dataDir)
+                stopDao.deleteAll()
+                stopDao.insertAll(stops)
 
-            onProgress("Зареждане на линии…")
-            val routes = GtfsParser.parseRoutes(context, dataDir)
-            routeDao.deleteAll()
-            routeDao.insertAll(routes)
+                onProgress("Зареждане на линии…")
+                val routes = GtfsParser.parseRoutes(context, dataDir)
+                routeDao.deleteAll()
+                routeDao.insertAll(routes)
 
-            onProgress("Зареждане на пътувания…")
-            val trips = GtfsParser.parseTrips(context, dataDir)
-            tripDao.deleteAll()
-            tripDao.insertAll(trips)
+                onProgress("Зареждане на пътувания…")
+                val trips = GtfsParser.parseTrips(context, dataDir)
+                tripDao.deleteAll()
+                tripDao.insertAll(trips)
 
-            onProgress("Зареждане на разписания…")
-            stopTimeDao.deleteAll()
-            GtfsParser.parseStopTimes(context, dataDir) { batch ->
-                stopTimeDao.insertAll(batch)
+                onProgress("Зареждане на разписания…")
+                stopTimeDao.deleteAll()
+                GtfsParser.parseStopTimes(context, dataDir) { batch ->
+                    stopTimeDao.insertAll(batch)
+                }
+
+                onProgress("Зареждане на работни дни…")
+                val calendar = GtfsParser.parseCalendarDates(context, dataDir)
+                calendarDateDao.deleteAll()
+                // Insert in batches of 5000 to avoid hitting SQLite limits
+                calendar.chunked(5_000).forEach { calendarDateDao.insertAll(it) }
+
+                onProgress("Готово")
+                FileLogger.i(TAG, "DB loaded ($source): stops=${stops.size} routes=${routes.size} " +
+                           "trips=${trips.size} calendar=${calendar.size}")
             }
-
-            onProgress("Зареждане на работни дни…")
-            val calendar = GtfsParser.parseCalendarDates(context, dataDir)
-            calendarDateDao.deleteAll()
-            // Insert in batches of 5000 to avoid hitting SQLite limits
-            calendar.chunked(5_000).forEach { calendarDateDao.insertAll(it) }
-
-            onProgress("Готово")
-            FileLogger.i(TAG, "DB loaded ($source): stops=${stops.size} routes=${routes.size} " +
-                       "trips=${trips.size} calendar=${calendar.size}")
+            _dataReady.value = true
+        } catch (e: Throwable) {
+            // If parsing failed mid-way the worker will rollback and call us
+            // again with the old data. In the meantime, reflect the actual
+            // table state so the UI doesn't get stuck on a stale empty list.
+            _dataReady.value = withContext(Dispatchers.IO) {
+                stopDao.count() > 0 && stopTimeDao.count() > 0
+            }
+            throw e
         }
     }
 
