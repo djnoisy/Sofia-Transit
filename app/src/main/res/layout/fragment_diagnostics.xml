@@ -57,6 +57,14 @@
         android:layout_marginTop="8dp"
         style="@style/Widget.Material3.Button.OutlinedButton"/>
 
+    <Button android:id="@+id/btnTestNearby"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Тест на близки спирки"
+        android:contentDescription="Тествай извличането на близки спирки от текущото местоположение"
+        android:layout_marginTop="8dp"
+        style="@style/Widget.Material3.Button.OutlinedButton"/>
+
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"

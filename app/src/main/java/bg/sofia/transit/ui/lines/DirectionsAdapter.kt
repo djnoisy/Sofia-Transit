@@ -2,35 +2,46 @@ package bg.sofia.transit.ui.lines
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
-import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import bg.sofia.transit.data.db.entity.Trip
 import bg.sofia.transit.databinding.ItemDirectionBinding
+import bg.sofia.transit.util.FileLogger
 
 class DirectionsAdapter(
     private val onClick: (Trip) -> Unit
-) : ListAdapter<Trip, DirectionsAdapter.VH>(DIFF) {
+) : RecyclerView.Adapter<DirectionsAdapter.VH>() {
+
+    companion object { private const val TAG = "DirectionsAdapter" }
+
+    private val items = mutableListOf<Trip>()
+
+    fun submitList(newItems: List<Trip>) {
+        FileLogger.i(TAG, "submitList ${newItems.size} items (current=${items.size})")
+        val oldSize = items.size
+        items.clear()
+        if (oldSize > 0) notifyItemRangeRemoved(0, oldSize)
+        items.addAll(newItems)
+        if (newItems.isNotEmpty()) notifyItemRangeInserted(0, newItems.size)
+    }
 
     inner class VH(val b: ItemDirectionBinding) : RecyclerView.ViewHolder(b.root) {
         fun bind(trip: Trip) {
-            val label = trip.tripHeadsign ?: "Направление ${(trip.directionId ?: 0) + 1}"
-            b.tvHeadsign.text = label
-            b.tvDirectionIcon.text = if ((trip.directionId ?: 0) == 0) "→" else "←"
-            b.root.contentDescription = "Направление: $label. Натиснете за спирките."
-            b.root.setOnClickListener { onClick(trip) }
+            try {
+                val headsign = trip.tripHeadsign?.ifBlank { "—" } ?: "—"
+                b.tvHeadsign.text = headsign
+                b.root.contentDescription =
+                    "Направление към $headsign. Натиснете за списък със спирки."
+                b.root.setOnClickListener { onClick(trip) }
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "bind failed for ${trip.tripId}", e)
+            }
         }
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, vt: Int): VH =
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =
         VH(ItemDirectionBinding.inflate(LayoutInflater.from(parent.context), parent, false))
 
-    override fun onBindViewHolder(h: VH, pos: Int) = h.bind(getItem(pos))
+    override fun onBindViewHolder(holder: VH, pos: Int) = holder.bind(items[pos])
 
-    companion object {
-        val DIFF = object : DiffUtil.ItemCallback<Trip>() {
-            override fun areItemsTheSame(a: Trip, b: Trip) = a.tripId == b.tripId
-            override fun areContentsTheSame(a: Trip, b: Trip) = a == b
-        }
-    }
+    override fun getItemCount(): Int = items.size
 }
