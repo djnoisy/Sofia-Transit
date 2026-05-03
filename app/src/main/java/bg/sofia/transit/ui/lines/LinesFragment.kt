@@ -3,7 +3,7 @@ package bg.sofia.transit.ui.lines
 import android.os.Bundle
 import android.view.*
 import androidx.fragment.app.Fragment
-import androidx.fragment.app.viewModels
+import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -20,7 +20,7 @@ class LinesFragment : Fragment() {
 
     private var _binding: FragmentLinesBinding? = null
     private val binding get() = _binding!!
-    private val vm: LinesViewModel by viewModels()
+    private val vm: LinesViewModel by activityViewModels()
     private lateinit var adapter: RoutesAdapter
 
     override fun onCreateView(
@@ -35,11 +35,9 @@ class LinesFragment : Fragment() {
 
         adapter = RoutesAdapter { route -> openDirections(route) }
 
-        binding.rvRoutes.apply {
-            layoutManager = LinearLayoutManager(requireContext())
-            adapter = this@LinesFragment.adapter
-            contentDescription = "Списък с транспортни линии"
-        }
+        binding.rvRoutes.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvRoutes.adapter = adapter
+        // No contentDescription on the RecyclerView itself
 
         // Tab buttons for transport type filtering
         binding.btnBus.setOnClickListener      { filterType(TransportType.BUS) }

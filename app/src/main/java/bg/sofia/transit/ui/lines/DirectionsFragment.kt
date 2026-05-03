@@ -37,11 +37,11 @@ class DirectionsFragment : Fragment() {
             "Линия ${args.routeShortName}: ${args.routeLongName}. Изберете направление."
 
         val adapter = DirectionsAdapter { trip -> openStops(trip) }
-        binding.rvDirections.apply {
-            layoutManager = LinearLayoutManager(requireContext())
-            this.adapter = adapter
-            contentDescription = "Направления на линия ${args.routeShortName}"
-        }
+        binding.rvDirections.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvDirections.adapter = adapter
+        // No contentDescription on the RecyclerView itself — it would make
+        // TalkBack treat the whole list as one element and may suppress
+        // child rendering. Same fix as in StopArrivalsFragment.
 
         viewLifecycleOwner.lifecycleScope.launch {
             vm.directions.collectLatest { adapter.submitList(it) }
