@@ -57,9 +57,51 @@ interface StopDao {
         limit: Int
     ): List<Stop>
 
+    /**
+     * Diagnostic query that returns the same data as getNearestStopsInBox
+     * but exposes the distSq value, so we can verify SQL is computing it
+     * correctly. Returns a flat row class.
+     */
+    @Query("""
+        SELECT s.stopId AS stopId,
+               s.stopCode AS stopCode,
+               s.stopName AS stopName,
+               s.stopLat AS stopLat,
+               s.stopLon AS stopLon,
+               ((:lat - s.stopLat) * (:lat - s.stopLat) +
+                (:lon - s.stopLon) * (:lon - s.stopLon) * :lonScale * :lonScale) AS distSq
+        FROM stops s
+        WHERE s.locationType = 0
+          AND s.stopLat BETWEEN :minLat AND :maxLat
+          AND s.stopLon BETWEEN :minLon AND :maxLon
+          AND EXISTS (SELECT 1 FROM stop_times st WHERE st.stopId = s.stopId LIMIT 1)
+        ORDER BY distSq ASC
+        LIMIT :limit
+    """)
+    suspend fun getNearestStopsDiagnostic(
+        lat: Double,
+        lon: Double,
+        minLat: Double,
+        maxLat: Double,
+        minLon: Double,
+        maxLon: Double,
+        lonScale: Double,
+        limit: Int
+    ): List<NearestStopRow>
+
     @Query("SELECT COUNT(*) FROM stops")
     suspend fun count(): Int
 
     @Query("DELETE FROM stops")
     suspend fun deleteAll()
 }
+
+/** Diagnostic row with distSq — used by Diagnostics screen to verify ordering. */
+data class NearestStopRow(
+    val stopId: String,
+    val stopCode: String?,
+    val stopName: String,
+    val stopLat: Double,
+    val stopLon: Double,
+    val distSq: Double
+)

@@ -179,4 +179,29 @@ class DiagnosticsViewModel @Inject constructor(
             _state.value = DiagnosticsState(running = false, report = sb.toString())
         }
     }
+
+    fun testNearbyStops(userLat: Double, userLon: Double) {
+        _state.value = DiagnosticsState(running = true, report = "Извличане на близки спирки…\n")
+        viewModelScope.launch {
+            val sb = StringBuilder()
+            sb.appendLine("=== ТЕСТ НА БЛИЗКИ СПИРКИ ===")
+            sb.appendLine("Местоположение: $userLat, $userLon")
+            sb.appendLine()
+            try {
+                val rows = gtfsRepo.getNearestStopsDiagnostic(userLat, userLon, limit = 15)
+                sb.appendLine("Върнати ${rows.size} реда (подредени според SQL):")
+                sb.appendLine()
+                rows.forEachIndexed { i, r ->
+                    val haversine = bg.sofia.transit.util.LocationHelper.distanceMetres(
+                        userLat, userLon, r.stopLat, r.stopLon
+                    )
+                    sb.appendLine("${i+1}. ${r.stopId} (${r.stopCode ?: "—"})  ${r.stopName}")
+                    sb.appendLine("   distSq=${"%.10f".format(r.distSq)}  истинско=${haversine.toInt()}м")
+                }
+            } catch (e: Exception) {
+                sb.appendLine("ГРЕШКА: ${e.javaClass.simpleName}: ${e.message}")
+            }
+            _state.value = DiagnosticsState(running = false, report = sb.toString())
+        }
+    }
 }
