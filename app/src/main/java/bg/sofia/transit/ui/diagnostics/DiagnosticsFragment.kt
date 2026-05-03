@@ -39,32 +39,6 @@ class DiagnosticsFragment : Fragment() {
             vm.lookupStop(stopId)
         }
 
-        binding.btnTestNearby.setOnClickListener {
-            // Get current location and test the nearest-stops query
-            val ctx = requireContext()
-            if (androidx.core.content.ContextCompat.checkSelfPermission(
-                    ctx, android.Manifest.permission.ACCESS_FINE_LOCATION
-                ) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(ctx, "Няма разрешение за местоположение", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            @Suppress("MissingPermission")
-            com.google.android.gms.location.LocationServices
-                .getFusedLocationProviderClient(ctx)
-                .lastLocation
-                .addOnSuccessListener { loc ->
-                    if (loc == null) {
-                        Toast.makeText(ctx, "Няма налично местоположение", Toast.LENGTH_SHORT).show()
-                    } else {
-                        vm.testNearbyStops(loc.latitude, loc.longitude)
-                    }
-                }
-                .addOnFailureListener { e ->
-                    Toast.makeText(ctx, "Грешка: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-        }
-
         binding.btnShareLog.setOnClickListener { shareLog() }
         binding.btnClearLog.setOnClickListener {
             FileLogger.clear()
