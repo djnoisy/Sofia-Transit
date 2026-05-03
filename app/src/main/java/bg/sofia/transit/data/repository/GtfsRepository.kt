@@ -326,12 +326,36 @@ class GtfsRepository @Inject constructor(
     /**
      * Returns the ordered list of stops for the *first* trip that matches
      * the given route + headsign. Sufficient for showing the route map.
+     *
+     * The `arrivalTime` field on each stop is the schedule of one specific
+     * (arbitrary) trip — it should NOT be shown directly in the UI as it
+     * would imply that's the time for "this" run. Instead we compute
+     * `minutesFromStart` here, which IS a stable property of the route.
      */
     suspend fun getStopsForDirection(routeId: String, headsign: String): List<StopWithSequence> {
         val trip = tripDao.getByRoute(routeId)
                          .firstOrNull { it.tripHeadsign == headsign }
                    ?: return emptyList()
-        return stopTimeDao.getStopsForTrip(trip.tripId)
+        val raw = stopTimeDao.getStopsForTrip(trip.tripId)
+
+        // Compute minutes of travel from the FIRST stop on this route.
+        val startMinutes = raw.firstOrNull()?.arrivalTime?.let { parseHmsToMinutes(it) }
+        return raw.map { stop ->
+            val nowMinutes = parseHmsToMinutes(stop.arrivalTime)
+            val delta = if (startMinutes != null && nowMinutes != null) {
+                (nowMinutes - startMinutes).coerceAtLeast(0)
+            } else null
+            stop.copy(minutesFromStart = delta)
+        }
+    }
+
+    /** Parses "HH:MM:SS" (or "H:MM:SS") into total minutes since midnight. */
+    private fun parseHmsToMinutes(hms: String): Int? {
+        val parts = hms.split(":")
+        if (parts.size < 2) return null
+        val h = parts[0].toIntOrNull() ?: return null
+        val m = parts[1].toIntOrNull() ?: return null
+        return h * 60 + m
     }
 
     // ── Schedules ─────────────────────────────────────────────────────────

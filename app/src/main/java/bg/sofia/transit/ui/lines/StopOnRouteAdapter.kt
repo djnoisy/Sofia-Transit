@@ -29,10 +29,12 @@ class StopOnRouteAdapter(
             try {
                 b.tvSequence.text = "${stop.stopSequence}."
                 b.tvStopName.text = stop.stopName
-                b.tvTime.text     = stop.arrivalTime.take(5)
+
+                // Show cumulative minutes of travel from the first stop.
+                val mins = stop.minutesFromStart ?: 0
+                b.tvTime.text = "$mins мин"
                 b.root.contentDescription =
-                    "Спирка ${stop.stopSequence}: ${stop.stopName}, " +
-                    "час ${stop.arrivalTime.take(5)}. Натиснете за разписание."
+                    "Спирка ${stop.stopSequence}: ${stop.stopName}, $mins минути"
                 b.root.setOnClickListener { onClick(stop) }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind failed for ${stop.stopId}", e)

@@ -8,7 +8,14 @@ data class StopWithSequence(
     val stopName: String,
     val stopSequence: Int,
     val arrivalTime: String,
-    val departureTime: String
+    val departureTime: String,
+    /**
+     * Minutes of travel from the FIRST stop on this route. 0 for the first
+     * stop. Computed in the repository, not stored in the DB — exact
+     * wall-clock times are not shown in the UI because they would imply
+     * this is one specific run.
+     */
+    val minutesFromStart: Int? = null
 )
 
 @Dao
