@@ -40,11 +40,8 @@ class StopsListFragment : Fragment() {
             "Изберете спирка за разписание."
 
         val adapter = StopOnRouteAdapter { stop -> openSchedule(stop) }
-        binding.rvStops.apply {
-            layoutManager = LinearLayoutManager(requireContext())
-            this.adapter = adapter
-            contentDescription = "Спирки по маршрута"
-        }
+        binding.rvStops.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvStops.adapter = adapter
 
         viewLifecycleOwner.lifecycleScope.launch {
             vm.directionStops.collectLatest { stops ->

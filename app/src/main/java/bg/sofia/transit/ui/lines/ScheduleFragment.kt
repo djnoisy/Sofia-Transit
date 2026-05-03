@@ -51,11 +51,8 @@ class ScheduleFragment : Fragment() {
         binding.tvSubHeader.text = "Спирка: ${args.stopName}"
 
         adapter = ScheduleAdapter()
-        binding.rvSchedule.apply {
-            layoutManager = LinearLayoutManager(requireContext())
-            this.adapter = adapter
-            contentDescription = "Часове на пристигане"
-        }
+        binding.rvSchedule.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvSchedule.adapter = adapter
 
         binding.btnToday.setOnClickListener     { vm.selectDayType(DayType.TODAY) }
         binding.btnWeekday.setOnClickListener   { vm.selectDayType(DayType.WEEKDAY) }
