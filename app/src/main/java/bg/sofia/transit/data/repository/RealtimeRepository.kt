@@ -62,6 +62,18 @@ class RealtimeRepository @Inject constructor() {
     }
 
     // ── Trip Updates ─────────────────────────────────────────────────────
+
+    /**
+     * Canonicalises a headsign string so that minor formatting differences
+     * ("Ж.К. ГОЦЕ ДЕЛЧЕВ" vs "Ж.к. Гоце Делчев" vs "Ж.К.  ГОЦЕ  ДЕЛЧЕВ")
+     * collapse to a single key when grouping. Uppercased, single-spaced,
+     * trimmed.
+     */
+    private fun normaliseHeadsign(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        return raw.uppercase().replace(Regex("\\s+"), " ").trim()
+    }
+
     /**
      * Fetches GTFS-RT TripUpdates and returns real-time arrival times
      * for the given stop, grouped by route short name and headsign.
@@ -83,7 +95,13 @@ class RealtimeRepository @Inject constructor() {
 
             val now = Instant.now().epochSecond
             val formatter = DateTimeFormatter.ofPattern("HH:mm")
-            val arrivals = mutableMapOf<String, MutableList<String>>()
+            // First pass: collect raw arrivals indexed by routeId, then dedupe.
+            // We can't group on headsign directly during the loop because two
+            // trips of the same line may report slightly different spellings
+            // (or one may report it and the other not), splitting one logical
+            // direction into multiple "arrivals" entries.
+            data class RawArrival(val routeId: String, val headsign: String, val time: String)
+            val rawList = mutableListOf<RawArrival>()
 
             var tripUpdateCount = 0
             var matchingStopCount = 0
@@ -110,14 +128,39 @@ class RealtimeRepository @Inject constructor() {
                     val rawHeadsign = tu.trip.tripHeadsign
                     val headsign = when {
                         rawHeadsign.isNotEmpty() -> rawHeadsign
-                        else -> routeHeadsigns[tu.trip.tripId] ?: "—"
+                        else -> routeHeadsigns[tu.trip.tripId] ?: ""
                     }
-                    val key = "$routeId|$headsign"
                     val timeStr = Instant.ofEpochSecond(arrTime)
                         .atZone(SOFIA_ZONE)
                         .format(formatter)
-                    arrivals.getOrPut(key) { mutableListOf() }.add(timeStr)
+                    rawList += RawArrival(routeId, headsign, timeStr)
                 }
+            }
+
+            // Per route, see what real (non-empty) headsigns exist. If a route
+            // has a single real headsign, treat the empty-headsign arrivals as
+            // belonging to that same direction.
+            val realHeadsignsByRoute = rawList
+                .filter { it.headsign.isNotBlank() }
+                .groupBy { it.routeId }
+                .mapValues { (_, list) ->
+                    list.map { normaliseHeadsign(it.headsign) }.distinct()
+                }
+
+            val arrivals = mutableMapOf<String, MutableList<String>>()
+            for (r in rawList) {
+                val normHs = normaliseHeadsign(r.headsign)
+                val resolved = when {
+                    normHs.isNotBlank() -> normHs
+                    // Empty headsign — if the route has exactly one direction,
+                    // attribute this arrival to it. Otherwise we genuinely
+                    // don't know — group under "—".
+                    realHeadsignsByRoute[r.routeId]?.size == 1 ->
+                        realHeadsignsByRoute[r.routeId]!![0]
+                    else -> "—"
+                }
+                val key = "${r.routeId}|$resolved"
+                arrivals.getOrPut(key) { mutableListOf() }.add(r.time)
             }
 
             FileLogger.i(TAG, "  ↳ tripUpdates=$tripUpdateCount, " +
@@ -131,7 +174,7 @@ class RealtimeRepository @Inject constructor() {
                     routeId       = routeId,
                     routeShortName = routeShortNames[routeId] ?: routeId,
                     headsign      = headsign,
-                    arrivals      = times.sorted().take(3)
+                    arrivals      = times.sorted().distinct().take(3)
                 )
             }.sortedWith(compareBy({ it.routeShortName }, { it.headsign }))
 
