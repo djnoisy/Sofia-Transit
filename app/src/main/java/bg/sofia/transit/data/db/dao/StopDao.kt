@@ -43,6 +43,7 @@ interface StopDao {
           AND s.stopLat BETWEEN :minLat AND :maxLat
           AND s.stopLon BETWEEN :minLon AND :maxLon
           AND EXISTS (SELECT 1 FROM stop_times st WHERE st.stopId = s.stopId LIMIT 1)
+        GROUP BY s.stopCode
         ORDER BY distSq ASC
         LIMIT :limit
     """)
@@ -56,6 +57,17 @@ interface StopDao {
         lonScale: Double,
         limit: Int
     ): List<Stop>
+
+    /**
+     * Returns all stop_ids that share the same stop_code. In the Sofia GTFS
+     * data, the same physical stop is sometimes represented by two rows
+     * with different prefixes — e.g. A1903 (bus) and TB1903 (trolley) both
+     * have stop_code 1903 at identical coordinates. Each row carries the
+     * stop_times only for vehicles of its own type, so to show every
+     * arrival at the physical stop we must query all of them.
+     */
+    @Query("SELECT stopId FROM stops WHERE stopCode = :code")
+    suspend fun getStopIdsByCode(code: String): List<String>
 
     @Query("SELECT COUNT(*) FROM stops")
     suspend fun count(): Int

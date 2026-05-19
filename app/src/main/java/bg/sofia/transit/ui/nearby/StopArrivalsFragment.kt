@@ -68,7 +68,9 @@ class StopArrivalsFragment : Fragment() {
         scheduleAutoRefresh()
     }
 
-    private fun loadArrivals() { vm.loadArrivals(stopId = args.stopId) }
+    private fun loadArrivals() {
+        vm.loadArrivals(stopId = args.stopId, stopCode = args.stopCode)
+    }
 
     private fun scheduleAutoRefresh() {
         refreshJob?.cancel()

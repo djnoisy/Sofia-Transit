@@ -33,14 +33,18 @@ class StopArrivalsViewModel @Inject constructor(
     private val _error = MutableSharedFlow<String>()
     val error: SharedFlow<String> = _error
 
-    fun loadArrivals(stopId: String) {
-        FileLogger.i(TAG, "loadArrivals called for stopId='$stopId'")
+    fun loadArrivals(stopId: String, stopCode: String? = null) {
+        FileLogger.i(TAG, "loadArrivals called for stopId='$stopId' code='$stopCode'")
         _state.value = _state.value.copy(loading = true)
 
         viewModelScope.launch {
             try {
-                val arrivals = gtfsRepo.getArrivalsForStop(stopId, realtimeRepo)
-                FileLogger.i(TAG, "Got ${arrivals.size} arrivals for $stopId")
+                val arrivals = gtfsRepo.getArrivalsForStopCode(
+                    stopCode = stopCode,
+                    primaryStopId = stopId,
+                    realtimeRepo = realtimeRepo
+                )
+                FileLogger.i(TAG, "Got ${arrivals.size} arrivals for $stopId (code $stopCode)")
                 if (arrivals.isNotEmpty()) {
                     arrivals.take(3).forEachIndexed { i, a ->
                         FileLogger.i(TAG, "  [$i] line=${a.routeShortName} → ${a.headsign}: ${a.arrivals.joinToString()}")

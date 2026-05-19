@@ -171,6 +171,45 @@ class GtfsRepository @Inject constructor(
         ids.distinct().mapNotNull { routeDao.getById(it) }
 
     /**
+     * Returns real-time arrivals at a physical stop identified by its
+     * stop_code. In the Sofia GTFS data the same physical stop is sometimes
+     * represented by multiple rows in stops.txt with different prefixes
+     * (e.g. A1903 + TB1903), each carrying stop_times only for vehicles of
+     * its own type. This method resolves all such rows and merges their
+     * arrivals so the user sees every vehicle that actually stops there.
+     *
+     * If [primaryStopId] is supplied and no rows share its code, this is
+     * equivalent to calling [getArrivalsForStop] directly.
+     */
+    suspend fun getArrivalsForStopCode(
+        stopCode: String?,
+        primaryStopId: String,
+        realtimeRepo: RealtimeRepository
+    ): List<ArrivalInfo> {
+        val stopIds: List<String> = if (stopCode.isNullOrBlank()) {
+            listOf(primaryStopId)
+        } else {
+            val all = stopDao.getStopIdsByCode(stopCode)
+            if (all.isEmpty()) listOf(primaryStopId) else all
+        }
+
+        if (stopIds.size == 1) {
+            return getArrivalsForStop(stopIds[0], realtimeRepo)
+        }
+
+        FileLogger.i("GtfsRepo", "Merging arrivals from ${stopIds.size} stop_ids: $stopIds")
+        val all = stopIds.flatMap { getArrivalsForStop(it, realtimeRepo) }
+
+        // Deduplicate by (routeId, headsign). If the same line+direction
+        // somehow appears in two underlying stop_ids, keep the entry with
+        // more arrival times listed.
+        return all
+            .groupBy { it.routeId to it.headsign }
+            .map { (_, list) -> list.maxByOrNull { it.arrivals.size }!! }
+            .sortedBy { it.routeShortName }
+    }
+
+    /**
      * Returns real-time arrivals for a stop, with headsigns resolved from
      * the static DB. For routes that have no realtime data (e.g. metro),
      * falls back to the static schedule for the current day, showing the
