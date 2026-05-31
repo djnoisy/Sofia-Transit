@@ -329,7 +329,8 @@ class GtfsRepository @Inject constructor(
         //     upcoming arrivals, append next static-schedule entries so the
         //     user sees the usual three. The static rows we pick come
         //     strictly AFTER the latest realtime epoch — that way the
-        //     ordering is naturally chronological and we never duplicate.
+        //     ordering is naturally chronological. Realtime epochs were
+        //     already deduped by trip_id in RealtimeRepository.
         val toppedUpRealtime = realtimeArrivals.map { rt ->
             if (rt.arrivalEpochs.size >= 3) return@map rt
             val routeIds = routes.filter { it.routeShortName == rt.routeShortName }.map { it.routeId }
@@ -356,7 +357,7 @@ class GtfsRepository @Inject constructor(
         //    realtime or static.
         val now = java.time.Instant.now().epochSecond
         val all = combined.map { info ->
-            val sortedEpochs = info.arrivalEpochs.sorted()
+            val sortedEpochs = info.arrivalEpochs.sorted().take(3)
             val displayTimes = sortedEpochs.map { formatEpochForDisplay(it, now) }
             info.copy(arrivals = displayTimes, arrivalEpochs = sortedEpochs)
         }

@@ -110,13 +110,20 @@ class RealtimeRepository @Inject constructor() {
             // trips of the same line may report slightly different spellings
             // (or one may report it and the other not), splitting one logical
             // direction into multiple "arrivals" entries.
-            data class RawArrival(val routeId: String, val headsign: String, val epoch: Long)
+            data class RawArrival(val routeId: String, val headsign: String, val epoch: Long, val tripId: String)
             val rawList = mutableListOf<RawArrival>()
 
             var tripUpdateCount = 0
             var matchingStopCount = 0
             var futureArrivalCount = 0
             var filteredOutForUnknownRoute = 0
+            var duplicateTripIds = 0
+
+            // Track trip_ids already collected for this stop. CGM occasionally
+            // emits the same trip_id twice in the same feed (a stale entity
+            // alongside the fresh one), which would otherwise show up as two
+            // identical "след 25 мин" entries.
+            val seenTripIds = mutableSetOf<String>()
 
             for (entity in feed.entityList) {
                 if (!entity.hasTripUpdate()) continue
@@ -133,6 +140,12 @@ class RealtimeRepository @Inject constructor() {
                 // through which stop; realtime only adds timing info.
                 if (routeShortNames.isNotEmpty() && routeId !in routeShortNames) {
                     filteredOutForUnknownRoute++
+                    continue
+                }
+
+                val tripId = tu.trip.tripId
+                if (tripId.isNotEmpty() && !seenTripIds.add(tripId)) {
+                    duplicateTripIds++
                     continue
                 }
 
@@ -155,7 +168,7 @@ class RealtimeRepository @Inject constructor() {
                                 ?.takeIf { it.isNotBlank() && it != "—" }
                                 ?: ""
                     }
-                    rawList += RawArrival(routeId, headsign, arrTime)
+                    rawList += RawArrival(routeId, headsign, arrTime, tripId)
                 }
             }
 
@@ -189,6 +202,7 @@ class RealtimeRepository @Inject constructor() {
                        "matchingStop=$matchingStopCount, " +
                        "futureArrivals=$futureArrivalCount, " +
                        "filteredOutForUnknownRoute=$filteredOutForUnknownRoute, " +
+                       "duplicateTripIds=$duplicateTripIds, " +
                        "groupedArrivals=${arrivals.size}")
 
             arrivals.map { (key, epochs) ->
