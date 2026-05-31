@@ -343,6 +343,9 @@ class GtfsRepository @Inject constructor(
                 afterEpoch     = lastRealtimeEpoch,
                 limit          = needed + 2 // overshoot for safety; dedup may drop some
             )
+            FileLogger.i("GtfsRepo", "  ↳ topup for line ${rt.routeShortName} → ${rt.headsign}: " +
+                "realtime epochs=${rt.arrivalEpochs.size}, " +
+                "needed=$needed, got static=${extraEpochs.size}")
             if (extraEpochs.isEmpty()) rt
             else rt.copy(arrivalEpochs = rt.arrivalEpochs + extraEpochs)
         }
