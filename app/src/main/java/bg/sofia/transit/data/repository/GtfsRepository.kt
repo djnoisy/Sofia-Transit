@@ -327,10 +327,8 @@ class GtfsRepository @Inject constructor(
 
         // 4b. Top-up: for routes that DO have realtime but fewer than 3
         //     upcoming arrivals, append next static-schedule entries so the
-        //     user sees the usual three. The static rows we pick come
-        //     strictly AFTER the latest realtime epoch — that way the
-        //     ordering is naturally chronological. Realtime epochs were
-        //     already deduped by trip_id in RealtimeRepository.
+        //     user sees the usual three. The displayed strings for realtime
+        //     and any static top-up are deduped at format time — see step 6.
         val toppedUpRealtime = realtimeArrivals.map { rt ->
             if (rt.arrivalEpochs.size >= 3) return@map rt
             val routeIds = routes.filter { it.routeShortName == rt.routeShortName }.map { it.routeId }
@@ -343,7 +341,7 @@ class GtfsRepository @Inject constructor(
                 routeIds       = routeIds,
                 headsign       = rt.headsign,
                 afterEpoch     = lastRealtimeEpoch,
-                limit          = needed
+                limit          = needed + 2 // overshoot for safety; dedup may drop some
             )
             if (extraEpochs.isEmpty()) rt
             else rt.copy(arrivalEpochs = rt.arrivalEpochs + extraEpochs)
@@ -353,13 +351,40 @@ class GtfsRepository @Inject constructor(
         val combined = toppedUpRealtime + scheduledArrivals
 
         // 6. Format all epochs to display strings, applying the 60-min
-        //    threshold uniformly regardless of whether the source was
-        //    realtime or static.
+        //    threshold uniformly. We also track which entries originate
+        //    from realtime (first N) vs static top-up (remaining), so we
+        //    can dedupe a static entry whose formatted string matches a
+        //    realtime one — that's the same physical vehicle, slightly
+        //    earlier in realtime than its scheduled time.
         val now = java.time.Instant.now().epochSecond
         val all = combined.map { info ->
-            val sortedEpochs = info.arrivalEpochs.sorted().take(3)
-            val displayTimes = sortedEpochs.map { formatEpochForDisplay(it, now) }
-            info.copy(arrivals = displayTimes, arrivalEpochs = sortedEpochs)
+            // Reconstruct which epochs were realtime — they were the
+            // original arrivalEpochs from realtimeArrivals before top-up
+            // appended any static ones. We can identify this only by
+            // comparing against the realtime list.
+            val realtimeEpochs = realtimeArrivals
+                .firstOrNull { it.routeId == info.routeId && it.headsign == info.headsign }
+                ?.arrivalEpochs ?: emptyList()
+
+            val realtimeDisplay = realtimeEpochs
+                .sorted()
+                .map { formatEpochForDisplay(it, now) }
+
+            val staticEpochs = info.arrivalEpochs.filter { it !in realtimeEpochs }
+            val realtimeDisplaySet = realtimeDisplay.toSet()
+            val staticDisplay = staticEpochs
+                .sorted()
+                .map { formatEpochForDisplay(it, now) }
+                .filter { it !in realtimeDisplaySet }   // drop visual duplicates of realtime
+
+            val displayTimes = (realtimeDisplay + staticDisplay).distinct().take(3)
+            // Keep arrivalEpochs aligned with the displayed entries — only
+            // those whose formatted string ended up in displayTimes.
+            val keptEpochs = info.arrivalEpochs
+                .filter { formatEpochForDisplay(it, now) in displayTimes }
+                .sorted()
+                .take(3)
+            info.copy(arrivals = displayTimes, arrivalEpochs = keptEpochs)
         }
 
         FileLogger.i("GtfsRepo", "getArrivalsForStop returning ${all.size} ArrivalInfo records total")
