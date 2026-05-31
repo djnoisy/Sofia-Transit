@@ -163,6 +163,16 @@ class GtfsRepository @Inject constructor(
 
     suspend fun getStopById(id: String) = stopDao.getById(id)
 
+    /**
+     * Searches the static DB for stops matching [query] (by code or name).
+     * Returns up to 10 results. Empty query returns an empty list.
+     */
+    suspend fun searchStops(query: String, limit: Int = 10): List<bg.sofia.transit.data.db.entity.Stop> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return emptyList()
+        return stopDao.searchStops(trimmed, trimmed, limit)
+    }
+
     /** Bulk lookup of trips by ID — for diagnostics & realtime resolution. */
     suspend fun getTripsByIds(ids: List<String>) = tripDao.getByIds(ids)
 
@@ -221,11 +231,11 @@ class GtfsRepository @Inject constructor(
     ): List<ArrivalInfo> {
         FileLogger.i("GtfsRepo", "getArrivalsForStop start, stopId=$stopId")
 
-        // 1. routeId → shortName + routeType map
+        // 1. Routes that the static DB says serve this stop
         val routes = routeDao.getRoutesForStops(listOf(stopId))
-        val routeShortNames = routes.associate { it.routeId to it.routeShortName }
-        val routeTypes      = routes.associate { it.routeId to it.routeType }
-        FileLogger.i("GtfsRepo", "Routes serving $stopId: ${routes.size}")
+        val routeShortNamesMutable = routes.associate { it.routeId to it.routeShortName }.toMutableMap()
+        val routeTypes             = routes.associate { it.routeId to it.routeType }
+        FileLogger.i("GtfsRepo", "Routes serving $stopId (static): ${routes.size}")
 
         // 2. Resolve headsigns for trips touching this stop in the realtime feed
         val rawTripIds = realtimeRepo.getTripIdsTouchingStop(stopId)
@@ -235,11 +245,66 @@ class GtfsRepository @Inject constructor(
             staticTrips[tripId]?.tripHeadsign ?: "—"
         }
 
+        // 2b. Some route_ids appear in the realtime feed for this stop but
+        //     have no static trip data at all (zero rows in trips.txt). A
+        //     real-world example is CGM's "M3" bus replacement route during
+        //     metro maintenance: it exists in routes.txt with short_name=M3
+        //     but has no scheduled trips. We can't tell from static data
+        //     whether a given stop is on its route, so we trust the feed
+        //     and let such arrivals through.
+        val realtimeRouteIdsFromTrips = staticTrips.values.map { it.routeId }.toSet()
+        val unknownRouteIds = realtimeRouteIdsFromTrips.filter { it !in routeShortNamesMutable }
+        if (unknownRouteIds.isNotEmpty()) {
+            FileLogger.i("GtfsRepo", "Resolving ${unknownRouteIds.size} extra route_ids: $unknownRouteIds")
+            for (rid in unknownRouteIds) {
+                val r = routeDao.getById(rid) ?: continue
+                val tripCount = tripDao.getByRoute(rid).size
+                if (tripCount == 0) {
+                    // Route is defined but has no trips anywhere — likely a
+                    // special replacement service. Show it.
+                    routeShortNamesMutable[rid] = r.routeShortName
+                    FileLogger.i("GtfsRepo", "  → including $rid (${r.routeShortName}): " +
+                        "no trips in static data, trusting realtime feed")
+                }
+                // If the route HAS trips but none of them touch this stop,
+                // we deliberately don't add it — RealtimeRepository will
+                // filter it out as a feed attribution error (like line 280
+                // appearing on Orlov most code 1289).
+            }
+        }
+
+        // Headsign fallback: built per route_id from the static data. Used
+        // when the realtime feed returns an empty trip_headsign AND we
+        // can't resolve a per-trip headsign either.
+        val routeHeadsignFallback = mutableMapOf<String, String>()
+        for (rid in routeShortNamesMutable.keys) {
+            val tripsForRoute = tripDao.getByRoute(rid)
+            val headsigns = tripsForRoute
+                .mapNotNull { it.tripHeadsign?.takeIf { h -> h.isNotBlank() } }
+                .distinct()
+            if (headsigns.isNotEmpty()) {
+                routeHeadsignFallback[rid] = headsigns.sorted().joinToString(" / ")
+            } else {
+                // Route has no trips — fall back to route_long_name.
+                val r = routeDao.getById(rid) ?: continue
+                val parts = r.routeLongName.split(" - ").map { it.trim() }.filter { it.isNotBlank() }
+                val mid = when (parts.size) {
+                    0 -> null
+                    1 -> parts[0]
+                    2 -> parts[1]
+                    else -> parts[parts.size / 2]
+                }
+                if (mid != null) routeHeadsignFallback[rid] = mid
+            }
+        }
+        val routeShortNames: Map<String, String> = routeShortNamesMutable
+
         // 3. Realtime arrivals (covers buses, trams, trolleybuses)
         val realtimeArrivals = realtimeRepo.getArrivalsForStop(
             stopId          = stopId,
             routeShortNames = routeShortNames,
-            routeHeadsigns  = headsignsByTripId
+            routeHeadsigns  = headsignsByTripId,
+            routeLevelHeadsignFallback = routeHeadsignFallback
         )
         val realtimeRouteIds = realtimeArrivals.map { it.routeId }.toSet()
         FileLogger.i("GtfsRepo", "Realtime returned ${realtimeArrivals.size} records " +
@@ -256,7 +321,7 @@ class GtfsRepository @Inject constructor(
         } else emptyList()
         FileLogger.i("GtfsRepo", "Schedule fallback returned ${scheduledArrivals.size} records")
 
-        // 5. Combine: realtime first, then scheduled fallback
+        // 5. Combine: realtime first, then scheduled fallback.
         val all = realtimeArrivals + scheduledArrivals
         FileLogger.i("GtfsRepo", "getArrivalsForStop returning ${all.size} ArrivalInfo records total")
         return all

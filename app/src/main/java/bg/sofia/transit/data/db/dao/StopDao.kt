@@ -69,6 +69,29 @@ interface StopDao {
     @Query("SELECT stopId FROM stops WHERE stopCode = :code")
     suspend fun getStopIdsByCode(code: String): List<String>
 
+    /**
+     * Searches for stops by code or name. Returns up to [limit] results.
+     * - `query` is matched as a prefix against stop_code (case-insensitive)
+     * - AND/OR as a substring against stop_name (case-insensitive)
+     * Phantom stops (those with no stop_times rows) are excluded.
+     * Ordered: code matches first, then name matches, alphabetical within each group.
+     */
+    @Query("""
+        SELECT s.* FROM stops s
+        WHERE s.locationType = 0
+          AND EXISTS (SELECT 1 FROM stop_times st WHERE st.stopId = s.stopId LIMIT 1)
+          AND (
+              s.stopCode LIKE :prefix || '%'
+              OR UPPER(s.stopName) LIKE '%' || UPPER(:query) || '%'
+          )
+        GROUP BY s.stopCode
+        ORDER BY
+            CASE WHEN s.stopCode LIKE :prefix || '%' THEN 0 ELSE 1 END,
+            s.stopName
+        LIMIT :limit
+    """)
+    suspend fun searchStops(query: String, prefix: String, limit: Int): List<Stop>
+
     @Query("SELECT COUNT(*) FROM stops")
     suspend fun count(): Int
 

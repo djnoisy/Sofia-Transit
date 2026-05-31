@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/tilQuery"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Име или код на спирка"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etQuery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text"
+            android:imeOptions="actionSearch"
+            android:maxLines="1"
+            android:contentDescription="Въведете име или код на спирка"/>
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnSearch"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Търси"
+        android:contentDescription="Стартирай търсене"
+        android:layout_marginTop="8dp"
+        style="@style/Widget.Material3.Button"/>
+
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:textSize="14sp"
+        android:text="Въведете име или код на спирка и натиснете „Търси“."/>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvResults"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginTop="8dp"
+        android:clipToPadding="false"/>
+</LinearLayout>

@@ -81,7 +81,10 @@ class RealtimeRepository @Inject constructor() {
     suspend fun getArrivalsForStop(
         stopId: String,
         routeShortNames: Map<String, String>,  // routeId -> shortName
-        routeHeadsigns: Map<String, String>    // tripId  -> headsign (fallback)
+        routeHeadsigns: Map<String, String>,   // tripId  -> headsign (per-trip fallback)
+        routeLevelHeadsignFallback: Map<String, String> = emptyMap()
+            // routeId -> headsign (route-level fallback, used when there's no
+            // per-trip data either, e.g. CGM metro-connector buses)
     ): List<ArrivalInfo> = withContext(Dispatchers.IO) {
         try {
             FileLogger.i(TAG, "getArrivalsForStop: stopId=$stopId, knownRoutes=${routeShortNames.size}")
@@ -106,12 +109,25 @@ class RealtimeRepository @Inject constructor() {
             var tripUpdateCount = 0
             var matchingStopCount = 0
             var futureArrivalCount = 0
+            var filteredOutForUnknownRoute = 0
 
             for (entity in feed.entityList) {
                 if (!entity.hasTripUpdate()) continue
                 tripUpdateCount++
                 val tu = entity.tripUpdate
                 val routeId = tu.trip.routeId
+
+                // Sanity filter: drop arrivals for route_ids that don't
+                // statically serve this stop. CGM's realtime feed sometimes
+                // attributes a vehicle's location to a stop it doesn't
+                // actually visit (e.g. line 280 appearing on Orlov most code
+                // 1289 when its real stops there are 1287/1288). We treat
+                // static GTFS as the source of truth for which line goes
+                // through which stop; realtime only adds timing info.
+                if (routeShortNames.isNotEmpty() && routeId !in routeShortNames) {
+                    filteredOutForUnknownRoute++
+                    continue
+                }
 
                 for (stu in tu.stopTimeUpdateList) {
                     if (stu.stopId != stopId) continue
@@ -128,7 +144,9 @@ class RealtimeRepository @Inject constructor() {
                     val rawHeadsign = tu.trip.tripHeadsign
                     val headsign = when {
                         rawHeadsign.isNotEmpty() -> rawHeadsign
-                        else -> routeHeadsigns[tu.trip.tripId] ?: ""
+                        else -> routeHeadsigns[tu.trip.tripId]
+                                ?.takeIf { it.isNotBlank() && it != "—" }
+                                ?: ""
                     }
                     val timeStr = Instant.ofEpochSecond(arrTime)
                         .atZone(SOFIA_ZONE)
@@ -153,10 +171,14 @@ class RealtimeRepository @Inject constructor() {
                 val resolved = when {
                     normHs.isNotBlank() -> normHs
                     // Empty headsign — if the route has exactly one direction,
-                    // attribute this arrival to it. Otherwise we genuinely
-                    // don't know — group under "—".
+                    // attribute this arrival to it.
                     realHeadsignsByRoute[r.routeId]?.size == 1 ->
                         realHeadsignsByRoute[r.routeId]!![0]
+                    // Otherwise try the route-level fallback (built from
+                    // route_long_name when no per-trip headsign is available).
+                    routeLevelHeadsignFallback[r.routeId]?.isNotBlank() == true ->
+                        normaliseHeadsign(routeLevelHeadsignFallback[r.routeId]!!)
+                    // Genuinely unknown — group under "—".
                     else -> "—"
                 }
                 val key = "${r.routeId}|$resolved"
@@ -166,6 +188,7 @@ class RealtimeRepository @Inject constructor() {
             FileLogger.i(TAG, "  ↳ tripUpdates=$tripUpdateCount, " +
                        "matchingStop=$matchingStopCount, " +
                        "futureArrivals=$futureArrivalCount, " +
+                       "filteredOutForUnknownRoute=$filteredOutForUnknownRoute, " +
                        "groupedArrivals=${arrivals.size}")
 
             arrivals.map { (key, times) ->

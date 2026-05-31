@@ -65,6 +65,14 @@
         android:layout_marginTop="8dp"
         style="@style/Widget.Material3.Button.OutlinedButton"/>
 
+    <Button android:id="@+id/btnUpdateData"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Обнови данните за линии и спирки"
+        android:contentDescription="Изтегли актуалните разписания и маршрути от ЦГМ"
+        android:layout_marginTop="8dp"
+        style="@style/Widget.Material3.Button.OutlinedButton"/>
+
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"

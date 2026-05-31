@@ -74,6 +74,24 @@ class GtfsUpdateWorker @AssistedInject constructor(
             WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, req)
         }
+
+        /**
+         * Schedules a one-time refresh of the GTFS static data. Used by the
+         * Diagnostics screen so the user can force a fresh download without
+         * waiting for the weekly cycle. Returns the work ID so the caller
+         * can observe progress.
+         */
+        fun runNow(context: Context): java.util.UUID {
+            val req = androidx.work.OneTimeWorkRequestBuilder<GtfsUpdateWorker>()
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+            WorkManager.getInstance(context).enqueue(req)
+            return req.id
+        }
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
