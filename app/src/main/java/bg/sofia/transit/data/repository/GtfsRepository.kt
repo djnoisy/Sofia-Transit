@@ -252,10 +252,14 @@ class GtfsRepository @Inject constructor(
         //     but has no scheduled trips. We can't tell from static data
         //     whether a given stop is on its route, so we trust the feed
         //     and let such arrivals through.
-        val realtimeRouteIdsFromTrips = staticTrips.values.map { it.routeId }.toSet()
-        val unknownRouteIds = realtimeRouteIdsFromTrips.filter { it !in routeShortNamesMutable }
+        //
+        //     We query route_ids directly from the realtime feed (rather than
+        //     deriving them from staticTrips) because routes with zero
+        //     scheduled trips have no trip_id match in our static DB at all.
+        val realtimeRouteIdsAtStop = realtimeRepo.getRouteIdsTouchingStop(stopId).toSet()
+        val unknownRouteIds = realtimeRouteIdsAtStop.filter { it !in routeShortNamesMutable }
         if (unknownRouteIds.isNotEmpty()) {
-            FileLogger.i("GtfsRepo", "Resolving ${unknownRouteIds.size} extra route_ids: $unknownRouteIds")
+            FileLogger.i("GtfsRepo", "Realtime route_ids not in static routes for $stopId: $unknownRouteIds")
             for (rid in unknownRouteIds) {
                 val r = routeDao.getById(rid) ?: continue
                 val tripCount = tripDao.getByRoute(rid).size

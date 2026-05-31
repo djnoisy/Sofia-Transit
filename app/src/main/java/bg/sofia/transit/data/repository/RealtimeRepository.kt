@@ -494,6 +494,31 @@ class RealtimeRepository @Inject constructor() {
     }
 
     /**
+     * Returns the set of route_ids that have at least one trip_update with a
+     * stop_time_update for the given stop_id, regardless of whether the
+     * trip_id matches anything in our static DB. Used to detect routes that
+     * exist in routes.txt but have zero trip entries (CGM "special" lines
+     * like M3 metro replacement) — we wouldn't otherwise know about them.
+     */
+    suspend fun getRouteIdsTouchingStop(stopId: String): List<String> = withContext(Dispatchers.IO) {
+        val feed = fetchTripUpdates() ?: return@withContext emptyList()
+        val routeIds = mutableSetOf<String>()
+        for (entity in feed.entityList) {
+            if (!entity.hasTripUpdate()) continue
+            val tu = entity.tripUpdate
+            val rid = tu.trip.routeId
+            if (rid.isEmpty()) continue
+            for (stu in tu.stopTimeUpdateList) {
+                if (stu.stopId == stopId) {
+                    routeIds.add(rid)
+                    break
+                }
+            }
+        }
+        routeIds.toList()
+    }
+
+    /**
      * Inspects the realtime feed for arrivals at a specific stop_id.
      * Returns up to 10 raw arrival entries with route + headsign + ETA.
      * Used by diagnostics to verify a specific stop is reachable.
