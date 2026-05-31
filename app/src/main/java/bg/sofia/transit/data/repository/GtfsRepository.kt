@@ -325,10 +325,91 @@ class GtfsRepository @Inject constructor(
         } else emptyList()
         FileLogger.i("GtfsRepo", "Schedule fallback returned ${scheduledArrivals.size} records")
 
-        // 5. Combine: realtime first, then scheduled fallback.
-        val all = realtimeArrivals + scheduledArrivals
+        // 4b. Top-up: for routes that DO have realtime but fewer than 3 future
+        //     arrivals, append upcoming static arrivals so the user sees the
+        //     usual three. Moovit/CGM do the same — realtime tracks vehicles
+        //     in the next ~10-30 minutes, and the rest comes from schedule.
+        val toppedUpRealtime = realtimeArrivals.map { rt ->
+            if (rt.arrivals.size >= 3) return@map rt
+            val routeIds = routes.filter { it.routeShortName == rt.routeShortName }.map { it.routeId }
+            if (routeIds.isEmpty()) return@map rt
+            val needed = 3 - rt.arrivals.size
+            val extras = buildScheduledArrivalTimes(
+                stopId       = stopId,
+                routeIds     = routeIds,
+                headsign     = rt.headsign,
+                afterTimes   = rt.arrivals,
+                limit        = needed
+            )
+            if (extras.isEmpty()) rt
+            else rt.copy(arrivals = (rt.arrivals + extras).distinct().take(3))
+        }
+
+        // 5. Combine: realtime first (topped up), then scheduled fallback.
+        val all = toppedUpRealtime + scheduledArrivals
         FileLogger.i("GtfsRepo", "getArrivalsForStop returning ${all.size} ArrivalInfo records total")
         return all
+    }
+
+    /**
+     * Returns static schedule times for the given route_ids at the given
+     * stop_id, matching the given headsign, suitable for "topping up" a
+     * realtime arrivals list. Skips any HH:MM already present in
+     * [existingDisplayTimes] (so we don't duplicate a realtime "20:08"
+     * with a scheduled "20:08").
+     */
+    private suspend fun buildScheduledArrivalTimes(
+        stopId: String,
+        routeIds: List<String>,
+        headsign: String,
+        afterTimes: List<String>,
+        limit: Int
+    ): List<String> {
+        if (limit <= 0) return emptyList()
+        val today = bg.sofia.transit.util.DateHelper.todayString()
+        val activeServices = calendarDateDao.getActiveServicesForDate(today)
+        if (activeServices.isEmpty()) return emptyList()
+
+        // Anchor at current local time — realtime arrivals (whether shown
+        // as "след 5 мин" or "20:30") are already in the future, and Room
+        // returns schedule rows sorted by time, so we just need the next
+        // few unique entries past now.
+        val nowStr = java.time.LocalTime.now(java.time.ZoneId.of("Europe/Sofia"))
+            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
+
+        val rows = stopTimeDao.getScheduledArrivalsAtStop(
+            stopId       = stopId,
+            serviceIds   = activeServices,
+            currentTime  = nowStr
+        ).filter { it.routeId in routeIds }
+
+        // Strip "сега" / "след N мин" prefixes; only "HH:MM" displays can
+        // collide with scheduled rows. Set of existing display times in
+        // HH:MM form so we can dedupe.
+        val existingHM = afterTimes
+            .filter { it.matches(Regex("""\d\d:\d\d""")) }
+            .toSet()
+
+        return rows
+            .asSequence()
+            .filter {
+                val candidate = it.headsign?.takeIf { h -> h.isNotBlank() } ?: ""
+                when {
+                    headsign.isBlank() || headsign == "—" -> true
+                    candidate.isBlank() -> true
+                    headsign.contains(" / ") ->
+                        headsign.split(" / ").any { p -> p.equals(candidate, ignoreCase = true) }
+                    else -> candidate.equals(headsign, ignoreCase = true)
+                }
+            }
+            .map { sched ->
+                val hms = sched.arrivalTime
+                if (hms.length >= 5) hms.substring(0, 5) else hms
+            }
+            .filter { it !in existingHM }
+            .distinct()
+            .take(limit)
+            .toList()
     }
 
     /**

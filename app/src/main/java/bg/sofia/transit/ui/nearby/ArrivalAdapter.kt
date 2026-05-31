@@ -31,15 +31,25 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
                 b.tvTimes.text    = info.arrivals.joinToString("  •  ")
 
                 val timesDesc = when (info.arrivals.size) {
-                    0 -> "без информация"
-                    1 -> "в ${info.arrivals[0]}"
-                    else -> info.arrivals.take(3).joinToString(", ") { "в $it" }
+                    0    -> "без информация"
+                    else -> info.arrivals.take(3).joinToString(", ") { describeTime(it) }
                 }
                 b.root.contentDescription =
                     "Линия ${info.routeShortName} към ${info.headsign}: $timesDesc"
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind() FAILED for $info", e)
             }
+        }
+
+        /**
+         * Formats one arrival string for TalkBack. Relative times like
+         * "след 5 мин" or "сега" are read as-is; absolute "HH:MM" gets
+         * "в" prepended so it sounds natural ("в 22:30").
+         */
+        private fun describeTime(s: String): String = when {
+            s == "сега" -> s
+            s.startsWith("след ") -> s
+            else -> "в $s"
         }
     }
 

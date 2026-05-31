@@ -75,6 +75,17 @@ class RealtimeRepository @Inject constructor() {
     }
 
     /**
+     * Formats an arrival "minutes from now" as a short relative phrase.
+     * The TalkBack-friendly form is "след N минути"; visually it's
+     * "след N мин" so it doesn't take too much horizontal space.
+     * 0 minutes → "сега" (special-cased — vehicle has just arrived).
+     */
+    private fun formatRelativeMinutes(min: Int): String = when {
+        min <= 0 -> "сега"
+        else     -> "след $min мин"
+    }
+
+    /**
      * Fetches GTFS-RT TripUpdates and returns real-time arrival times
      * for the given stop, grouped by route short name and headsign.
      */
@@ -103,7 +114,7 @@ class RealtimeRepository @Inject constructor() {
             // trips of the same line may report slightly different spellings
             // (or one may report it and the other not), splitting one logical
             // direction into multiple "arrivals" entries.
-            data class RawArrival(val routeId: String, val headsign: String, val time: String)
+            data class RawArrival(val routeId: String, val headsign: String, val time: String, val sortKey: Int)
             val rawList = mutableListOf<RawArrival>()
 
             var tripUpdateCount = 0
@@ -148,10 +159,20 @@ class RealtimeRepository @Inject constructor() {
                                 ?.takeIf { it.isNotBlank() && it != "—" }
                                 ?: ""
                     }
-                    val timeStr = Instant.ofEpochSecond(arrTime)
-                        .atZone(SOFIA_ZONE)
-                        .format(formatter)
-                    rawList += RawArrival(routeId, headsign, timeStr)
+                    // Format as relative minutes when arrival is within an
+                    // hour; otherwise show absolute HH:MM. The user feedback
+                    // is that "след N мин" is much easier to act on for the
+                    // near-term cases, while distant times read more naturally
+                    // as wall-clock.
+                    val minutesAway = ((arrTime - now) / 60).toInt()
+                    val timeStr = if (minutesAway < 60) {
+                        formatRelativeMinutes(minutesAway)
+                    } else {
+                        Instant.ofEpochSecond(arrTime)
+                            .atZone(SOFIA_ZONE)
+                            .format(formatter)
+                    }
+                    rawList += RawArrival(routeId, headsign, timeStr, minutesAway)
                 }
             }
 
@@ -165,24 +186,22 @@ class RealtimeRepository @Inject constructor() {
                     list.map { normaliseHeadsign(it.headsign) }.distinct()
                 }
 
-            val arrivals = mutableMapOf<String, MutableList<String>>()
+            // Group times alongside their sort keys (minutes-from-now), so
+            // we can order chronologically regardless of display format.
+            data class TimedEntry(val display: String, val sortKey: Int)
+            val arrivals = mutableMapOf<String, MutableList<TimedEntry>>()
             for (r in rawList) {
                 val normHs = normaliseHeadsign(r.headsign)
                 val resolved = when {
                     normHs.isNotBlank() -> normHs
-                    // Empty headsign — if the route has exactly one direction,
-                    // attribute this arrival to it.
                     realHeadsignsByRoute[r.routeId]?.size == 1 ->
                         realHeadsignsByRoute[r.routeId]!![0]
-                    // Otherwise try the route-level fallback (built from
-                    // route_long_name when no per-trip headsign is available).
                     routeLevelHeadsignFallback[r.routeId]?.isNotBlank() == true ->
                         normaliseHeadsign(routeLevelHeadsignFallback[r.routeId]!!)
-                    // Genuinely unknown — group under "—".
                     else -> "—"
                 }
                 val key = "${r.routeId}|$resolved"
-                arrivals.getOrPut(key) { mutableListOf() }.add(r.time)
+                arrivals.getOrPut(key) { mutableListOf() }.add(TimedEntry(r.time, r.sortKey))
             }
 
             FileLogger.i(TAG, "  ↳ tripUpdates=$tripUpdateCount, " +
@@ -191,13 +210,18 @@ class RealtimeRepository @Inject constructor() {
                        "filteredOutForUnknownRoute=$filteredOutForUnknownRoute, " +
                        "groupedArrivals=${arrivals.size}")
 
-            arrivals.map { (key, times) ->
+            arrivals.map { (key, entries) ->
                 val (routeId, headsign) = key.split("|", limit = 2)
+                val sortedTimes = entries
+                    .sortedBy { it.sortKey }
+                    .map { it.display }
+                    .distinct()
+                    .take(3)
                 ArrivalInfo(
                     routeId       = routeId,
                     routeShortName = routeShortNames[routeId] ?: routeId,
                     headsign      = headsign,
-                    arrivals      = times.sorted().distinct().take(3)
+                    arrivals      = sortedTimes
                 )
             }.sortedWith(compareBy({ it.routeShortName }, { it.headsign }))
 
