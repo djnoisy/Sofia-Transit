@@ -325,70 +325,100 @@ class GtfsRepository @Inject constructor(
         } else emptyList()
         FileLogger.i("GtfsRepo", "Schedule fallback returned ${scheduledArrivals.size} records")
 
-        // 4b. Top-up: for routes that DO have realtime but fewer than 3 future
-        //     arrivals, append upcoming static arrivals so the user sees the
-        //     usual three. Moovit/CGM do the same — realtime tracks vehicles
-        //     in the next ~10-30 minutes, and the rest comes from schedule.
+        // 4b. Top-up: for routes that DO have realtime but fewer than 3
+        //     upcoming arrivals, append next static-schedule entries so the
+        //     user sees the usual three. The static rows we pick come
+        //     strictly AFTER the latest realtime epoch — that way the
+        //     ordering is naturally chronological and we never duplicate.
         val toppedUpRealtime = realtimeArrivals.map { rt ->
-            if (rt.arrivals.size >= 3) return@map rt
+            if (rt.arrivalEpochs.size >= 3) return@map rt
             val routeIds = routes.filter { it.routeShortName == rt.routeShortName }.map { it.routeId }
             if (routeIds.isEmpty()) return@map rt
-            val needed = 3 - rt.arrivals.size
-            val extras = buildScheduledArrivalTimes(
-                stopId       = stopId,
-                routeIds     = routeIds,
-                headsign     = rt.headsign,
-                afterTimes   = rt.arrivals,
-                limit        = needed
+
+            val needed = 3 - rt.arrivalEpochs.size
+            val lastRealtimeEpoch = rt.arrivalEpochs.maxOrNull()
+            val extraEpochs = buildScheduledArrivalEpochs(
+                stopId         = stopId,
+                routeIds       = routeIds,
+                headsign       = rt.headsign,
+                afterEpoch     = lastRealtimeEpoch,
+                limit          = needed
             )
-            if (extras.isEmpty()) rt
-            else rt.copy(arrivals = (rt.arrivals + extras).distinct().take(3))
+            if (extraEpochs.isEmpty()) rt
+            else rt.copy(arrivalEpochs = rt.arrivalEpochs + extraEpochs)
         }
 
-        // 5. Combine: realtime first (topped up), then scheduled fallback.
-        val all = toppedUpRealtime + scheduledArrivals
+        // 5. Combine: realtime first (topped up), then schedule-only records.
+        val combined = toppedUpRealtime + scheduledArrivals
+
+        // 6. Format all epochs to display strings, applying the 60-min
+        //    threshold uniformly regardless of whether the source was
+        //    realtime or static.
+        val now = java.time.Instant.now().epochSecond
+        val all = combined.map { info ->
+            val sortedEpochs = info.arrivalEpochs.sorted()
+            val displayTimes = sortedEpochs.map { formatEpochForDisplay(it, now) }
+            info.copy(arrivals = displayTimes, arrivalEpochs = sortedEpochs)
+        }
+
         FileLogger.i("GtfsRepo", "getArrivalsForStop returning ${all.size} ArrivalInfo records total")
         return all
     }
 
     /**
-     * Returns static schedule times for the given route_ids at the given
-     * stop_id, matching the given headsign, suitable for "topping up" a
-     * realtime arrivals list. Skips any HH:MM already present in
-     * [existingDisplayTimes] (so we don't duplicate a realtime "20:08"
-     * with a scheduled "20:08").
+     * Formats an absolute Unix-epoch arrival time as a display string.
+     * Under 60 minutes from [now]: "сега" / "след N мин".
+     * 60+ minutes: "HH:MM" in local Sofia time.
      */
-    private suspend fun buildScheduledArrivalTimes(
+    private fun formatEpochForDisplay(epoch: Long, now: Long): String {
+        val minutesAway = ((epoch - now) / 60).toInt()
+        return when {
+            minutesAway <= 0  -> "сега"
+            minutesAway < 60  -> "след $minutesAway мин"
+            else -> java.time.Instant.ofEpochSecond(epoch)
+                .atZone(java.time.ZoneId.of("Europe/Sofia"))
+                .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+        }
+    }
+
+    /**
+     * Returns the next upcoming static-schedule epoch times for the given
+     * route_ids at the given stop_id, matching the given headsign and
+     * strictly after [afterEpoch] (or after "now" if afterEpoch is null).
+     * Used to "top up" realtime arrivals when the feed returns fewer than 3.
+     */
+    private suspend fun buildScheduledArrivalEpochs(
         stopId: String,
         routeIds: List<String>,
         headsign: String,
-        afterTimes: List<String>,
+        afterEpoch: Long?,
         limit: Int
-    ): List<String> {
+    ): List<Long> {
         if (limit <= 0) return emptyList()
         val today = bg.sofia.transit.util.DateHelper.todayString()
         val activeServices = calendarDateDao.getActiveServicesForDate(today)
         if (activeServices.isEmpty()) return emptyList()
 
-        // Anchor at current local time — realtime arrivals (whether shown
-        // as "след 5 мин" or "20:30") are already in the future, and Room
-        // returns schedule rows sorted by time, so we just need the next
-        // few unique entries past now.
-        val nowStr = java.time.LocalTime.now(java.time.ZoneId.of("Europe/Sofia"))
+        val zone = java.time.ZoneId.of("Europe/Sofia")
+        // Lower bound: just after the latest realtime arrival, or just after
+        // the current moment if no realtime arrivals are present yet.
+        val cutoffEpoch = (afterEpoch ?: java.time.Instant.now().epochSecond) + 1
+        // Translate cutoffEpoch into local "HH:MM:SS" for the Room query,
+        // which compares against text columns.
+        val cutoffLocal = java.time.Instant.ofEpochSecond(cutoffEpoch)
+            .atZone(zone)
+            .toLocalTime()
             .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
 
         val rows = stopTimeDao.getScheduledArrivalsAtStop(
             stopId       = stopId,
             serviceIds   = activeServices,
-            currentTime  = nowStr
+            currentTime  = cutoffLocal
         ).filter { it.routeId in routeIds }
 
-        // Strip "сега" / "след N мин" prefixes; only "HH:MM" displays can
-        // collide with scheduled rows. Set of existing display times in
-        // HH:MM form so we can dedupe.
-        val existingHM = afterTimes
-            .filter { it.matches(Regex("""\d\d:\d\d""")) }
-            .toSet()
+        // Today's calendar date as a LocalDate, used to build epoch values
+        // from the static "HH:MM:SS" strings.
+        val todayDate = java.time.LocalDate.now(zone)
 
         return rows
             .asSequence()
@@ -402,11 +432,20 @@ class GtfsRepository @Inject constructor(
                     else -> candidate.equals(headsign, ignoreCase = true)
                 }
             }
-            .map { sched ->
-                val hms = sched.arrivalTime
-                if (hms.length >= 5) hms.substring(0, 5) else hms
+            .mapNotNull { sched ->
+                // Parse "HH:MM:SS" → epoch using today's local date.
+                val parts = sched.arrivalTime.split(":")
+                if (parts.size < 2) return@mapNotNull null
+                val h = parts[0].toIntOrNull() ?: return@mapNotNull null
+                val m = parts[1].toIntOrNull() ?: return@mapNotNull null
+                val s = parts.getOrNull(2)?.toIntOrNull() ?: 0
+                // CGM uses 24h+ for after-midnight services; normalise.
+                val day = todayDate.plusDays((h / 24).toLong())
+                val hour = h % 24
+                val localTime = java.time.LocalTime.of(hour, m, s)
+                day.atTime(localTime).atZone(zone).toEpochSecond()
             }
-            .filter { it !in existingHM }
+            .filter { it > (afterEpoch ?: 0L) }
             .distinct()
             .take(limit)
             .toList()
@@ -437,20 +476,31 @@ class GtfsRepository @Inject constructor(
             currentTime  = nowStr
         ).filter { it.routeId in routeIds }
 
+        val zone = java.time.ZoneId.of("Europe/Sofia")
+        val todayDate = java.time.LocalDate.now(zone)
+
         // Group by (routeId, headsign) and take first 3 times
         return rows
             .groupBy { it.routeId to (it.headsign ?: "—") }
             .map { (key, list) ->
                 val (routeId, headsign) = key
+                val epochs = list.take(3).mapNotNull { sched ->
+                    val parts = sched.arrivalTime.split(":")
+                    if (parts.size < 2) return@mapNotNull null
+                    val h = parts[0].toIntOrNull() ?: return@mapNotNull null
+                    val m = parts[1].toIntOrNull() ?: return@mapNotNull null
+                    val s = parts.getOrNull(2)?.toIntOrNull() ?: 0
+                    val day = todayDate.plusDays((h / 24).toLong())
+                    val hour = h % 24
+                    val localTime = java.time.LocalTime.of(hour, m, s)
+                    day.atTime(localTime).atZone(zone).toEpochSecond()
+                }
                 ArrivalInfo(
                     routeId        = routeId,
                     routeShortName = routeShortNames[routeId] ?: routeId,
                     headsign       = headsign,
-                    arrivals       = list.take(3).map { sched ->
-                        val hms = sched.arrivalTime
-                        // Trim "HH:MM:SS" → "HH:MM"
-                        if (hms.length >= 5) hms.substring(0, 5) else hms
-                    }
+                    arrivals       = emptyList(), // formatted later
+                    arrivalEpochs  = epochs
                 )
             }
             .sortedBy { it.routeShortName }

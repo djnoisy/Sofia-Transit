@@ -18,7 +18,14 @@ data class ArrivalInfo(
     val routeId: String,
     val routeShortName: String,
     val headsign: String,
-    val arrivals: List<String>   // HH:MM formatted times (up to 3)
+    /** Display strings, e.g. "след 5 мин", "сега", "20:30". */
+    val arrivals: List<String>,
+    /**
+     * Absolute Unix-epoch seconds for each [arrivals] entry, so callers can
+     * merge realtime + static arrivals and re-format consistently. Empty
+     * for purely scheduled arrivals where the epoch isn't computed.
+     */
+    val arrivalEpochs: List<Long> = emptyList()
 )
 
 data class VehicleInfo(
@@ -75,17 +82,6 @@ class RealtimeRepository @Inject constructor() {
     }
 
     /**
-     * Formats an arrival "minutes from now" as a short relative phrase.
-     * The TalkBack-friendly form is "след N минути"; visually it's
-     * "след N мин" so it doesn't take too much horizontal space.
-     * 0 minutes → "сега" (special-cased — vehicle has just arrived).
-     */
-    private fun formatRelativeMinutes(min: Int): String = when {
-        min <= 0 -> "сега"
-        else     -> "след $min мин"
-    }
-
-    /**
      * Fetches GTFS-RT TripUpdates and returns real-time arrival times
      * for the given stop, grouped by route short name and headsign.
      */
@@ -114,7 +110,7 @@ class RealtimeRepository @Inject constructor() {
             // trips of the same line may report slightly different spellings
             // (or one may report it and the other not), splitting one logical
             // direction into multiple "arrivals" entries.
-            data class RawArrival(val routeId: String, val headsign: String, val time: String, val sortKey: Int)
+            data class RawArrival(val routeId: String, val headsign: String, val epoch: Long)
             val rawList = mutableListOf<RawArrival>()
 
             var tripUpdateCount = 0
@@ -159,20 +155,7 @@ class RealtimeRepository @Inject constructor() {
                                 ?.takeIf { it.isNotBlank() && it != "—" }
                                 ?: ""
                     }
-                    // Format as relative minutes when arrival is within an
-                    // hour; otherwise show absolute HH:MM. The user feedback
-                    // is that "след N мин" is much easier to act on for the
-                    // near-term cases, while distant times read more naturally
-                    // as wall-clock.
-                    val minutesAway = ((arrTime - now) / 60).toInt()
-                    val timeStr = if (minutesAway < 60) {
-                        formatRelativeMinutes(minutesAway)
-                    } else {
-                        Instant.ofEpochSecond(arrTime)
-                            .atZone(SOFIA_ZONE)
-                            .format(formatter)
-                    }
-                    rawList += RawArrival(routeId, headsign, timeStr, minutesAway)
+                    rawList += RawArrival(routeId, headsign, arrTime)
                 }
             }
 
@@ -186,10 +169,8 @@ class RealtimeRepository @Inject constructor() {
                     list.map { normaliseHeadsign(it.headsign) }.distinct()
                 }
 
-            // Group times alongside their sort keys (minutes-from-now), so
-            // we can order chronologically regardless of display format.
-            data class TimedEntry(val display: String, val sortKey: Int)
-            val arrivals = mutableMapOf<String, MutableList<TimedEntry>>()
+            // Group arrivals by routeId+headsign, sorted by epoch.
+            val arrivals = mutableMapOf<String, MutableList<Long>>()
             for (r in rawList) {
                 val normHs = normaliseHeadsign(r.headsign)
                 val resolved = when {
@@ -201,7 +182,7 @@ class RealtimeRepository @Inject constructor() {
                     else -> "—"
                 }
                 val key = "${r.routeId}|$resolved"
-                arrivals.getOrPut(key) { mutableListOf() }.add(TimedEntry(r.time, r.sortKey))
+                arrivals.getOrPut(key) { mutableListOf() }.add(r.epoch)
             }
 
             FileLogger.i(TAG, "  ↳ tripUpdates=$tripUpdateCount, " +
@@ -210,18 +191,15 @@ class RealtimeRepository @Inject constructor() {
                        "filteredOutForUnknownRoute=$filteredOutForUnknownRoute, " +
                        "groupedArrivals=${arrivals.size}")
 
-            arrivals.map { (key, entries) ->
+            arrivals.map { (key, epochs) ->
                 val (routeId, headsign) = key.split("|", limit = 2)
-                val sortedTimes = entries
-                    .sortedBy { it.sortKey }
-                    .map { it.display }
-                    .distinct()
-                    .take(3)
+                val sortedEpochs = epochs.sorted().distinct().take(3)
                 ArrivalInfo(
-                    routeId       = routeId,
+                    routeId        = routeId,
                     routeShortName = routeShortNames[routeId] ?: routeId,
-                    headsign      = headsign,
-                    arrivals      = sortedTimes
+                    headsign       = headsign,
+                    arrivals       = emptyList(), // formatted later in GtfsRepository
+                    arrivalEpochs  = sortedEpochs
                 )
             }.sortedWith(compareBy({ it.routeShortName }, { it.headsign }))
 
