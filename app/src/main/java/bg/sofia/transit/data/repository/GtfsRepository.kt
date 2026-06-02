@@ -277,19 +277,30 @@ class GtfsRepository @Inject constructor(
             }
         }
 
-        // Headsign fallback: built per route_id from the static data. Used
-        // when the realtime feed returns an empty trip_headsign AND we
-        // can't resolve a per-trip headsign either.
+        // Headsign fallback: built per route_id from the static data, but
+        // ONLY from trips that actually pass through THIS stop. A stop is
+        // served by a single direction of each line (the opposite direction
+        // stops across the street), so this gives the correct headsign(s)
+        // here — e.g. trolley 2 at stop TB1902 is heading to "Бъкстон",
+        // not the full list of every direction the line ever runs.
+        // Used when the realtime feed returns an empty trip_headsign.
         val routeHeadsignFallback = mutableMapOf<String, String>()
         for (rid in routeShortNamesMutable.keys) {
-            val tripsForRoute = tripDao.getByRoute(rid)
-            val headsigns = tripsForRoute
-                .mapNotNull { it.tripHeadsign?.takeIf { h -> h.isNotBlank() } }
-                .distinct()
-            if (headsigns.isNotEmpty()) {
-                routeHeadsignFallback[rid] = headsigns.sorted().joinToString(" / ")
+            val headsignCounts = tripDao.getHeadsignCountsForRouteAtStop(rid, stopId)
+            if (headsignCounts.isNotEmpty()) {
+                // Keep only the genuinely common directions for this stop.
+                // Rare variants (depot runs, partial routes) have very few
+                // trips; we drop those below a fraction of the top one to
+                // avoid noise, but always keep at least the top direction.
+                val top = headsignCounts.first().tripCount
+                val mainHeadsigns = headsignCounts
+                    .filter { it.tripCount >= top / 4 }   // within 25% of the busiest
+                    .map { it.headsign }
+                    .distinct()
+                routeHeadsignFallback[rid] = mainHeadsigns.joinToString(" / ")
             } else {
-                // Route has no trips — fall back to route_long_name.
+                // Route has no trips through this stop at all (e.g. M3 with
+                // zero static trips) — fall back to route_long_name's middle.
                 val r = routeDao.getById(rid) ?: continue
                 val parts = r.routeLongName.split(" - ").map { it.trim() }.filter { it.isNotBlank() }
                 val mid = when (parts.size) {

@@ -162,6 +162,13 @@ class RealtimeRepository @Inject constructor() {
                     futureArrivalCount++
 
                     val rawHeadsign = tu.trip.tripHeadsign
+                    // Diagnostic: does CGM populate direction_id / headsign
+                    // in the realtime feed (unlike static trips.txt where
+                    // direction_id is always blank)?
+                    val rtDir = if (tu.trip.hasDirectionId()) tu.trip.directionId.toString() else "none"
+                    FileLogger.i(TAG, "    rt trip ${tu.trip.tripId} route=$routeId " +
+                        "headsign='${rawHeadsign}' direction_id=$rtDir")
+
                     val headsign = when {
                         rawHeadsign.isNotEmpty() -> rawHeadsign
                         else -> routeHeadsigns[tu.trip.tripId]

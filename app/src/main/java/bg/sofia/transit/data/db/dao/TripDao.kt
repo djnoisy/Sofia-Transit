@@ -36,6 +36,28 @@ interface TripDao {
     """)
     suspend fun getHeadsignCountsForRoute(routeId: String): List<HeadsignCount>
 
+    /**
+     * Like [getHeadsignCountsForRoute] but only counts trips that actually
+     * pass through the given stop. This is how we determine the correct
+     * direction(s) for a route AT A SPECIFIC STOP: a stop is served by only
+     * one direction of a line (the opposite direction uses the stop across
+     * the street), so this returns just the headsign(s) relevant here.
+     * Used as a headsign fallback when the realtime feed omits one.
+     */
+    @Query("""
+        SELECT t.tripHeadsign AS headsign, COUNT(*) AS tripCount
+        FROM trips t
+        WHERE t.routeId = :routeId
+          AND t.tripHeadsign IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM stop_times st
+              WHERE st.tripId = t.tripId AND st.stopId = :stopId
+          )
+        GROUP BY t.tripHeadsign
+        ORDER BY tripCount DESC
+    """)
+    suspend fun getHeadsignCountsForRouteAtStop(routeId: String, stopId: String): List<HeadsignCount>
+
     @Query("SELECT * FROM trips WHERE tripId = :id")
     suspend fun getById(id: String): Trip?
 
