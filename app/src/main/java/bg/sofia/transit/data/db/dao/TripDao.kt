@@ -58,6 +58,23 @@ interface TripDao {
     """)
     suspend fun getHeadsignCountsForRouteAtStop(routeId: String, stopId: String): List<HeadsignCount>
 
+    /**
+     * Finds the most common headsign among static trips whose trip_id starts
+     * with the given prefix (typically "ROUTE-SEGMENT-", e.g. "TB9-TB12-").
+     * The second segment of a CGM trip_id encodes the direction/variant, so
+     * this resolves the correct headsign for a realtime trip whose exact
+     * trip_id isn't in our static data (the service-day suffix differs).
+     * Returns null if no trips match the prefix.
+     */
+    @Query("""
+        SELECT tripHeadsign FROM trips
+        WHERE tripId LIKE :prefix || '%' AND tripHeadsign IS NOT NULL AND tripHeadsign != ''
+        GROUP BY tripHeadsign
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+    """)
+    suspend fun getHeadsignByTripIdPrefix(prefix: String): String?
+
     @Query("SELECT * FROM trips WHERE tripId = :id")
     suspend fun getById(id: String): Trip?
 

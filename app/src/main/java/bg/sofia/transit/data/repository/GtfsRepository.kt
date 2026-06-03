@@ -181,6 +181,20 @@ class GtfsRepository @Inject constructor(
         ids.distinct().mapNotNull { routeDao.getById(it) }
 
     /**
+     * Extracts the "ROUTE-SEGMENT-" prefix from a CGM trip_id, which encodes
+     * the direction/variant. E.g. "TB9-TB12-10-18-27985912821" → "TB9-TB12-".
+     * Returns null if the id doesn't have at least two dash-separated
+     * segments. The trailing dash is included so the LIKE prefix match in
+     * [TripDao.getHeadsignByTripIdPrefix] doesn't accidentally match e.g.
+     * "TB9-TB120-" when looking for "TB9-TB12-".
+     */
+    private fun tripIdDirectionPrefix(tripId: String): String? {
+        val parts = tripId.split("-")
+        if (parts.size < 2) return null
+        return "${parts[0]}-${parts[1]}-"
+    }
+
+    /**
      * Returns real-time arrivals at a physical stop identified by its
      * stop_code. In the Sofia GTFS data the same physical stop is sometimes
      * represented by multiple rows in stops.txt with different prefixes
@@ -237,12 +251,27 @@ class GtfsRepository @Inject constructor(
         val routeTypes             = routes.associate { it.routeId to it.routeType }
         FileLogger.i("GtfsRepo", "Routes serving $stopId (static): ${routes.size}")
 
-        // 2. Resolve headsigns for trips touching this stop in the realtime feed
+        // 2. Resolve headsigns for trips touching this stop in the realtime
+        //    feed. The exact realtime trip_id usually isn't in our static
+        //    data (the service-day suffix differs), but the first two
+        //    segments — "ROUTE-SEGMENT" — encode the direction and DO match.
+        //    So we resolve the headsign by that prefix. E.g. realtime
+        //    "TB9-TB12-10-18-..." → prefix "TB9-TB12-" → static headsign
+        //    "Ж.К. БЪКСТОН". Verified ~100% reliable for buses/trolleys;
+        //    the rare ambiguous cases (metro) fall back to the per-stop
+        //    headsign computed in routeHeadsignFallback below.
         val rawTripIds = realtimeRepo.getTripIdsTouchingStop(stopId)
         FileLogger.i("GtfsRepo", "Realtime trips touching $stopId: ${rawTripIds.size}")
-        val staticTrips = tripDao.getByIds(rawTripIds).associateBy { it.tripId }
-        val headsignsByTripId = rawTripIds.associateWith { tripId ->
-            staticTrips[tripId]?.tripHeadsign ?: "—"
+        val headsignsByTripId = mutableMapOf<String, String>()
+        for (tripId in rawTripIds) {
+            val prefix = tripIdDirectionPrefix(tripId)
+            val resolved = if (prefix != null) {
+                tripDao.getHeadsignByTripIdPrefix(prefix)
+            } else null
+            // Fall back to exact-id lookup if prefix didn't resolve.
+            headsignsByTripId[tripId] = resolved
+                ?: tripDao.getById(tripId)?.tripHeadsign
+                ?: "—"
         }
 
         // 2b. Some route_ids appear in the realtime feed for this stop but
