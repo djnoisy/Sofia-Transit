@@ -560,6 +560,9 @@ class RealtimeRepository @Inject constructor() {
             var withDirection = 0
             var withHeadsign = 0
             var withStopSeq = 0
+            var withBearing = 0
+            var withSpeed = 0
+            var withPosition = 0
             var total = 0
             val activeSamples = mutableListOf<String>()
 
@@ -571,28 +574,39 @@ class RealtimeRepository @Inject constructor() {
                 if (t.hasDirectionId()) withDirection++
                 if (t.tripHeadsign.isNotEmpty()) withHeadsign++
                 if (v.hasCurrentStopSequence()) withStopSeq++
+                if (v.hasPosition() && v.position.hasBearing()) withBearing++
+                if (v.hasPosition() && v.position.hasSpeed()) withSpeed++
+                if (v.hasPosition()) withPosition++
 
-                // "Active" = has a live GPS position. Show a few of these
-                // so we judge fields on vehicles that are really moving,
-                // not parked/depot entries.
                 val isActive = v.hasPosition() &&
                                (v.position.latitude != 0f || v.position.longitude != 0f)
                 if (isActive && activeSamples.size < 6) {
+                    val p = v.position
                     val dir = if (t.hasDirectionId()) t.directionId.toString() else "none"
                     val seq = if (v.hasCurrentStopSequence()) v.currentStopSequence.toString() else "none"
                     val stopId = if (v.hasStopId()) v.stopId else "none"
-                    activeSamples += "route=${t.routeId} headsign='${t.tripHeadsign}' " +
-                                     "dir=$dir stopSeq=$seq stopId=$stopId"
+                    val brng = if (p.hasBearing()) "%.0f".format(p.bearing) else "none"
+                    val spd = if (p.hasSpeed()) "%.1f".format(p.speed) else "none"
+                    val status = if (v.hasCurrentStatus()) v.currentStatus.name else "none"
+                    val label = if (v.vehicle.label.isNotEmpty()) v.vehicle.label else "none"
+                    val vid = if (v.vehicle.id.isNotEmpty()) v.vehicle.id else "none"
+                    activeSamples += "route=${t.routeId} trip=${t.tripId}\n" +
+                        "  lat=${"%.5f".format(p.latitude)} lon=${"%.5f".format(p.longitude)} " +
+                        "bearing=$brng speed=$spd\n" +
+                        "  dir=$dir stopSeq=$seq stopId=$stopId status=$status vehId=$vid label=$label"
                 }
             }
 
             sb.appendLine("=== GPS ДАННИ (vehicle-positions) ===")
             sb.appendLine("Общо превозни средства: $total")
+            sb.appendLine("с позиция (lat/lon): $withPosition")
+            sb.appendLine("с bearing (посока): $withBearing")
+            sb.appendLine("с speed: $withSpeed")
             sb.appendLine("с direction_id: $withDirection")
             sb.appendLine("с headsign: $withHeadsign")
             sb.appendLine("с current_stop_sequence: $withStopSeq")
             sb.appendLine()
-            sb.appendLine("=== Примери от активни коли ===")
+            sb.appendLine("=== Сурови данни от активни коли ===")
             activeSamples.forEach { sb.appendLine(it) }
         } catch (e: Exception) {
             sb.appendLine("ГРЕШКА: ${e.javaClass.simpleName}: ${e.message}")
