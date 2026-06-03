@@ -369,9 +369,19 @@ class GtfsRepository @Inject constructor(
         //     upcoming arrivals, append next static-schedule entries so the
         //     user sees the usual three. The displayed strings for realtime
         //     and any static top-up are deduped at format time — see step 6.
+        //     We match by route_id (not route_short_name): three different
+        //     lines can share the number "5" (trolley TB3, bus A70, tram
+        //     TM25), and matching by short name would mix their schedules.
         val toppedUpRealtime = realtimeArrivals.map { rt ->
             if (rt.arrivalEpochs.size >= 3) return@map rt
-            val routeIds = routes.filter { it.routeShortName == rt.routeShortName }.map { it.routeId }
+            // rt.routeId is the specific route this arrival belongs to.
+            val routeIds = if (routes.any { it.routeId == rt.routeId }) {
+                listOf(rt.routeId)
+            } else {
+                // rt.routeId not in static routes for this stop (e.g. M3 with
+                // no trips) — nothing to top up from static.
+                emptyList()
+            }
             if (routeIds.isEmpty()) return@map rt
 
             val needed = 3 - rt.arrivalEpochs.size
