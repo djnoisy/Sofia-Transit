@@ -542,6 +542,66 @@ class RealtimeRepository @Inject constructor() {
     }
 
     /**
+     * Diagnostic: dumps the full structure of the vehicle-positions feed,
+     * focusing on what fields CGM actually populate (direction_id, headsign,
+     * current_stop_sequence, bearing). Logs the first ~15 vehicles. Used to
+     * decide whether vehicle-positions carries direction info that
+     * trip-updates lacks.
+     */
+    suspend fun diagnoseVehiclePositions(): String = withContext(Dispatchers.IO) {
+        val sb = StringBuilder()
+        try {
+            val feed = fetchVehiclePositions()
+            if (feed == null) {
+                sb.appendLine("vehicle-positions feed е null (грешка при заявка)")
+                return@withContext sb.toString()
+            }
+
+            var withDirection = 0
+            var withHeadsign = 0
+            var withStopSeq = 0
+            var total = 0
+            val activeSamples = mutableListOf<String>()
+
+            for (entity in feed.entityList) {
+                if (!entity.hasVehicle()) continue
+                val v = entity.vehicle
+                val t = v.trip
+                total++
+                if (t.hasDirectionId()) withDirection++
+                if (t.tripHeadsign.isNotEmpty()) withHeadsign++
+                if (v.hasCurrentStopSequence()) withStopSeq++
+
+                // "Active" = has a live GPS position. Show a few of these
+                // so we judge fields on vehicles that are really moving,
+                // not parked/depot entries.
+                val isActive = v.hasPosition() &&
+                               (v.position.latitude != 0f || v.position.longitude != 0f)
+                if (isActive && activeSamples.size < 6) {
+                    val dir = if (t.hasDirectionId()) t.directionId.toString() else "none"
+                    val seq = if (v.hasCurrentStopSequence()) v.currentStopSequence.toString() else "none"
+                    val stopId = if (v.hasStopId()) v.stopId else "none"
+                    activeSamples += "route=${t.routeId} headsign='${t.tripHeadsign}' " +
+                                     "dir=$dir stopSeq=$seq stopId=$stopId"
+                }
+            }
+
+            sb.appendLine("=== GPS ДАННИ (vehicle-positions) ===")
+            sb.appendLine("Общо превозни средства: $total")
+            sb.appendLine("с direction_id: $withDirection")
+            sb.appendLine("с headsign: $withHeadsign")
+            sb.appendLine("с current_stop_sequence: $withStopSeq")
+            sb.appendLine()
+            sb.appendLine("=== Примери от активни коли ===")
+            activeSamples.forEach { sb.appendLine(it) }
+        } catch (e: Exception) {
+            sb.appendLine("ГРЕШКА: ${e.javaClass.simpleName}: ${e.message}")
+        }
+        FileLogger.i(TAG, sb.toString())
+        sb.toString()
+    }
+
+    /**
      * Inspects the realtime feed for arrivals at a specific stop_id.
      * Returns up to 10 raw arrival entries with route + headsign + ETA.
      * Used by diagnostics to verify a specific stop is reachable.

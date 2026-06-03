@@ -73,6 +73,14 @@
         android:layout_marginTop="8dp"
         style="@style/Widget.Material3.Button.OutlinedButton"/>
 
+    <Button android:id="@+id/btnDiagnoseVehicles"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Диагностика на GPS данни"
+        android:contentDescription="Провери какви данни съдържа vehicle-positions потокът"
+        android:layout_marginTop="8dp"
+        style="@style/Widget.Material3.Button.OutlinedButton"/>
+
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"

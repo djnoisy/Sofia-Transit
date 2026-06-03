@@ -25,6 +25,14 @@ class DiagnosticsViewModel @Inject constructor(
     private val _state = MutableStateFlow(DiagnosticsState())
     val state: StateFlow<DiagnosticsState> = _state
 
+    fun diagnoseVehicles() {
+        _state.value = DiagnosticsState(running = true, report = "Извличане на GPS данни…\n")
+        viewModelScope.launch {
+            val report = realtimeRepo.diagnoseVehiclePositions()
+            _state.value = DiagnosticsState(running = false, report = report)
+        }
+    }
+
     fun runDiagnostics() {
         _state.value = DiagnosticsState(running = true, report = "Стартиране на проверка…\n")
         viewModelScope.launch {

@@ -73,6 +73,8 @@ class DiagnosticsFragment : Fragment() {
 
         binding.btnUpdateData.setOnClickListener { triggerDataUpdate() }
 
+        binding.btnDiagnoseVehicles.setOnClickListener { vm.diagnoseVehicles() }
+
         viewLifecycleOwner.lifecycleScope.launch {
             vm.state.collectLatest { state ->
                 binding.pbProgress.visibility =
