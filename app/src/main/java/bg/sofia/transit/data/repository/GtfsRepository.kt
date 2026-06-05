@@ -226,11 +226,16 @@ class GtfsRepository @Inject constructor(
 
         // Deduplicate by (routeId, headsign). If the same line+direction
         // somehow appears in two underlying stop_ids, keep the entry with
-        // more arrival times listed.
+        // more arrival times listed. Then sort by earliest arrival so the
+        // board is ordered by time, not line number.
         return all
             .groupBy { it.routeId to it.headsign }
             .map { (_, list) -> list.maxByOrNull { it.arrivals.size }!! }
-            .sortedBy { it.routeShortName }
+            .sortedWith(
+                compareBy<ArrivalInfo> { it.arrivalEpochs.minOrNull() ?: Long.MAX_VALUE }
+                    .thenBy { it.routeShortName.toIntOrNull() ?: Int.MAX_VALUE }
+                    .thenBy { it.routeShortName }
+            )
     }
 
     /**
@@ -380,12 +385,32 @@ class GtfsRepository @Inject constructor(
 
         // 6. Format all epochs to display strings, applying the 60-min
         //    threshold uniformly (under an hour → "след N мин", else HH:MM).
+        //    Also attach the vehicle type for TalkBack, and finally sort the
+        //    whole board by earliest arrival (not by line number) so the
+        //    next vehicle to arrive is at the top.
         val now = java.time.Instant.now().epochSecond
         val all = combined.map { info ->
             val sortedEpochs = info.arrivalEpochs.sorted().take(3)
             val displayTimes = sortedEpochs.map { formatEpochForDisplay(it, now) }
-            info.copy(arrivals = displayTimes, arrivalEpochs = sortedEpochs)
-        }
+            val vType = resolveVehicleType(
+                routeType = routeTypes[info.routeId] ?: -1,
+                shortName = info.routeShortName
+            )
+            info.copy(
+                arrivals      = displayTimes,
+                arrivalEpochs = sortedEpochs,
+                vehicleType   = vType
+            )
+        }.sortedWith(
+            // Primary: earliest arrival (full epoch precision, so seconds
+            // still decide when CGM provides them). Secondary, only when two
+            // arrivals share the exact same epoch: line number, so the order
+            // is stable and predictable rather than arbitrary. Numeric lines
+            // sort numerically; lettered ones (E186, 3TM) fall after, by text.
+            compareBy<ArrivalInfo> { it.arrivalEpochs.minOrNull() ?: Long.MAX_VALUE }
+                .thenBy { it.routeShortName.toIntOrNull() ?: Int.MAX_VALUE }
+                .thenBy { it.routeShortName }
+        )
 
         FileLogger.i("GtfsRepo", "getArrivalsForStop returning ${all.size} ArrivalInfo records total")
         return all
@@ -404,6 +429,40 @@ class GtfsRepository @Inject constructor(
             else -> java.time.Instant.ofEpochSecond(epoch)
                 .atZone(java.time.ZoneId.of("Europe/Sofia"))
                 .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+        }
+    }
+
+    /**
+     * Determines the human-readable vehicle type for a route, for TalkBack.
+     * CGM's route_type lumps trolleybuses, electric buses and even some
+     * regular buses together under type 11, so for that category we
+     * disambiguate by line number:
+     *   - plain number 1–11  → тролейбус (the real trolley lines)
+     *   - other plain numbers / "E"+number (60, 73, E186…) → електробус
+     *   - anything else (temporary lines like 3TM, 12T, 1А, Д1) → null,
+     *     because we can't be sure what vehicle will run them, and a wrong
+     *     announcement is worse than none for a blind rider.
+     * Other route_types map cleanly: 0=трамвай, 1=метро, 3=автобус.
+     */
+    private fun resolveVehicleType(routeType: Int, shortName: String): String? {
+        return when (routeType) {
+            0 -> "трамвай"
+            1 -> "метро"
+            3 -> "автобус"
+            11 -> {
+                val asPlainNumber = shortName.toIntOrNull()
+                when {
+                    // Real trolleys: plain numeric 1..11.
+                    asPlainNumber != null && asPlainNumber in 1..11 -> "тролейбус"
+                    // Plain number outside that range → electric bus.
+                    asPlainNumber != null -> "електробус"
+                    // "E"/"е" + number (E186) → electric bus.
+                    shortName.matches(Regex("^[EеЕ]\\d+$")) -> "електробус"
+                    // Temporary / lettered lines (3TM, 12T, 1А, Д1…) — unknown.
+                    else -> null
+                }
+            }
+            else -> null
         }
     }
 

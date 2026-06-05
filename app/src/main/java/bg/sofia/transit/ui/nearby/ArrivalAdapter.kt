@@ -26,7 +26,15 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
     inner class VH(val b: ItemArrivalBinding) : RecyclerView.ViewHolder(b.root) {
         fun bind(info: ArrivalInfo) {
             try {
-                b.tvRoute.text    = "Линия ${info.routeShortName}"
+                // Visible label: prefer the vehicle type when known, e.g.
+                // "Автобус 84" / "Тролейбус 2" / "Електробус 73". Fall back
+                // to plain "Линия N" when the type is uncertain.
+                val label = if (info.vehicleType != null) {
+                    "${info.vehicleType.replaceFirstChar { it.uppercase() }} ${info.routeShortName}"
+                } else {
+                    "Линия ${info.routeShortName}"
+                }
+                b.tvRoute.text    = label
                 b.tvHeadsign.text = info.headsign
                 b.tvTimes.text    = info.arrivals.joinToString("  •  ")
 
@@ -34,8 +42,8 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
                     0    -> "без информация"
                     else -> info.arrivals.take(3).joinToString(", ") { describeTime(it) }
                 }
-                b.root.contentDescription =
-                    "Линия ${info.routeShortName} към ${info.headsign}: $timesDesc"
+                // TalkBack: "Автобус 84 към ЛЕТИЩЕ…: след 3 мин, …"
+                b.root.contentDescription = "$label към ${info.headsign}: $timesDesc"
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind() FAILED for $info", e)
             }

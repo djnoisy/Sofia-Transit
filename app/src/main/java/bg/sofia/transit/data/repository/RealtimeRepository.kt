@@ -25,7 +25,14 @@ data class ArrivalInfo(
      * merge realtime + static arrivals and re-format consistently. Empty
      * for purely scheduled arrivals where the epoch isn't computed.
      */
-    val arrivalEpochs: List<Long> = emptyList()
+    val arrivalEpochs: List<Long> = emptyList(),
+    /**
+     * Human-readable vehicle type for TalkBack ("автобус", "тролейбус",
+     * "трамвай", "метро", "електробус"), or null when the type can't be
+     * determined confidently (e.g. temporary lines) — in which case the
+     * UI omits it rather than risk announcing the wrong kind.
+     */
+    val vehicleType: String? = null
 )
 
 data class VehicleInfo(
