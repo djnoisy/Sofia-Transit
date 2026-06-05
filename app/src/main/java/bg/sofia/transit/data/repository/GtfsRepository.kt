@@ -354,90 +354,37 @@ class GtfsRepository @Inject constructor(
         FileLogger.i("GtfsRepo", "Realtime returned ${realtimeArrivals.size} records " +
             "covering ${realtimeRouteIds.size} routes")
 
-        // 4. Static fallback for routes the realtime feed doesn't cover.
-        //    Most importantly: metro (route_type = 1) is rarely in the feed.
+        // 4. Static fallback — applied ONLY to metro lines (route_type == 1).
+        //    Metro vehicles are essentially never in the realtime feed, so
+        //    without this the metro would show nothing. All other modes
+        //    (bus/trolley/tram) show realtime only; if they're not in the
+        //    feed right now, they simply aren't displayed.
         val routeIdsWithoutRealtime = routes
+            .filter { it.routeType == 1 }          // metro only
             .map { it.routeId }
             .filter { it !in realtimeRouteIds }
 
         val scheduledArrivals = if (routeIdsWithoutRealtime.isNotEmpty()) {
             buildScheduledArrivals(stopId, routeIdsWithoutRealtime, routeShortNames, routeTypes)
         } else emptyList()
-        FileLogger.i("GtfsRepo", "Schedule fallback returned ${scheduledArrivals.size} records")
+        FileLogger.i("GtfsRepo", "Metro schedule fallback returned ${scheduledArrivals.size} records")
 
-        // 4b. Top-up: for routes that DO have realtime but fewer than 3
-        //     upcoming arrivals, append next static-schedule entries so the
-        //     user sees the usual three. The displayed strings for realtime
-        //     and any static top-up are deduped at format time — see step 6.
-        //     We match by route_id (not route_short_name): three different
-        //     lines can share the number "5" (trolley TB3, bus A70, tram
-        //     TM25), and matching by short name would mix their schedules.
-        val toppedUpRealtime = realtimeArrivals.map { rt ->
-            if (rt.arrivalEpochs.size >= 3) return@map rt
-            // rt.routeId is the specific route this arrival belongs to.
-            val routeIds = if (routes.any { it.routeId == rt.routeId }) {
-                listOf(rt.routeId)
-            } else {
-                // rt.routeId not in static routes for this stop (e.g. M3 with
-                // no trips) — nothing to top up from static.
-                emptyList()
-            }
-            if (routeIds.isEmpty()) return@map rt
-
-            val needed = 3 - rt.arrivalEpochs.size
-            val lastRealtimeEpoch = rt.arrivalEpochs.maxOrNull()
-            val extraEpochs = buildScheduledArrivalEpochs(
-                stopId         = stopId,
-                routeIds       = routeIds,
-                headsign       = rt.headsign,
-                afterEpoch     = lastRealtimeEpoch,
-                limit          = needed + 2 // overshoot for safety; dedup may drop some
-            )
-            FileLogger.i("GtfsRepo", "  ↳ topup for line ${rt.routeShortName} → ${rt.headsign}: " +
-                "realtime epochs=${rt.arrivalEpochs.size}, " +
-                "needed=$needed, got static=${extraEpochs.size}")
-            if (extraEpochs.isEmpty()) rt
-            else rt.copy(arrivalEpochs = rt.arrivalEpochs + extraEpochs)
-        }
-
-        // 5. Combine: realtime first (topped up), then schedule-only records.
-        val combined = toppedUpRealtime + scheduledArrivals
+        // 5. Combine realtime arrivals with schedule-only records (the
+        //    latter only for routes with NO realtime at all, e.g. metro).
+        //    NOTE: static "top-up" of realtime arrivals is intentionally
+        //    disabled for now — the virtual boards show realtime times only,
+        //    so it's clear during testing which data is live. Routes with no
+        //    realtime still fall back to schedule (otherwise metro would
+        //    show nothing).
+        val combined = realtimeArrivals + scheduledArrivals
 
         // 6. Format all epochs to display strings, applying the 60-min
-        //    threshold uniformly. We also track which entries originate
-        //    from realtime (first N) vs static top-up (remaining), so we
-        //    can dedupe a static entry whose formatted string matches a
-        //    realtime one — that's the same physical vehicle, slightly
-        //    earlier in realtime than its scheduled time.
+        //    threshold uniformly (under an hour → "след N мин", else HH:MM).
         val now = java.time.Instant.now().epochSecond
         val all = combined.map { info ->
-            // Reconstruct which epochs were realtime — they were the
-            // original arrivalEpochs from realtimeArrivals before top-up
-            // appended any static ones. We can identify this only by
-            // comparing against the realtime list.
-            val realtimeEpochs = realtimeArrivals
-                .firstOrNull { it.routeId == info.routeId && it.headsign == info.headsign }
-                ?.arrivalEpochs ?: emptyList()
-
-            val realtimeDisplay = realtimeEpochs
-                .sorted()
-                .map { formatEpochForDisplay(it, now) }
-
-            val staticEpochs = info.arrivalEpochs.filter { it !in realtimeEpochs }
-            val realtimeDisplaySet = realtimeDisplay.toSet()
-            val staticDisplay = staticEpochs
-                .sorted()
-                .map { formatEpochForDisplay(it, now) }
-                .filter { it !in realtimeDisplaySet }   // drop visual duplicates of realtime
-
-            val displayTimes = (realtimeDisplay + staticDisplay).distinct().take(3)
-            // Keep arrivalEpochs aligned with the displayed entries — only
-            // those whose formatted string ended up in displayTimes.
-            val keptEpochs = info.arrivalEpochs
-                .filter { formatEpochForDisplay(it, now) in displayTimes }
-                .sorted()
-                .take(3)
-            info.copy(arrivals = displayTimes, arrivalEpochs = keptEpochs)
+            val sortedEpochs = info.arrivalEpochs.sorted().take(3)
+            val displayTimes = sortedEpochs.map { formatEpochForDisplay(it, now) }
+            info.copy(arrivals = displayTimes, arrivalEpochs = sortedEpochs)
         }
 
         FileLogger.i("GtfsRepo", "getArrivalsForStop returning ${all.size} ArrivalInfo records total")
