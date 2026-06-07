@@ -2,6 +2,7 @@ package bg.sofia.transit.ui.nearby
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import bg.sofia.transit.data.repository.ArrivalInfo
 import bg.sofia.transit.databinding.ItemArrivalBinding
@@ -13,14 +14,48 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
 
     private val items = mutableListOf<ArrivalInfo>()
 
+    /**
+     * Updates the list using DiffUtil so RecyclerView receives precise
+     * move/change/insert/remove operations instead of "everything was
+     * replaced". This matters for accessibility: on the periodic refresh,
+     * a vehicle that just moved up the time-sorted list is reported to
+     * TalkBack as the SAME item moved (notifyItemMoved), so TalkBack keeps
+     * focus on it and the scroll position is preserved — rather than the
+     * whole list being torn down and the focus jumping back to the top.
+     */
     fun submitList(newItems: List<ArrivalInfo>) {
         FileLogger.i(TAG, "submitList called with ${newItems.size} items (current=${items.size})")
-        val oldSize = items.size
+        val diff = DiffUtil.calculateDiff(Callback(items.toList(), newItems))
         items.clear()
-        if (oldSize > 0) notifyItemRangeRemoved(0, oldSize)
         items.addAll(newItems)
-        if (newItems.isNotEmpty()) notifyItemRangeInserted(0, newItems.size)
+        diff.dispatchUpdatesTo(this)
         FileLogger.i(TAG, "submitList done. items.size=${items.size}, getItemCount()=$itemCount")
+    }
+
+    /**
+     * DiffUtil callback. Identity is routeId + headsign — this is stable as
+     * a vehicle's ETA counts down, so the same line+direction is recognised
+     * across refreshes even when it changes position in the sorted list.
+     * Contents compare the displayed times, type and drop-off flag.
+     */
+    private class Callback(
+        private val old: List<ArrivalInfo>,
+        private val new: List<ArrivalInfo>
+    ) : DiffUtil.Callback() {
+        override fun getOldListSize() = old.size
+        override fun getNewListSize() = new.size
+
+        override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean {
+            val a = old[oldPos]; val b = new[newPos]
+            return a.routeId == b.routeId && a.headsign == b.headsign
+        }
+
+        override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean {
+            val a = old[oldPos]; val b = new[newPos]
+            return a.arrivals == b.arrivals &&
+                   a.vehicleType == b.vehicleType &&
+                   a.dropOffOnly == b.dropOffOnly
+        }
     }
 
     inner class VH(val b: ItemArrivalBinding) : RecyclerView.ViewHolder(b.root) {
@@ -68,12 +103,10 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        FileLogger.i(TAG, "onCreateViewHolder called, parent=${parent.javaClass.simpleName}")
         return try {
             val binding = ItemArrivalBinding.inflate(
                 LayoutInflater.from(parent.context), parent, false
             )
-            FileLogger.i(TAG, "  ↳ inflated successfully, root=${binding.root.javaClass.simpleName}")
             VH(binding)
         } catch (e: Exception) {
             FileLogger.e(TAG, "onCreateViewHolder FAILED", e)
@@ -82,7 +115,6 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
     }
 
     override fun onBindViewHolder(holder: VH, pos: Int) {
-        FileLogger.i(TAG, "onBindViewHolder pos=$pos, items.size=${items.size}")
         try {
             holder.bind(items[pos])
         } catch (e: Exception) {
@@ -90,8 +122,5 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
         }
     }
 
-    override fun getItemCount(): Int {
-        // Don't log here — called many times by RecyclerView internals
-        return items.size
-    }
+    override fun getItemCount(): Int = items.size
 }
