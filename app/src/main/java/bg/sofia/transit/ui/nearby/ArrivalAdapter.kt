@@ -35,15 +35,21 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
                     "Линия ${info.routeShortName}"
                 }
                 b.tvRoute.text    = label
-                b.tvHeadsign.text = info.headsign
+                val headsignText = if (info.dropOffOnly) "само слизане" else info.headsign
+                b.tvHeadsign.text = headsignText
                 b.tvTimes.text    = info.arrivals.joinToString("  •  ")
 
                 val timesDesc = when (info.arrivals.size) {
                     0    -> "без информация"
                     else -> info.arrivals.take(3).joinToString(", ") { describeTime(it) }
                 }
-                // TalkBack: "Автобус 84 към ЛЕТИЩЕ…: след 3 мин, …"
-                b.root.contentDescription = "$label към ${info.headsign}: $timesDesc"
+                // TalkBack: "Автобус 84, само за слизане: …" or
+                // "Автобус 84 към ЛЕТИЩЕ…: след 3 мин, …"
+                b.root.contentDescription = if (info.dropOffOnly) {
+                    "$label, само за слизане: $timesDesc"
+                } else {
+                    "$label към ${info.headsign}: $timesDesc"
+                }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind() FAILED for $info", e)
             }

@@ -32,7 +32,13 @@ data class ArrivalInfo(
      * determined confidently (e.g. temporary lines) — in which case the
      * UI omits it rather than risk announcing the wrong kind.
      */
-    val vehicleType: String? = null
+    val vehicleType: String? = null,
+    /**
+     * True when this stop is the final stop for this line+direction — i.e.
+     * the vehicle terminates here and passengers can only get off, not on.
+     * The UI shows "само слизане" instead of a destination for these.
+     */
+    val dropOffOnly: Boolean = false
 )
 
 data class VehicleInfo(

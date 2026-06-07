@@ -114,9 +114,37 @@ interface StopTimeDao {
     @Query("SELECT COUNT(*) FROM stop_times")
     suspend fun count(): Int
 
+    /**
+     * For a given stop, returns one row per trip passing through it, telling
+     * whether that stop is the LAST stop of the trip (isTerminal = 1) or not.
+     * We strip the trip_id down to its "ROUTE-SEGMENT" prefix (the part that
+     * encodes direction) and aggregate in the repository, so we can decide
+     * per direction whether this stop is a terminal (drop-off only) or a
+     * normal departure/through stop.
+     *
+     * isTerminal is 1 when the stop's sequence equals the max sequence of
+     * that trip — i.e. it's the final stop on that run.
+     */
+    @Query("""
+        SELECT st.tripId AS tripId,
+               CASE WHEN st.stopSequence = (
+                   SELECT MAX(st2.stopSequence) FROM stop_times st2
+                   WHERE st2.tripId = st.tripId
+               ) THEN 1 ELSE 0 END AS isTerminal
+        FROM stop_times st
+        WHERE st.stopId = :stopId
+    """)
+    suspend fun getTerminalFlagsAtStop(stopId: String): List<TripTerminalFlag>
+
     @Query("DELETE FROM stop_times")
     suspend fun deleteAll()
 }
+
+/** Result row for getTerminalFlagsAtStop. */
+data class TripTerminalFlag(
+    val tripId: String,
+    val isTerminal: Int
+)
 
 /** Result row for getScheduledArrivalsAtStop. */
 data class ScheduledArrival(

@@ -195,6 +195,16 @@ class GtfsRepository @Inject constructor(
     }
 
     /**
+     * Normalises a headsign the same way RealtimeRepository does, so the
+     * (routeId, headsign) keys used for terminal-direction lookup match the
+     * headsigns carried on ArrivalInfo. Uppercased, single-spaced, trimmed.
+     */
+    private fun normaliseHs(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        return raw.uppercase().replace(Regex("\\s+"), " ").trim()
+    }
+
+    /**
      * Returns real-time arrivals at a physical stop identified by its
      * stop_code. In the Sofia GTFS data the same physical stop is sometimes
      * represented by multiple rows in stops.txt with different prefixes
@@ -278,6 +288,44 @@ class GtfsRepository @Inject constructor(
                 ?: tripDao.getById(tripId)?.tripHeadsign
                 ?: "—"
         }
+
+        // 2a. Determine which DIRECTIONS (by resolved headsign) terminate at
+        //     this stop. One query returns, per static trip through the stop,
+        //     whether the stop is that trip's last stop. We map each trip to
+        //     its resolved headsign (via its ROUTE-SEGMENT prefix) and then,
+        //     per (routeId, headsign), check whether ALL its trips end here.
+        //     This lets us, per arrival:
+        //       - drop the terminal phase of a loop when another direction of
+        //         the same line departs here (avoids showing the line twice)
+        //       - mark a purely terminal stop as "само слизане".
+        val terminalFlags = stopTimeDao.getTerminalFlagsAtStop(stopId)
+        // key = "routeId|headsign" → [terminalTripCount, totalTripCount]
+        val dirTerminalCounts = mutableMapOf<String, IntArray>()
+        val prefixHeadsignCache = mutableMapOf<String, String?>()
+        for (tf in terminalFlags) {
+            val prefix = tripIdDirectionPrefix(tf.tripId) ?: continue
+            // Cache headsign-by-prefix so a busy terminal with many trips
+            // sharing a few prefixes doesn't re-query for each one.
+            val hs = prefixHeadsignCache.getOrPut(prefix) {
+                tripDao.getHeadsignByTripIdPrefix(prefix)
+            } ?: continue
+            val rid = tf.tripId.substringBefore("-")
+            val key = "$rid|${normaliseHs(hs)}"
+            val arr = dirTerminalCounts.getOrPut(key) { IntArray(2) }
+            if (tf.isTerminal == 1) arr[0]++
+            arr[1]++
+        }
+        // A (route, direction) is terminal-only here when every trip ends here.
+        val terminalOnlyDirections = dirTerminalCounts
+            .filter { (_, c) -> c[1] > 0 && c[0] == c[1] }
+            .keys
+            .toSet()
+        // A (route, direction) departs/through here when at least one trip
+        // does NOT end here.
+        val departingDirections = dirTerminalCounts
+            .filter { (_, c) -> c[0] < c[1] }
+            .keys
+            .toSet()
 
         // 2b. Some route_ids appear in the realtime feed for this stop but
         //     have no static trip data at all (zero rows in trips.txt). A
@@ -381,7 +429,32 @@ class GtfsRepository @Inject constructor(
         //    so it's clear during testing which data is live. Routes with no
         //    realtime still fall back to schedule (otherwise metro would
         //    show nothing).
-        val combined = realtimeArrivals + scheduledArrivals
+        val combinedRaw = realtimeArrivals + scheduledArrivals
+
+        // 5b. Loop / terminal handling. For each (routeId, headsign) decide
+        //     its role at THIS stop using the terminal maps built in 2a:
+        //       - departing (passes through / starts here) → keep, normal.
+        //       - terminal-only (every trip ends here):
+        //           * if the SAME line also has a departing direction here
+        //             (a loop, e.g. trolley 1 at 2483), DROP the terminal
+        //             entry — the departing one already represents the line.
+        //           * if the line has NO departing direction here at all
+        //             (pure terminal, e.g. bus 84 at 2601), KEEP it but mark
+        //             it drop-off-only so the UI shows "само слизане".
+        val linesWithDeparture = combinedRaw
+            .filter { "${it.routeId}|${normaliseHs(it.headsign)}" in departingDirections }
+            .map { it.routeId }
+            .toSet()
+
+        val combined = combinedRaw.mapNotNull { info ->
+            val dirKey = "${info.routeId}|${normaliseHs(info.headsign)}"
+            val isTerminalOnly = dirKey in terminalOnlyDirections
+            when {
+                !isTerminalOnly -> info               // normal departing/through
+                info.routeId in linesWithDeparture -> null  // loop terminal phase → drop
+                else -> info.copy(dropOffOnly = true) // pure terminal → mark
+            }
+        }
 
         // 6. Format all epochs to display strings, applying the 60-min
         //    threshold uniformly (under an hour → "след N мин", else HH:MM).
@@ -399,7 +472,8 @@ class GtfsRepository @Inject constructor(
             info.copy(
                 arrivals      = displayTimes,
                 arrivalEpochs = sortedEpochs,
-                vehicleType   = vType
+                vehicleType   = vType,
+                dropOffOnly   = info.dropOffOnly
             )
         }.sortedWith(
             // Primary: earliest arrival (full epoch precision, so seconds
