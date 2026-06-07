@@ -3,19 +3,26 @@
     android:layout_width="match_parent" android:layout_height="wrap_content"
     android:orientation="horizontal" android:paddingVertical="12dp"
     android:paddingHorizontal="4dp" android:minHeight="56dp"
-    android:gravity="center_vertical">
+    android:gravity="center_vertical"
+    android:focusable="true"
+    android:screenReaderFocusable="true"
+    android:importantForAccessibility="yes">
 
     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-        android:layout_weight="1" android:orientation="vertical">
+        android:layout_weight="1" android:orientation="vertical"
+        android:importantForAccessibility="no">
         <TextView android:id="@+id/tvRoute"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:textSize="16sp" android:textStyle="bold"/>
+            android:textSize="16sp" android:textStyle="bold"
+            android:importantForAccessibility="no"/>
         <TextView android:id="@+id/tvHeadsign"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:textSize="14sp" android:alpha="0.8" android:layout_marginTop="2dp"/>
+            android:textSize="14sp" android:alpha="0.8" android:layout_marginTop="2dp"
+            android:importantForAccessibility="no"/>
     </LinearLayout>
 
     <TextView android:id="@+id/tvTimes"
         android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:textSize="15sp" android:textStyle="bold" android:textColor="#388E3C"/>
+        android:textSize="15sp" android:textStyle="bold" android:textColor="#388E3C"
+        android:importantForAccessibility="no"/>
 </LinearLayout>
