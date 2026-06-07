@@ -679,9 +679,11 @@ class GtfsRepository @Inject constructor(
     suspend fun getAllStopIds(): Set<String> =
         stopDao.getAllStops().map { it.stopId }.toSet()
 
-    /** All route_ids known to the static feed — for cross-check vs realtime. */
+    /** All route_ids known to the static feed — for cross-check vs realtime.
+     *  Uses the unfiltered query so zero-trip routes (e.g. A241/M3) are still
+     *  recognised as "known" and not mistaken for phantom realtime routes. */
     suspend fun getAllRouteIdsSet(): Set<String> =
-        routeDao.getAllRoutesOnce().map { it.routeId }.toSet()
+        routeDao.getAllRouteIds().toSet()
 
     // ── Routes ────────────────────────────────────────────────────────────
     fun getAllRoutes(): Flow<List<Route>> = routeDao.getAllRoutes()

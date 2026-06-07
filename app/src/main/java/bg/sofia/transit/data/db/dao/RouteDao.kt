@@ -9,14 +9,32 @@ interface RouteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(routes: List<Route>)
 
-    @Query("SELECT * FROM routes ORDER BY routeType, routeShortName")
+    // Only routes that actually have trips — empty/placeholder route
+    // definitions (duplicate numbers, seasonal/temporary lines CGM defines
+    // but doesn't operate) have nothing to show in the Lines section, so we
+    // hide them. A route "has trips" when at least one trip references it.
+    @Query("""
+        SELECT * FROM routes
+        WHERE EXISTS (SELECT 1 FROM trips WHERE trips.routeId = routes.routeId)
+        ORDER BY routeType, routeShortName
+    """)
     fun getAllRoutes(): Flow<List<Route>>
 
-    @Query("SELECT * FROM routes ORDER BY routeType, routeShortName")
+    @Query("""
+        SELECT * FROM routes
+        WHERE EXISTS (SELECT 1 FROM trips WHERE trips.routeId = routes.routeId)
+        ORDER BY routeType, routeShortName
+    """)
     suspend fun getAllRoutesOnce(): List<Route>
 
     @Query("SELECT * FROM routes WHERE routeType = :type ORDER BY routeShortName")
     suspend fun getByType(type: Int): List<Route>
+
+    /** All route_ids in the static feed, INCLUDING ones with no trips —
+     *  used for realtime cross-check/diagnostics where we want the complete
+     *  set (e.g. to recognise A241/M3 which has zero static trips). */
+    @Query("SELECT routeId FROM routes")
+    suspend fun getAllRouteIds(): List<String>
 
     @Query("SELECT * FROM routes WHERE routeId = :id")
     suspend fun getById(id: String): Route?
