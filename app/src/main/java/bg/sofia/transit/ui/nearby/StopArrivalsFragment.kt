@@ -49,6 +49,12 @@ class StopArrivalsFragment : Fragment() {
         adapter = ArrivalAdapter()
         binding.rvArrivals.layoutManager = LinearLayoutManager(requireContext())
         binding.rvArrivals.adapter = adapter
+        // Disable the "change" animation: when a row's contents update in
+        // place (ETA ticking down), the default animator cross-fades by
+        // swapping in a second ViewHolder, which disturbs TalkBack focus.
+        // Turning it off keeps the same view, so focus stays put.
+        (binding.rvArrivals.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)
+            ?.supportsChangeAnimations = false
         // Removed contentDescription on the RecyclerView itself — it was making
         // TalkBack treat the whole list as one element and may have been
         // suppressing child rendering.
@@ -76,38 +82,43 @@ class StopArrivalsFragment : Fragment() {
         refreshJob?.cancel()
         refreshJob = viewLifecycleOwner.lifecycleScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(20_000L)
+                // 60 s: frequent enough to stay current, infrequent enough
+                // that TalkBack users aren't constantly interrupted by the
+                // list re-rendering. The "Обнови" button is there for anyone
+                // who wants an immediate refresh.
+                kotlinx.coroutines.delay(60_000L)
                 loadArrivals()
             }
         }
     }
 
     private fun renderState(state: StopArrivalsState) {
-        FileLogger.i(TAG, "renderState: loading=${state.loading} arrivals.size=${state.arrivals.size}")
-
         binding.pbLoading.visibility =
             if (state.loading) View.VISIBLE else View.GONE
         binding.btnRefresh.isEnabled = !state.loading
 
+        // While merely loading (no data yet in this tick), don't touch the
+        // list — calling submitList with the old/empty list on every refresh
+        // cycle disturbs focus. Only update the list when we actually have a
+        // resolved result for this load.
+        if (state.loading) return
+
         adapter.submitList(state.arrivals)
-        FileLogger.i(TAG, "After submitList: itemCount=${adapter.itemCount}")
 
-        // Empty / debug state
-        val showEmpty = !state.loading && state.arrivals.isEmpty()
-        binding.svEmpty.visibility = if (showEmpty) View.VISIBLE else View.GONE
-        if (showEmpty) {
-            binding.tvEmpty.text = "Няма пристигащи превозни средства в момента"
+        val showEmpty = state.arrivals.isEmpty()
+        // Only flip visibility when it actually changes — writing visibility
+        // (even to the same value) can emit an accessibility event that makes
+        // TalkBack re-evaluate the screen and bounce focus to the top.
+        val desiredEmptyVis = if (showEmpty) View.VISIBLE else View.GONE
+        if (binding.svEmpty.visibility != desiredEmptyVis) {
+            binding.svEmpty.visibility = desiredEmptyVis
+            if (showEmpty) {
+                binding.tvEmpty.text = "Няма пристигащи превозни средства в момента"
+            }
         }
-
-        binding.rvArrivals.visibility =
-            if (state.arrivals.isNotEmpty()) View.VISIBLE else View.GONE
-
-        // Diagnostic post-layout check
-        binding.rvArrivals.post {
-            FileLogger.i(TAG, "After post: rv.width=${binding.rvArrivals.width} " +
-                "rv.height=${binding.rvArrivals.height} " +
-                "rv.visibility=${binding.rvArrivals.visibility} " +
-                "rv.childCount=${binding.rvArrivals.childCount}")
+        val desiredListVis = if (state.arrivals.isNotEmpty()) View.VISIBLE else View.GONE
+        if (binding.rvArrivals.visibility != desiredListVis) {
+            binding.rvArrivals.visibility = desiredListVis
         }
     }
 
