@@ -719,6 +719,43 @@ class GtfsRepository @Inject constructor(
         }
     }
 
+    /**
+     * Builds a subtitle for every route from its two most-trafficked
+     * headsigns, e.g. "Ж.К. ОВЧА КУПЕЛ-2 - СТУДЕНТСКИ ГРАД". This is shown
+     * in the Lines list INSTEAD of route_long_name, because CGM's long_name
+     * is unreliable — it sometimes names an intermediate stop (e.g.
+     * "Балканкар АД" for bus 102) or gets edited inconsistently between
+     * feed updates. Deriving the subtitle from trip headsigns keeps the
+     * list consistent with the directions screen, which uses the same
+     * top-2-headsign logic (getDirectionsForRoute).
+     * One SQL query for all routes; top-2 picked in memory.
+     */
+    suspend fun getRouteSubtitles(): Map<String, String> {
+        val rows = tripDao.getHeadsignCountsAllRoutes()
+        val result = mutableMapOf<String, String>()
+        var currentRoute: String? = null
+        var picked = 0
+        val parts = mutableListOf<String>()
+        for (row in rows) {
+            if (row.routeId != currentRoute) {
+                if (currentRoute != null && parts.isNotEmpty()) {
+                    result[currentRoute] = parts.joinToString(" - ")
+                }
+                currentRoute = row.routeId
+                picked = 0
+                parts.clear()
+            }
+            if (picked < 2) {
+                parts += row.headsign
+                picked++
+            }
+        }
+        if (currentRoute != null && parts.isNotEmpty()) {
+            result[currentRoute] = parts.joinToString(" - ")
+        }
+        return result
+    }
+
     suspend fun getTripsForRoute(routeId: String) = tripDao.getByRoute(routeId)
 
     suspend fun getTripById(id: String) = tripDao.getById(id)

@@ -14,6 +14,7 @@ class RoutesAdapter(
     companion object { private const val TAG = "RoutesAdapter" }
 
     private val items = mutableListOf<Route>()
+    private var subtitles: Map<String, String> = emptyMap()
 
     fun submitList(newItems: List<Route>) {
         FileLogger.i(TAG, "submitList ${newItems.size} items (current=${items.size})")
@@ -24,15 +25,28 @@ class RoutesAdapter(
         if (newItems.isNotEmpty()) notifyItemRangeInserted(0, newItems.size)
     }
 
+    /**
+     * Sets the routeId → subtitle map (top-2 headsigns, e.g.
+     * "Ж.К. ОВЧА КУПЕЛ-2 - СТУДЕНТСКИ ГРАД"). Used instead of CGM's
+     * unreliable route_long_name so the list matches the directions screen.
+     */
+    fun setSubtitles(map: Map<String, String>) {
+        if (map == subtitles) return
+        subtitles = map
+        if (items.isNotEmpty()) notifyItemRangeChanged(0, items.size)
+    }
+
     inner class VH(val b: ItemRouteBinding) : RecyclerView.ViewHolder(b.root) {
         fun bind(route: Route) {
             try {
                 val type = route.getTransportType()
+                val subtitle = subtitles[route.routeId]
+                    ?: route.routeLongName.ifBlank { type.labelBg }
                 b.tvRouteNumber.text = route.routeShortName
-                b.tvRouteName.text   = route.routeLongName.ifBlank { type.labelBg }
+                b.tvRouteName.text   = subtitle
                 b.tvRouteType.text   = type.emoji
                 b.root.contentDescription =
-                    "${type.labelBg} линия ${route.routeShortName}: ${route.routeLongName}. " +
+                    "${type.labelBg} линия ${route.routeShortName}: $subtitle. " +
                     "Натиснете за направления."
                 b.root.setOnClickListener { onClick(route) }
             } catch (e: Exception) {

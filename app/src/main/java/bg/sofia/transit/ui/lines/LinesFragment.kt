@@ -55,6 +55,12 @@ class LinesFragment : Fragment() {
             }
         }
 
+        viewLifecycleOwner.lifecycleScope.launch {
+            vm.routeSubtitles.collectLatest { subs ->
+                adapter.setSubtitles(subs)
+            }
+        }
+
         vm.loadRoutes()
     }
 

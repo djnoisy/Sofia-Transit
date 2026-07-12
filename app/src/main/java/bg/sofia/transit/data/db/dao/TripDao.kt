@@ -6,6 +6,8 @@ import bg.sofia.transit.data.db.entity.Trip
 /** Aggregated row used to find the two main directions of a route. */
 data class HeadsignCount(val headsign: String, val tripCount: Int)
 
+data class RouteHeadsignCount(val routeId: String, val headsign: String, val tripCount: Int)
+
 @Dao
 interface TripDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -35,6 +37,21 @@ interface TripDao {
         ORDER BY tripCount DESC
     """)
     suspend fun getHeadsignCountsForRoute(routeId: String): List<HeadsignCount>
+
+    /**
+     * Headsign counts for ALL routes in one query — used to build the
+     * "DIRECTION1 - DIRECTION2" subtitle for every line in the Lines list
+     * without issuing a per-route query. Grouped by (routeId, headsign),
+     * ordered so the repository can pick the top-2 per route by iterating.
+     */
+    @Query("""
+        SELECT routeId, tripHeadsign AS headsign, COUNT(*) AS tripCount
+        FROM trips
+        WHERE tripHeadsign IS NOT NULL AND tripHeadsign != ''
+        GROUP BY routeId, tripHeadsign
+        ORDER BY routeId, tripCount DESC
+    """)
+    suspend fun getHeadsignCountsAllRoutes(): List<RouteHeadsignCount>
 
     /**
      * Like [getHeadsignCountsForRoute] but only counts trips that actually
