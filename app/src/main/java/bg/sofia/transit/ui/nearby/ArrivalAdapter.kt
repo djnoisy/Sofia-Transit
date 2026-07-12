@@ -62,8 +62,9 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
         fun bind(info: ArrivalInfo) {
             try {
                 // Visible label: prefer the vehicle type when known, e.g.
-                // "Автобус 84" / "Тролейбус 2" / "Електробус 73". Fall back
-                // to plain "Линия N" when the type is uncertain.
+                // "Автобус 84" / "Тролей 2" / "Електробус 73". Fall back to
+                // plain "Линия N" when the type is uncertain (temporary
+                // lines with unknown vehicle kind).
                 val label = if (info.vehicleType != null) {
                     "${info.vehicleType.replaceFirstChar { it.uppercase() }} ${info.routeShortName}"
                 } else {

@@ -108,6 +108,21 @@ class GtfsRepository @Inject constructor(
                 // Insert in batches of 5000 to avoid hitting SQLite limits
                 calendar.chunked(5_000).forEach { calendarDateDao.insertAll(it) }
 
+                // Mandatory final step: mark stops that belong to the real
+                // trolleybus network (served by short_name 1..11 in
+                // route_type=11) and invalidate the trolley-route cache.
+                // Must run AFTER stop_times because the marking JOINs
+                // stops → stop_times → trips → routes. Runs on every
+                // import (initial from bundled assets, weekly refresh,
+                // manual "Обнови данните") so the flag is always in sync
+                // with the data.
+                onProgress("Определяне на тролейбусната мрежа…")
+                stopDao.clearTrolleyFlags()
+                stopDao.markTrolleyStops()
+                trolleyRouteIdsCache = null
+                val trolleyStops = stopDao.countTrolleyStops()
+                FileLogger.i(TAG, "Marked $trolleyStops trolley stops")
+
                 onProgress("Готово")
                 FileLogger.i(TAG, "DB loaded ($source): stops=${stops.size} routes=${routes.size} " +
                            "trips=${trips.size} calendar=${calendar.size}")
@@ -462,12 +477,14 @@ class GtfsRepository @Inject constructor(
         //    whole board by earliest arrival (not by line number) so the
         //    next vehicle to arrive is at the top.
         val now = java.time.Instant.now().epochSecond
+        val trolleyRouteIds = getTrolleyRouteIds()
         val all = combined.map { info ->
             val sortedEpochs = info.arrivalEpochs.sorted().take(3)
             val displayTimes = sortedEpochs.map { formatEpochForDisplay(it, now) }
             val vType = resolveVehicleType(
                 routeType = routeTypes[info.routeId] ?: -1,
-                shortName = info.routeShortName
+                routeId   = info.routeId,
+                trolleyRouteIds = trolleyRouteIds
             )
             info.copy(
                 arrivals      = displayTimes,
@@ -507,35 +524,47 @@ class GtfsRepository @Inject constructor(
     }
 
     /**
+     * Cached set of route_ids that are real trolleybuses — computed once
+     * per import (see load step) and lazily re-fetched from the DB on
+     * first use per process. Never null after the first fetch; cleared to
+     * null at the end of every import so the next lookup rebuilds it.
+     */
+    @Volatile private var trolleyRouteIdsCache: Set<String>? = null
+
+    /**
+     * Returns the route_ids of real trolleybus lines. First call after
+     * process start (or after an import) does one SQL query; subsequent
+     * calls come from memory.
+     */
+    private suspend fun getTrolleyRouteIds(): Set<String> {
+        trolleyRouteIdsCache?.let { return it }
+        val ids = routeDao.getTrolleyRouteIds().toSet()
+        trolleyRouteIdsCache = ids
+        return ids
+    }
+
+    /**
      * Determines the human-readable vehicle type for a route, for TalkBack.
-     * CGM's route_type lumps trolleybuses, electric buses and even some
-     * regular buses together under type 11, so for that category we
-     * disambiguate by line number:
-     *   - plain number 1–11  → тролейбус (the real trolley lines)
-     *   - other plain numbers / "E"+number (60, 73, E186…) → електробус
-     *   - anything else (temporary lines like 3TM, 12T, 1А, Д1) → null,
-     *     because we can't be sure what vehicle will run them, and a wrong
-     *     announcement is worse than none for a blind rider.
+     * CGM's route_type=11 lumps real trolleys and electric buses together
+     * with no in-data distinguisher. We tell them apart by the stops the
+     * line uses: a real trolley can only run where there's overhead-wire
+     * infrastructure, which corresponds exactly to the stops of lines
+     * 1..11. Any type=11 line touching a stop outside that set can't be a
+     * trolley, so we call it an electric bus. This is checked in SQL once
+     * per import (StopDao.markTrolleyStops + RouteDao.getTrolleyRouteIds);
+     * here we just look up the cached set.
      * Other route_types map cleanly: 0=трамвай, 1=метро, 3=автобус.
      */
-    private fun resolveVehicleType(routeType: Int, shortName: String): String? {
+    private fun resolveVehicleType(
+        routeType: Int,
+        routeId: String,
+        trolleyRouteIds: Set<String>
+    ): String? {
         return when (routeType) {
             0 -> "трамвай"
             1 -> "метро"
             3 -> "автобус"
-            11 -> {
-                val asPlainNumber = shortName.toIntOrNull()
-                when {
-                    // Real trolleys: plain numeric 1..11.
-                    asPlainNumber != null && asPlainNumber in 1..11 -> "тролейбус"
-                    // Plain number outside that range → electric bus.
-                    asPlainNumber != null -> "електробус"
-                    // "E"/"е" + number (E186) → electric bus.
-                    shortName.matches(Regex("^[EеЕ]\\d+$")) -> "електробус"
-                    // Temporary / lettered lines (3TM, 12T, 1А, Д1…) — unknown.
-                    else -> null
-                }
-            }
+            11 -> if (routeId in trolleyRouteIds) "тролей" else "електробус"
             else -> null
         }
     }
@@ -685,6 +714,10 @@ class GtfsRepository @Inject constructor(
     suspend fun getAllRouteIdsSet(): Set<String> =
         routeDao.getAllRouteIds().toSet()
 
+    /** Returns route_ids of real trolleybuses — used by the Lines list to
+     *  label rows precisely within CGM's mixed route_type=11 group. */
+    suspend fun getTrolleyRouteIdsSet(): Set<String> = getTrolleyRouteIds()
+
     // ── Routes ────────────────────────────────────────────────────────────
     fun getAllRoutes(): Flow<List<Route>> = routeDao.getAllRoutes()
 
@@ -712,9 +745,14 @@ class GtfsRepository @Inject constructor(
         if (topHeadsigns.isEmpty()) return emptyList()
 
         // Take one representative Trip per headsign so the UI has a
-        // tripId/directionId to navigate further
+        // tripId/directionId to navigate further.
+        // Reverse the order relative to the list subtitle: the list shows
+        // "A - B" (busier first) as a route description "from A to B", so
+        // on the Directions screen the first entry should be B — the
+        // destination someone would head TOWARDS from A. Works whether the
+        // two counts are equal or not.
         val allTrips = tripDao.getByRoute(routeId)
-        return topHeadsigns.mapNotNull { hs ->
+        return topHeadsigns.reversed().mapNotNull { hs ->
             allTrips.firstOrNull { it.tripHeadsign == hs }
         }
     }

@@ -36,6 +36,28 @@ interface RouteDao {
     @Query("SELECT routeId FROM routes")
     suspend fun getAllRouteIds(): List<String>
 
+    /**
+     * Returns route_ids of type=11 lines whose every stop is a trolley
+     * stop (isTrolleyStop=1). These are the real trolleybuses — a line
+     * that touches even one non-trolley stop can't be a trolley because
+     * the overhead-wire network hasn't been extended beyond the routes
+     * of lines 1..11 in decades. Called once per import and cached.
+     */
+    @Query("""
+        SELECT r.routeId FROM routes r
+        WHERE r.routeType = 11
+          AND EXISTS (SELECT 1 FROM trips WHERE trips.routeId = r.routeId)
+          AND NOT EXISTS (
+              SELECT 1
+              FROM trips t
+              JOIN stop_times st ON st.tripId = t.tripId
+              JOIN stops s ON s.stopId = st.stopId
+              WHERE t.routeId = r.routeId
+                AND s.isTrolleyStop = 0
+          )
+    """)
+    suspend fun getTrolleyRouteIds(): List<String>
+
     @Query("SELECT * FROM routes WHERE routeId = :id")
     suspend fun getById(id: String): Route?
 

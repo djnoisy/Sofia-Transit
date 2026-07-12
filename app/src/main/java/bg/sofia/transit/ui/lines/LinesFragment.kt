@@ -61,6 +61,12 @@ class LinesFragment : Fragment() {
             }
         }
 
+        viewLifecycleOwner.lifecycleScope.launch {
+            vm.trolleyRouteIds.collectLatest { ids ->
+                adapter.setTrolleyRouteIds(ids)
+            }
+        }
+
         vm.loadRoutes()
     }
 

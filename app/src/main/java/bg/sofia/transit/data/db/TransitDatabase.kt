@@ -7,7 +7,7 @@ import bg.sofia.transit.data.db.entity.*
 
 @Database(
     entities = [Stop::class, Route::class, Trip::class, StopTime::class, CalendarDate::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class TransitDatabase : RoomDatabase() {

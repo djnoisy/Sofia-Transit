@@ -95,6 +95,35 @@ interface StopDao {
     @Query("SELECT COUNT(*) FROM stops")
     suspend fun count(): Int
 
+    /**
+     * Marks the stops served by real trolleybus lines (short_name 1..11
+     * with route_type=11). Called once per GTFS import — after stops,
+     * routes, trips and stop_times are all loaded. Idempotent: resets all
+     * flags first, then sets the ones that belong to the trolley network.
+     *
+     * Note the strict criteria to avoid capturing tram stops (some trams
+     * share numbers 1..11): we require route_type=11 AND the number, and
+     * we exclude any short_name that isn't a plain integer 1..11.
+     */
+    @Query("UPDATE stops SET isTrolleyStop = 0")
+    suspend fun clearTrolleyFlags()
+
+    @Query("""
+        UPDATE stops SET isTrolleyStop = 1
+        WHERE stopId IN (
+            SELECT DISTINCT st.stopId
+            FROM stop_times st
+            JOIN trips t ON t.tripId = st.tripId
+            JOIN routes r ON r.routeId = t.routeId
+            WHERE r.routeType = 11
+              AND r.routeShortName IN ('1','2','3','4','5','6','7','8','9','10','11')
+        )
+    """)
+    suspend fun markTrolleyStops()
+
+    @Query("SELECT COUNT(*) FROM stops WHERE isTrolleyStop = 1")
+    suspend fun countTrolleyStops(): Int
+
     @Query("DELETE FROM stops")
     suspend fun deleteAll()
 }

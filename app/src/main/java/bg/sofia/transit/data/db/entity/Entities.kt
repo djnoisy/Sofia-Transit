@@ -16,7 +16,17 @@ data class Stop(
     val stopLat: Double,
     val stopLon: Double,
     val locationType: Int = 0,
-    val parentStation: String? = null
+    val parentStation: String? = null,
+    /**
+     * True when this stop is served by a real trolleybus line (short_name
+     * 1..11 in CGM's route_type=11 group). Populated after each GTFS
+     * import via StopDao.markTrolleyStops(). Used to distinguish real
+     * trolleys from electric buses within the type=11 category, since
+     * CGM lump both together but only trolleys can run on the actual
+     * overhead-wire network — which corresponds exactly to the stops of
+     * lines 1..11 whose routes haven't been extended in decades.
+     */
+    val isTrolleyStop: Boolean = false
 )
 
 @Entity(tableName = "routes")
