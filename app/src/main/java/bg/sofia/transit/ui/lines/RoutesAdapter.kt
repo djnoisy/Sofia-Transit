@@ -38,6 +38,14 @@ class RoutesAdapter(
     }
 
     /**
+     * Returns the adapter position of the route with the given id, or -1.
+     * Used to restore scroll/accessibility focus to the last-opened line
+     * when the user navigates back to the list.
+     */
+    fun positionOf(routeId: String): Int =
+        items.indexOfFirst { it.routeId == routeId }
+
+    /**
      * Sets which route_ids are real trolleys — for labelling rows within
      * CGM's mixed route_type=11 group. Determined in the repository by
      * checking whether all of the line's stops are trolley stops.

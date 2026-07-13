@@ -35,9 +35,19 @@ class StopsListFragment : Fragment() {
         super.onViewCreated(view, saved)
 
         binding.tvDirectionTitle.text = "→ ${args.headsign}"
-        binding.tvDirectionTitle.contentDescription =
-            "Линия ${args.routeName} към ${args.headsign}. " +
-            "Изберете спирка за разписание."
+        binding.tvDirectionTitle.contentDescription = "към ${args.headsign}"
+
+        // Same pattern as Directions/Schedule screens: replace generic
+        // "Линия N" with the concrete vehicle type ("Автобус 84",
+        // "Тролей 2"), for consistency with the Lines list. Visual uses
+        // "→"; TalkBack reads "към" so it sounds natural.
+        viewLifecycleOwner.lifecycleScope.launch {
+            val meta = vm.getRouteMeta(args.routeId)
+            val label = meta.vehicleType?.replaceFirstChar { it.uppercase() } ?: "Линия"
+            binding.tvDirectionTitle.text = "$label ${args.routeName} → ${args.headsign}"
+            binding.tvDirectionTitle.contentDescription =
+                "$label ${args.routeName} към ${args.headsign}"
+        }
 
         val adapter = StopOnRouteAdapter { stop -> openSchedule(stop) }
         binding.rvStops.layoutManager = LinearLayoutManager(requireContext())

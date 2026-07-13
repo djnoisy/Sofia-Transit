@@ -44,6 +44,10 @@ class ScheduleViewModel @Inject constructor(
         }
     }
 
+    /** Per-route metadata for the screen header — same source as the
+     *  Lines list, so "Автобус 84" / "Тролей 2" appear consistently. */
+    suspend fun getRouteMeta(routeId: String) = repo.getRouteMeta(routeId)
+
     fun selectDayType(dayType: DayType) {
         _state.value = _state.value.copy(dayType = dayType, loading = true)
         viewModelScope.launch {

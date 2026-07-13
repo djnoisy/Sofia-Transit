@@ -45,10 +45,21 @@ class ScheduleFragment : Fragment() {
         binding.tvHeader.text =
             "Линия ${args.routeName} → ${args.headsign}"
         binding.tvHeader.contentDescription =
-            "Разписание за линия ${args.routeName} към ${args.headsign}, " +
-            "от спирка ${args.stopName}"
+            "Линия ${args.routeName} към ${args.headsign}"
 
         binding.tvSubHeader.text = "Спирка: ${args.stopName}"
+
+        // Replace "Линия N" with the concrete vehicle type once meta loads
+        // — same source as the Lines list, so "Автобус 84" / "Тролей 2"
+        // read consistently across the app. Visual uses "→"; TalkBack
+        // reads "към" so it sounds natural instead of speaking a symbol.
+        viewLifecycleOwner.lifecycleScope.launch {
+            val meta = vm.getRouteMeta(args.routeId)
+            val label = meta.vehicleType?.replaceFirstChar { it.uppercase() } ?: "Линия"
+            binding.tvHeader.text = "$label ${args.routeName} → ${args.headsign}"
+            binding.tvHeader.contentDescription =
+                "$label ${args.routeName} към ${args.headsign}"
+        }
 
         adapter = ScheduleAdapter()
         binding.rvSchedule.layoutManager = LinearLayoutManager(requireContext())

@@ -718,6 +718,31 @@ class GtfsRepository @Inject constructor(
      *  label rows precisely within CGM's mixed route_type=11 group. */
     suspend fun getTrolleyRouteIdsSet(): Set<String> = getTrolleyRouteIds()
 
+    /**
+     * Fetches display metadata for a single route: its top-2-headsign
+     * subtitle (e.g. "Ж.К. ОВЧА КУПЕЛ-2 - СТУДЕНТСКИ ГРАД") and the
+     * resolved vehicle type ("автобус", "тролей", "електробус", …).
+     * Both use the same logic as the Lines list and the Stops screen, so
+     * the Directions screen header stays consistent with them.
+     * Returns nulls if the route has no trips (shouldn't happen for the
+     * routes the UI shows, but safe fallback).
+     */
+    suspend fun getRouteMeta(routeId: String): RouteMeta {
+        val route = routeDao.getById(routeId)
+        val headsigns = tripDao.getHeadsignCountsForRoute(routeId).take(2).map { it.headsign }
+        val subtitle = if (headsigns.isNotEmpty()) headsigns.joinToString(" - ") else null
+        val vType = if (route != null) {
+            resolveVehicleType(
+                routeType = route.routeType,
+                routeId = routeId,
+                trolleyRouteIds = getTrolleyRouteIds()
+            )
+        } else null
+        return RouteMeta(subtitle, vType)
+    }
+
+    data class RouteMeta(val subtitle: String?, val vehicleType: String?)
+
     // ── Routes ────────────────────────────────────────────────────────────
     fun getAllRoutes(): Flow<List<Route>> = routeDao.getAllRoutes()
 

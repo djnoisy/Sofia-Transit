@@ -39,19 +39,26 @@ class LinesFragment : Fragment() {
         binding.rvRoutes.adapter = adapter
         // No contentDescription on the RecyclerView itself
 
-        // Tab buttons for transport type filtering
+        // Tab buttons for transport type filtering. Presented to TalkBack
+        // as plain selectable elements (tabs), not "buttons": the delegate
+        // suppresses the button role, and the selected state announces
+        // "избрано" for the active category.
         binding.btnBus.setOnClickListener      { filterType(TransportType.BUS) }
         binding.btnTram.setOnClickListener     { filterType(TransportType.TRAM) }
         binding.btnTrolley.setOnClickListener  { filterType(TransportType.TROLLEYBUS) }
         binding.btnMetro.setOnClickListener    { filterType(TransportType.METRO) }
         binding.btnAll.setOnClickListener      { showAll() }
+        attachTabSemantics(binding.btnAll, binding.btnBus, binding.btnTram,
+                           binding.btnTrolley, binding.btnMetro)
 
         viewLifecycleOwner.lifecycleScope.launch {
             vm.groupedRoutes.collectLatest { grouped ->
-                // Show all by default
-                val all = grouped.values.flatten()
-                adapter.submitList(all)
-                updateAccessibilityCount(all.size)
+                if (grouped.isEmpty()) return@collectLatest
+                // Re-apply whatever filter was active before navigating
+                // away (survives in the shared VM), instead of always
+                // resetting to "all".
+                applyCurrentFilter(announce = false)
+                restoreFocusToLastSelected()
             }
         }
 
@@ -67,31 +74,100 @@ class LinesFragment : Fragment() {
             }
         }
 
+        updateFilterButtonStates()
         vm.loadRoutes()
     }
 
-    private var currentFilter: TransportType? = null
-    private var allGrouped: Map<TransportType, List<Route>> = emptyMap()
-
     private fun filterType(type: TransportType) {
-        currentFilter = type
-        viewLifecycleOwner.lifecycleScope.launch {
-            vm.groupedRoutes.value.let { grouped ->
-                val filtered = grouped[type] ?: emptyList()
-                adapter.submitList(filtered)
-                updateAccessibilityCount(filtered.size)
-                binding.rvRoutes.announceForAccessibility(
-                    "${type.labelBg}: ${filtered.size} линии"
-                )
-            }
-        }
+        vm.currentFilter = type
+        applyCurrentFilter(announce = true)
     }
 
     private fun showAll() {
-        currentFilter = null
-        val all = vm.groupedRoutes.value.values.flatten()
-        adapter.submitList(all)
-        updateAccessibilityCount(all.size)
+        vm.currentFilter = null
+        applyCurrentFilter(announce = true)
+    }
+
+    /**
+     * Applies vm.currentFilter to the list and syncs the button states.
+     * When [announce] is true (user just tapped a category), TalkBack
+     * announces the new category and count.
+     */
+    private fun applyCurrentFilter(announce: Boolean) {
+        val grouped = vm.groupedRoutes.value
+        val filter = vm.currentFilter
+        val list = if (filter == null) grouped.values.flatten()
+                   else grouped[filter] ?: emptyList()
+        adapter.submitList(list)
+        updateAccessibilityCount(list.size)
+        updateFilterButtonStates()
+        if (announce) {
+            val label = filter?.labelBg ?: "Всички"
+            binding.rvRoutes.announceForAccessibility("$label: ${list.size} линии")
+        }
+    }
+
+    /**
+     * Attaches "tab" accessibility semantics to the category filters:
+     * suppresses the "button" role (so TalkBack uses the plain element
+     * focus sound) and reports the selected state, which TalkBack
+     * announces as "избрано" for the active category.
+     */
+    private fun attachTabSemantics(vararg views: View) {
+        val delegate = object : androidx.core.view.AccessibilityDelegateCompat() {
+            override fun onInitializeAccessibilityNodeInfo(
+                host: View,
+                info: androidx.core.view.accessibility.AccessibilityNodeInfoCompat
+            ) {
+                super.onInitializeAccessibilityNodeInfo(host, info)
+                info.className = "android.view.View"
+                info.isSelected = host.isSelected
+            }
+        }
+        views.forEach { androidx.core.view.ViewCompat.setAccessibilityDelegate(it, delegate) }
+    }
+
+    /**
+     * Marks the active category visually and for accessibility via the
+     * selected state (announced by TalkBack thanks to attachTabSemantics).
+     */
+    private fun updateFilterButtonStates() {
+        val filter = vm.currentFilter
+        val map = listOf(
+            binding.btnAll to null,
+            binding.btnBus to TransportType.BUS,
+            binding.btnTram to TransportType.TRAM,
+            binding.btnTrolley to TransportType.TROLLEYBUS,
+            binding.btnMetro to TransportType.METRO
+        )
+        for ((btn, type) in map) {
+            btn.isSelected = (filter == type)
+        }
+    }
+
+    /**
+     * After returning from a deeper screen, scrolls to and puts
+     * accessibility focus on the route the user last opened, so they
+     * continue from where they were instead of the top of the list.
+     * Consumes the stored id so it only happens once per return.
+     */
+    private fun restoreFocusToLastSelected() {
+        val targetId = vm.lastSelectedRouteId ?: return
+        vm.lastSelectedRouteId = null
+        val pos = adapter.positionOf(targetId)
+        if (pos < 0) return
+        binding.rvRoutes.post {
+            (binding.rvRoutes.layoutManager as? LinearLayoutManager)
+                ?.scrollToPositionWithOffset(pos, 0)
+            binding.rvRoutes.post {
+                binding.rvRoutes.findViewHolderForAdapterPosition(pos)
+                    ?.itemView
+                    ?.performAccessibilityAction(
+                        android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS,
+                        null
+                    )
+            }
+        }
     }
 
     private fun updateAccessibilityCount(count: Int) {
@@ -101,6 +177,7 @@ class LinesFragment : Fragment() {
 
     private fun openDirections(route: Route) {
         vm.selectRoute(route)
+        vm.lastSelectedRouteId = route.routeId
         findNavController().navigate(
             LinesFragmentDirections.actionLinesToDirections(
                 routeId        = route.routeId,

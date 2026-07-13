@@ -32,9 +32,9 @@ class DirectionsFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
 
-        binding.tvRouteTitle.text = "Линия ${args.routeShortName}"
-        binding.tvRouteTitle.contentDescription =
-            "Линия ${args.routeShortName}: ${args.routeLongName}. Изберете направление."
+        // Placeholder — final title is set once route meta loads below.
+        binding.tvRouteTitle.text = args.routeShortName
+        binding.tvRouteTitle.contentDescription = args.routeShortName
 
         val adapter = DirectionsAdapter { trip -> openStops(trip) }
         binding.rvDirections.layoutManager = LinearLayoutManager(requireContext())
@@ -45,6 +45,19 @@ class DirectionsFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             vm.directions.collectLatest { adapter.submitList(it) }
+        }
+
+        // Load the same "vehicle type + top-2 headsigns" info the Lines
+        // list uses. The visible header is just "Автобус 84" / "Тролей 2"
+        // — enough to orient after re-entering the app on this screen —
+        // and TalkBack reads the same, without repeating the directions
+        // that follow as list items below.
+        viewLifecycleOwner.lifecycleScope.launch {
+            val meta = vm.getRouteMeta(args.routeId)
+            val label = meta.vehicleType?.replaceFirstChar { it.uppercase() } ?: "Линия"
+            val title = "$label ${args.routeShortName}"
+            binding.tvRouteTitle.text = title
+            binding.tvRouteTitle.contentDescription = title
         }
     }
 

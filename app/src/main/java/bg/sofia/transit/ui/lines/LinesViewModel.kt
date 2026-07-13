@@ -44,6 +44,16 @@ class LinesViewModel @Inject constructor(
     private var selectedRoute: Route? = null
     private var selectedDirection: Trip? = null
 
+    /**
+     * UI state that must survive navigation away and back to the Lines
+     * screen: the active category filter and the last route the user
+     * opened. Kept here (shared, activity-scoped VM) because the
+     * fragment's view is destroyed on forward navigation and local
+     * fragment fields can't restore the screen reliably.
+     */
+    var currentFilter: TransportType? = null
+    var lastSelectedRouteId: String? = null
+
     fun loadRoutes() {
         viewModelScope.launch {
             _routeSubtitles.value = repo.getRouteSubtitles()
@@ -56,6 +66,9 @@ class LinesViewModel @Inject constructor(
             }
         }
     }
+
+    /** Per-route metadata for the Directions screen header. */
+    suspend fun getRouteMeta(routeId: String) = repo.getRouteMeta(routeId)
 
     /**
      * Natural sort for route short names, so that "2" comes before "11" and
