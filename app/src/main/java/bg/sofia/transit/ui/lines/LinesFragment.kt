@@ -39,17 +39,19 @@ class LinesFragment : Fragment() {
         binding.rvRoutes.adapter = adapter
         // No contentDescription on the RecyclerView itself
 
-        // Tab buttons for transport type filtering. Presented to TalkBack
-        // as plain selectable elements (tabs), not "buttons": the delegate
-        // suppresses the button role, and the selected state announces
-        // "избрано" for the active category.
+        // Category filters shown as vertical icon-over-label tabs.
+        // Presented to TalkBack as plain selectable elements (not
+        // "buttons"); the active one reports its selected state ("избрано").
         binding.btnBus.setOnClickListener      { filterType(TransportType.BUS) }
         binding.btnTram.setOnClickListener     { filterType(TransportType.TRAM) }
         binding.btnTrolley.setOnClickListener  { filterType(TransportType.TROLLEYBUS) }
         binding.btnMetro.setOnClickListener    { filterType(TransportType.METRO) }
-        binding.btnAll.setOnClickListener      { showAll() }
-        attachTabSemantics(binding.btnAll, binding.btnBus, binding.btnTram,
+        attachTabSemantics(binding.btnBus, binding.btnTram,
                            binding.btnTrolley, binding.btnMetro)
+
+        // Default category on first entry (no prior choice): buses — the
+        // largest and most-used group. Replaces the old "Всички" view.
+        if (vm.currentFilter == null) vm.currentFilter = TransportType.BUS
 
         viewLifecycleOwner.lifecycleScope.launch {
             vm.groupedRoutes.collectLatest { grouped ->
@@ -83,11 +85,6 @@ class LinesFragment : Fragment() {
         applyCurrentFilter(announce = true)
     }
 
-    private fun showAll() {
-        vm.currentFilter = null
-        applyCurrentFilter(announce = true)
-    }
-
     /**
      * Applies vm.currentFilter to the list and syncs the button states.
      * When [announce] is true (user just tapped a category), TalkBack
@@ -95,15 +92,13 @@ class LinesFragment : Fragment() {
      */
     private fun applyCurrentFilter(announce: Boolean) {
         val grouped = vm.groupedRoutes.value
-        val filter = vm.currentFilter
-        val list = if (filter == null) grouped.values.flatten()
-                   else grouped[filter] ?: emptyList()
+        val filter = vm.currentFilter ?: TransportType.BUS
+        val list = grouped[filter] ?: emptyList()
         adapter.submitList(list)
         updateAccessibilityCount(list.size)
         updateFilterButtonStates()
         if (announce) {
-            val label = filter?.labelBg ?: "Всички"
-            binding.rvRoutes.announceForAccessibility("$label: ${list.size} линии")
+            binding.rvRoutes.announceForAccessibility("${filter.labelBg}: ${list.size} линии")
         }
     }
 
@@ -134,7 +129,6 @@ class LinesFragment : Fragment() {
     private fun updateFilterButtonStates() {
         val filter = vm.currentFilter
         val map = listOf(
-            binding.btnAll to null,
             binding.btnBus to TransportType.BUS,
             binding.btnTram to TransportType.TRAM,
             binding.btnTrolley to TransportType.TROLLEYBUS,

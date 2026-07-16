@@ -19,6 +19,8 @@ import kotlinx.coroutines.launch
 @AndroidEntryPoint
 class DiagnosticsFragment : Fragment() {
 
+    companion object { private const val TAG = "DiagnosticsFrag" }
+
     private var _binding: FragmentDiagnosticsBinding? = null
     private val binding get() = _binding!!
     private val vm: DiagnosticsViewModel by viewModels()
@@ -87,6 +89,7 @@ class DiagnosticsFragment : Fragment() {
     private fun triggerDataUpdate() {
         val ctx = requireContext()
         val workId = bg.sofia.transit.worker.GtfsUpdateWorker.runNow(ctx)
+        FileLogger.i(TAG, "Manual GTFS update requested, workId=$workId")
         binding.btnUpdateData.isEnabled = false
         binding.tvReport.text = "Стартирано обновяване на данните…\nЗа големи файлове отнема около 1-2 минути."
         Toast.makeText(ctx, "Стартирано обновяване", Toast.LENGTH_SHORT).show()
@@ -95,6 +98,11 @@ class DiagnosticsFragment : Fragment() {
             .getWorkInfoByIdLiveData(workId)
             .observe(viewLifecycleOwner) { info ->
                 if (info == null) return@observe
+                // Log every transition — if the worker can't even be
+                // constructed, doWork() never runs and logs nothing, so this
+                // is the only trace we'd have.
+                FileLogger.i(TAG, "GTFS update work state: ${info.state} " +
+                    "(attempt ${info.runAttemptCount})")
                 when (info.state) {
                     androidx.work.WorkInfo.State.SUCCEEDED -> {
                         binding.btnUpdateData.isEnabled = true

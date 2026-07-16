@@ -62,5 +62,30 @@
                 android:resource="@xml/provider_paths"/>
         </provider>
 
+        <!--
+          Disable WorkManager's default (androidx.startup) initializer.
+
+          TransitApplication implements Configuration.Provider and supplies
+          HiltWorkerFactory, which is what can construct GtfsUpdateWorker
+          (its @AssistedInject constructor needs GtfsRepository injected).
+
+          Without removing the default initializer, WorkManager initialises
+          itself at process start with the DEFAULT factory, which can only
+          build workers having a plain (Context, WorkerParameters)
+          constructor. It then fails to instantiate GtfsUpdateWorker and
+          marks the job FAILED *before* doWork() ever runs — so nothing is
+          logged and the static GTFS update silently never happens.
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove"/>
+        </provider>
+
     </application>
 </manifest>

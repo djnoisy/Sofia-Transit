@@ -7,27 +7,33 @@
         android:text="Линии" android:textSize="22sp" android:textStyle="bold"
         android:padding="16dp" android:accessibilityHeading="true"/>
 
-    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:scrollbars="none">
-        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:padding="8dp">
-            <Button android:id="@+id/btnAll" android:layout_width="wrap_content"
-                android:layout_height="48dp" android:text="Всички"
-                android:layout_marginEnd="4dp" style="@style/Widget.Material3.Button.OutlinedButton"/>
-            <Button android:id="@+id/btnBus" android:layout_width="wrap_content"
-                android:layout_height="48dp" android:text="🚌 Автобуси"
-                android:layout_marginEnd="4dp" style="@style/Widget.Material3.Button.OutlinedButton"/>
-            <Button android:id="@+id/btnTram" android:layout_width="wrap_content"
-                android:layout_height="48dp" android:text="🚊 Трамваи"
-                android:layout_marginEnd="4dp" style="@style/Widget.Material3.Button.OutlinedButton"/>
-            <Button android:id="@+id/btnTrolley" android:layout_width="wrap_content"
-                android:layout_height="48dp" android:text="🚎 Тролеи"
-                android:layout_marginEnd="4dp" style="@style/Widget.Material3.Button.OutlinedButton"/>
-            <Button android:id="@+id/btnMetro" android:layout_width="wrap_content"
-                android:layout_height="48dp" android:text="🚇 Метро"
-                style="@style/Widget.Material3.Button.OutlinedButton"/>
-        </LinearLayout>
-    </HorizontalScrollView>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:padding="4dp"
+        android:baselineAligned="false">
+        <Button android:id="@+id/btnBus" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            android:minHeight="64dp" android:text="🚌\nАвтобуси" android:maxLines="2"
+            android:layout_marginEnd="4dp" android:padding="4dp" android:insetTop="0dp"
+            android:insetBottom="0dp"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+        <Button android:id="@+id/btnTram" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            android:minHeight="64dp" android:text="🚊\nТрамваи" android:maxLines="2"
+            android:layout_marginEnd="4dp" android:padding="4dp" android:insetTop="0dp"
+            android:insetBottom="0dp"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+        <Button android:id="@+id/btnTrolley" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            android:minHeight="64dp" android:text="🚎\nТролеи" android:maxLines="2"
+            android:layout_marginEnd="4dp" android:padding="4dp" android:insetTop="0dp"
+            android:insetBottom="0dp"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+        <Button android:id="@+id/btnMetro" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            android:minHeight="64dp" android:text="🚇\nМетро" android:maxLines="2"
+            android:padding="4dp" android:insetTop="0dp" android:insetBottom="0dp"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+    </LinearLayout>
 
     <TextView android:id="@+id/tvRouteCount"
         android:layout_width="wrap_content" android:layout_height="wrap_content"
