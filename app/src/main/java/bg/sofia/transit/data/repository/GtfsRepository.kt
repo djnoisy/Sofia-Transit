@@ -7,10 +7,16 @@ import bg.sofia.transit.data.db.dao.StopWithSequence
 import bg.sofia.transit.data.db.entity.*
 import bg.sofia.transit.data.parser.GtfsParser
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
@@ -38,6 +44,47 @@ class GtfsRepository @Inject constructor(
     val dataReady: StateFlow<Boolean> = _dataReady
 
     /**
+     * Serialises every import. Without it the first-run import (started by
+     * MainActivity from bundled assets) and the GtfsUpdateWorker import
+     * (started from the freshly downloaded files) could run at the same time
+     * on the same Room tables — both calling deleteAll() + insertAll() while
+     * the other is mid-insert. That race is what left the loading overlay on
+     * screen forever, and it could also let the *older* bundled data win the
+     * last write and silently overwrite the fresh download.
+     *
+     * Whoever gets here second simply waits and then re-imports. Not
+     * reentrant — no import path calls loadStaticData() from inside another.
+     */
+    private val importMutex = Mutex()
+
+    /**
+     * Application-lifetime scope for the first-run import. Deliberately NOT
+     * the Activity's lifecycleScope: that scope dies on rotation or when the
+     * Activity is destroyed, which would abort a 40-second import halfway
+     * and leave the DB partially populated.
+     */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var initialLoadJob: Job? = null
+
+    /**
+     * True once the DB has been populated at least once — either found
+     * already full, or filled by the first-run import. Unlike [dataReady],
+     * this never flips back to false during a later refresh, so the UI can
+     * use it to dismiss the first-run overlay without the overlay
+     * reappearing when the weekly worker reimports.
+     */
+    private val _initialLoadDone = MutableStateFlow(false)
+    val initialLoadDone: StateFlow<Boolean> = _initialLoadDone
+
+    /** Human-readable step of the import currently running, or null if none. */
+    private val _importProgress = MutableStateFlow<String?>(null)
+    val importProgress: StateFlow<String?> = _importProgress
+
+    /** Set when an import fails outright; cleared when a new import starts. */
+    private val _importError = MutableStateFlow<String?>(null)
+    val importError: StateFlow<String?> = _importError
+
+    /**
      * Returns the directory holding the latest downloaded GTFS files,
      * or null if the worker has never produced one yet (so we should
      * fall back to bundled assets).
@@ -57,7 +104,10 @@ class GtfsRepository @Inject constructor(
      */
     suspend fun isDatabaseReady(): Boolean {
         val ready = stopDao.count() > 0 && routeDao.count() > 0 && stopTimeDao.count() > 0
-        if (ready) _dataReady.value = true
+        if (ready) {
+            _dataReady.value = true
+            _initialLoadDone.value = true
+        }
         return ready
     }
 
@@ -69,7 +119,53 @@ class GtfsRepository @Inject constructor(
      * Renamed from `initialiseFromAssets` to reflect that it can use either
      * source — public API kept as alias below for backward compatibility.
      */
-    suspend fun loadStaticData(onProgress: (String) -> Unit = {}) {
+    suspend fun loadStaticData(onProgress: (String) -> Unit = {}) =
+        importMutex.withLock {
+            try {
+                _importError.value = null
+                loadStaticDataLocked { msg ->
+                    _importProgress.value = msg
+                    onProgress(msg)
+                }
+            } catch (e: Throwable) {
+                _importError.value = e.message ?: e.javaClass.simpleName
+                throw e
+            } finally {
+                _importProgress.value = null
+            }
+        }
+
+    /**
+     * Starts the first-run import at most once per process, on a scope that
+     * outlives the Activity. Safe to call from onCreate on every launch: if
+     * the DB is already populated it only runs three COUNT queries and exits.
+     */
+    fun startInitialLoadIfNeeded() {
+        synchronized(this) {
+            if (initialLoadJob?.isActive == true) return
+            initialLoadJob = appScope.launch {
+                try {
+                    if (!isDatabaseReady()) {
+                        FileLogger.i(TAG, "DB empty — starting first-run import")
+                        loadStaticData()
+                        _initialLoadDone.value = true
+                    }
+                } catch (e: Throwable) {
+                    // Never rethrow: an uncaught CancellationException here is
+                    // what used to kill the caller silently and strand the UI.
+                    FileLogger.e(TAG, "First-run import failed: ${e.message}", e)
+                }
+            }
+        }
+    }
+
+    /** Retries the first-run import after a failure. */
+    fun retryInitialLoad() {
+        synchronized(this) { initialLoadJob = null }
+        startInitialLoadIfNeeded()
+    }
+
+    private suspend fun loadStaticDataLocked(onProgress: (String) -> Unit = {}) {
         // Mark DB unavailable for the whole reload window, so location-driven
         // queries buffer their input instead of running against half-empty
         // tables. Also flips on subsequent reloads (weekly worker), giving
@@ -128,6 +224,7 @@ class GtfsRepository @Inject constructor(
                            "trips=${trips.size} calendar=${calendar.size}")
             }
             _dataReady.value = true
+            _initialLoadDone.value = true
         } catch (e: Throwable) {
             // If parsing failed mid-way the worker will rollback and call us
             // again with the old data. In the meantime, reflect the actual
