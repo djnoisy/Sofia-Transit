@@ -26,10 +26,9 @@ import java.util.zip.ZipInputStream
  *   2. Atomically extracts it into filesDir/gtfs/  (via a tmp dir + rename)
  *   3. Re-imports the new data into the Room database
  *
- * Triggered only by the user: either by opening the app when the data has
- * gone stale (see [scheduleIfStale], Wi-Fi only) or by the manual button in
- * Diagnostics (see [runNow], any connection). Nothing runs unless the app is
- * launched.
+ * Triggered only when the user opens the app and the data has gone stale
+ * (see [scheduleIfStale], Wi-Fi only). Nothing runs unless the app is
+ * launched, and nothing is pulled over mobile data.
  *
  * On any failure (network, malformed ZIP, parsing error) the previous data
  * is preserved untouched — guaranteeing the app always has a working dataset.
@@ -48,6 +47,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
 
         private const val PREFS_NAME     = "gtfs_update"
         private const val KEY_LAST_OK_MS = "last_success_ms"
+        private const val KEY_LAST_MODIFIED = "last_modified"
 
         /** How old the data may get before we offer to refresh it. */
         private val MAX_AGE_MS = TimeUnit.DAYS.toMillis(7)
@@ -93,8 +93,16 @@ class GtfsUpdateWorker @AssistedInject constructor(
          *
          * The refresh only runs on an unmetered connection. The feed ZIP is
          * tens of megabytes and must never be pulled over mobile data without
-         * the user asking for it — the manual button in Diagnostics is the way
-         * to force it on any connection.
+         * the user's knowledge, so it waits for Wi-Fi.
+         *
+         * On a clean install this deliberately causes ONE redundant re-import:
+         * MainActivity first imports the bundled assets so the app is usable
+         * offline within ~30 s, then (if on Wi-Fi) this downloads and re-imports
+         * the fresh feed. Parsing 47 MB of stop_times twice within two minutes
+         * is the accepted price of guaranteeing the app shows correct data
+         * immediately even with no network — see the 2075 tram bug. It happens
+         * exactly once per install; every later launch hits the 7-day guard
+         * above and does nothing.
          */
         fun scheduleIfStale(context: Context) {
             val last = lastSuccessMs(context)
@@ -120,22 +128,33 @@ class GtfsUpdateWorker @AssistedInject constructor(
         }
 
         /**
-         * Schedules a one-time refresh of the GTFS static data. Used by the
-         * Diagnostics screen so the user can force a fresh download on demand.
-         * Unlike [scheduleIfStale] this accepts any connection — the user has
-         * explicitly asked for it, so mobile data is their call to make.
-         * Returns the work ID so the caller can observe progress.
+         * Marks the bundled assets as the current data source, using the date
+         * baked into assets/gtfs/bundle_date.txt. Called once after the
+         * first-run import of bundled data so the freshness clock starts from
+         * when the data was actually produced — not from install time. This is
+         * what lets [scheduleIfStale] decide whether the bundled data is
+         * recent enough to skip the immediate download.
          */
-        fun runNow(context: Context): java.util.UUID {
-            val req = androidx.work.OneTimeWorkRequestBuilder<GtfsUpdateWorker>()
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build()
-                )
-                .build()
-            WorkManager.getInstance(context).enqueue(req)
-            return req.id
+        fun recordBundledDate(context: Context) {
+            val bundleMs = readBundleDateMs(context) ?: run {
+                // No/invalid bundle date → treat as ancient so we refresh ASAP.
+                FileLogger.w(TAG, "No bundle date found; will refresh on first Wi-Fi")
+                0L
+            }
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putLong(KEY_LAST_OK_MS, bundleMs).apply()
+            FileLogger.i(TAG, "Bundled data dated ${bundleMs}ms; freshness clock set")
+        }
+
+        /** Reads assets/gtfs/bundle_date.txt (ISO yyyy-MM-dd) → epoch millis, or null. */
+        private fun readBundleDateMs(context: Context): Long? = try {
+            val text = context.assets.open("gtfs/bundle_date.txt")
+                .bufferedReader().use { it.readText().trim() }
+            java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                .parse(text)?.time
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "Could not read bundle_date.txt: ${e.message}")
+            null
         }
     }
 
@@ -152,9 +171,19 @@ class GtfsUpdateWorker @AssistedInject constructor(
             tmpDir.deleteRecursively()
             backupDir.deleteRecursively()
 
-            // 1) Download + extract into tmp dir
+            // 1) Download + extract into tmp dir. If the server reports the
+            //    feed is unchanged since our last success (HTTP 304), skip the
+            //    whole ~20 MB download and 60 s re-import: the data we already
+            //    have is current. We still refresh the success timestamp so the
+            //    7-day clock resets.
             tmpDir.mkdirs()
-            downloadAndExtract(tmpDir)
+            val downloaded = downloadAndExtract(tmpDir, ctx)
+            if (!downloaded) {
+                FileLogger.i(TAG, "Feed unchanged (304) — keeping current data")
+                tmpDir.deleteRecursively()
+                recordSuccess(ctx)
+                return@withContext Result.success()
+            }
 
             // 1.5) Delete unused files to save ~50 MB of disk space
             tmpDir.listFiles()?.forEach { f ->
@@ -207,7 +236,15 @@ class GtfsUpdateWorker @AssistedInject constructor(
                 FileLogger.e(TAG, "Parse failed, rolling back: ${e.message}")
                 finalDir.deleteRecursively()
                 backupDir.renameTo(finalDir)
-                gtfsRepo.loadStaticData()  // reload old data
+                try {
+                    gtfsRepo.loadStaticData()  // reload old data
+                } catch (reloadError: Exception) {
+                    // The rollback reload itself failed. Don't let it mask the
+                    // real parse error above — just log it and let WorkManager
+                    // retry the whole job. The DB may be empty until then, but
+                    // isDatabaseReady() on next launch will re-import.
+                    FileLogger.e(TAG, "Rollback reload also failed: ${reloadError.message}")
+                }
                 if (runAttemptCount < 3) Result.retry() else Result.failure()
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -218,17 +255,36 @@ class GtfsUpdateWorker @AssistedInject constructor(
         }
     }
 
-    /** Streams the ZIP from FEED_URL and writes its entries into [target]. */
-    private fun downloadAndExtract(target: File) {
+    /**
+     * Streams the ZIP from FEED_URL and writes its entries into [target].
+     *
+     * Sends an If-Modified-Since header built from the Last-Modified value we
+     * stored on the previous successful run. Returns:
+     *   - true  → new data was downloaded and extracted into [target]
+     *   - false → server replied 304 Not Modified; [target] left empty
+     */
+    private fun downloadAndExtract(target: File, ctx: Context): Boolean {
+        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val conn = URL(FEED_URL).openConnection() as HttpURLConnection
         conn.connectTimeout = 30_000
         conn.readTimeout    = 120_000
         conn.requestMethod  = "GET"
+        prefs.getString(KEY_LAST_MODIFIED, null)?.let {
+            conn.setRequestProperty("If-Modified-Since", it)
+        }
         conn.connect()
 
         try {
+            if (conn.responseCode == HttpURLConnection.HTTP_NOT_MODIFIED) {
+                return false
+            }
             if (conn.responseCode != 200) {
                 throw Exception("HTTP ${conn.responseCode}")
+            }
+
+            // Remember the server's Last-Modified for next time's 304 check.
+            conn.getHeaderField("Last-Modified")?.let {
+                prefs.edit().putString(KEY_LAST_MODIFIED, it).apply()
             }
 
             ZipInputStream(conn.inputStream.buffered()).use { zip ->
@@ -245,6 +301,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
                     entry = zip.nextEntry
                 }
             }
+            return true
         } finally {
             conn.disconnect()
         }

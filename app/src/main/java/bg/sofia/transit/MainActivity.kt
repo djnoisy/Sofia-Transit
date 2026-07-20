@@ -23,6 +23,9 @@ class MainActivity : AppCompatActivity() {
 
     @Inject lateinit var gtfsRepo: GtfsRepository
 
+    /** Ensures [scheduleIfStale] is called at most once per Activity instance. */
+    private var stalenessChecked = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -74,7 +77,10 @@ class MainActivity : AppCompatActivity() {
                             // a background refresh in the whole app: no app
                             // launch, no refresh. Wi-Fi only; it does nothing
                             // if the data is under 7 days old.
-                            bg.sofia.transit.worker.GtfsUpdateWorker.scheduleIfStale(this@MainActivity)
+                            if (!stalenessChecked) {
+                                stalenessChecked = true
+                                bg.sofia.transit.worker.GtfsUpdateWorker.scheduleIfStale(this@MainActivity)
+                            }
                         } else {
                             binding.layoutLoading.visibility = View.VISIBLE
                             binding.tvLoadingMsg.text = "Зареждане на данни за пръв път…"

@@ -73,8 +73,6 @@ class DiagnosticsFragment : Fragment() {
             Toast.makeText(requireContext(), "Логът е изчистен", Toast.LENGTH_SHORT).show()
         }
 
-        binding.btnUpdateData.setOnClickListener { triggerDataUpdate() }
-
         viewLifecycleOwner.lifecycleScope.launch {
             vm.state.collectLatest { state ->
                 binding.pbProgress.visibility =
@@ -86,47 +84,6 @@ class DiagnosticsFragment : Fragment() {
         }
     }
 
-    private fun triggerDataUpdate() {
-        val ctx = requireContext()
-        val workId = bg.sofia.transit.worker.GtfsUpdateWorker.runNow(ctx)
-        FileLogger.i(TAG, "Manual GTFS update requested, workId=$workId")
-        binding.btnUpdateData.isEnabled = false
-        binding.tvReport.text = "Стартирано обновяване на данните…\nЗа големи файлове отнема около 1-2 минути."
-        Toast.makeText(ctx, "Стартирано обновяване", Toast.LENGTH_SHORT).show()
-
-        androidx.work.WorkManager.getInstance(ctx)
-            .getWorkInfoByIdLiveData(workId)
-            .observe(viewLifecycleOwner) { info ->
-                if (info == null) return@observe
-                // Log every transition — if the worker can't even be
-                // constructed, doWork() never runs and logs nothing, so this
-                // is the only trace we'd have.
-                FileLogger.i(TAG, "GTFS update work state: ${info.state} " +
-                    "(attempt ${info.runAttemptCount})")
-                when (info.state) {
-                    androidx.work.WorkInfo.State.SUCCEEDED -> {
-                        binding.btnUpdateData.isEnabled = true
-                        binding.tvReport.text = "Обновяването завърши успешно.\n" +
-                            "Излезте от диагностиката и отворете спирка отново, " +
-                            "за да видите актуалните данни."
-                        Toast.makeText(ctx, "Готово", Toast.LENGTH_SHORT).show()
-                    }
-                    androidx.work.WorkInfo.State.FAILED -> {
-                        binding.btnUpdateData.isEnabled = true
-                        binding.tvReport.text = "Обновяването се провали.\n" +
-                            "Провери лога за подробности (бутон 'Сподели лог')."
-                        Toast.makeText(ctx, "Грешка", Toast.LENGTH_LONG).show()
-                    }
-                    androidx.work.WorkInfo.State.CANCELLED -> {
-                        binding.btnUpdateData.isEnabled = true
-                        binding.tvReport.text = "Обновяването е отказано."
-                    }
-                    else -> {
-                        // RUNNING / ENQUEUED / BLOCKED — keep button disabled
-                    }
-                }
-            }
-    }
 
     private fun shareLog() {
         val file = FileLogger.file()

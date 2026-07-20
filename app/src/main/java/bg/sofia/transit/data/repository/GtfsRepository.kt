@@ -6,6 +6,7 @@ import bg.sofia.transit.data.db.TransitDatabase
 import bg.sofia.transit.data.db.dao.StopWithSequence
 import bg.sofia.transit.data.db.entity.*
 import bg.sofia.transit.data.parser.GtfsParser
+import bg.sofia.transit.worker.GtfsUpdateWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -146,8 +147,19 @@ class GtfsRepository @Inject constructor(
             initialLoadJob = appScope.launch {
                 try {
                     if (!isDatabaseReady()) {
-                        FileLogger.i(TAG, "DB empty — starting first-run import")
+                        // Remember whether we're about to import bundled or
+                        // downloaded data BEFORE the import runs. If bundled,
+                        // we set the freshness clock to the bundle's own date
+                        // afterwards, so scheduleIfStale() can tell whether the
+                        // baked-in data is recent enough to skip the immediate
+                        // download — avoiding the double import on a fresh APK.
+                        val usingBundled = getActiveDataDir() == null
+                        FileLogger.i(TAG, "DB empty — starting first-run import " +
+                            "(${if (usingBundled) "bundled" else "downloaded"})")
                         loadStaticData()
+                        if (usingBundled) {
+                            GtfsUpdateWorker.recordBundledDate(context)
+                        }
                         _initialLoadDone.value = true
                     }
                 } catch (e: Throwable) {
@@ -209,9 +221,8 @@ class GtfsRepository @Inject constructor(
                 // route_type=11) and invalidate the trolley-route cache.
                 // Must run AFTER stop_times because the marking JOINs
                 // stops → stop_times → trips → routes. Runs on every
-                // import (initial from bundled assets, weekly refresh,
-                // manual "Обнови данните") so the flag is always in sync
-                // with the data.
+                // import (initial from bundled assets and the weekly Wi-Fi
+                // refresh) so the flag is always in sync with the data.
                 onProgress("Определяне на тролейбусната мрежа…")
                 stopDao.clearTrolleyFlags()
                 stopDao.markTrolleyStops()
