@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import bg.sofia.transit.data.repository.GtfsRepository
 import bg.sofia.transit.util.DateHelper
-import bg.sofia.transit.util.DateHelper.DayType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,8 +11,8 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class ScheduleState(
-    val dayType: DayType = DayType.TODAY,
-    val effectiveDate: String? = null,    // YYYYMMDD that we resolved to
+    val days: List<DateHelper.DayChip> = emptyList(),
+    val selectedDate: String = "",        // YYYYMMDD currently shown
     val times: List<String> = emptyList(),
     val loading: Boolean = false,
     val noDataReason: String? = null      // null when data is present
@@ -31,49 +30,39 @@ class ScheduleViewModel @Inject constructor(
     private var headsign: String = ""
     private var stopId: String = ""
 
-    private var availableDates: Set<String> = emptySet()
-
     fun init(routeId: String, headsign: String, stopId: String) {
         this.routeId  = routeId
         this.headsign = headsign
         this.stopId   = stopId
-        viewModelScope.launch {
-            availableDates = repo.getAllAvailableScheduleDates().toSet()
-            // Default selection: today's actual date
-            selectDayType(DayType.TODAY)
-        }
+
+        val days = DateHelper.upcomingDays(7)
+        _state.value = _state.value.copy(days = days)
+        // Default selection: today (first chip).
+        days.firstOrNull()?.let { selectDate(it.date) }
     }
 
     /** Per-route metadata for the screen header — same source as the
      *  Lines list, so "Автобус 84" / "Тролей 2" appear consistently. */
     suspend fun getRouteMeta(routeId: String) = repo.getRouteMeta(routeId)
 
-    fun selectDayType(dayType: DayType) {
-        _state.value = _state.value.copy(dayType = dayType, loading = true)
+    fun selectDate(date: String) {
+        _state.value = _state.value.copy(
+            selectedDate = date,
+            loading = true,
+            noDataReason = null
+        )
         viewModelScope.launch {
-            val date = DateHelper.representativeDate(dayType, availableDates)
-            if (date == null) {
-                _state.value = ScheduleState(
-                    dayType       = dayType,
-                    effectiveDate = null,
-                    times         = emptyList(),
-                    loading       = false,
-                    noDataReason  = "Няма данни за избрания вид ден"
-                )
-                return@launch
-            }
             val times = repo.getScheduleForDirectionAtStop(
                 routeId  = routeId,
                 headsign = headsign,
                 stopId   = stopId,
                 date     = date
             )
-            _state.value = ScheduleState(
-                dayType       = dayType,
-                effectiveDate = date,
-                times         = times,
-                loading       = false,
-                noDataReason  = if (times.isEmpty()) "Няма пътувания за този ден" else null
+            _state.value = _state.value.copy(
+                selectedDate = date,
+                times        = times,
+                loading      = false,
+                noDataReason = if (times.isEmpty()) "Няма курсове за тази дата" else null
             )
         }
     }

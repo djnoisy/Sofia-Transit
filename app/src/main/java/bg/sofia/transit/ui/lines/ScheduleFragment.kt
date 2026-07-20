@@ -4,23 +4,25 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.navArgs
 import androidx.recyclerview.widget.LinearLayoutManager
+import bg.sofia.transit.R
 import bg.sofia.transit.databinding.FragmentScheduleBinding
 import bg.sofia.transit.util.DateHelper
-import bg.sofia.transit.util.DateHelper.DayType
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * Shows the static schedule for a specific (route, direction, stop) triple,
- * filtered by day-type (Today / Weekday / Saturday / Sunday).
+ * Shows the static schedule for a specific (route, direction, stop) triple.
  *
- * Reached by tapping a stop in StopsListFragment.
+ * The user browses by concrete date via a 7-day strip (today + 6 days), with
+ * today selected by default. Reached by tapping a stop in StopsListFragment.
  */
 @AndroidEntryPoint
 class ScheduleFragment : Fragment() {
@@ -31,6 +33,9 @@ class ScheduleFragment : Fragment() {
     private val args: ScheduleFragmentArgs by navArgs()
 
     private lateinit var adapter: ScheduleAdapter
+
+    /** Chip views by date string, so we can toggle their selected state. */
+    private val chipViews = mutableMapOf<String, View>()
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, saved: Bundle?
@@ -65,11 +70,6 @@ class ScheduleFragment : Fragment() {
         binding.rvSchedule.layoutManager = LinearLayoutManager(requireContext())
         binding.rvSchedule.adapter = adapter
 
-        binding.btnToday.setOnClickListener     { vm.selectDayType(DayType.TODAY) }
-        binding.btnWeekday.setOnClickListener   { vm.selectDayType(DayType.WEEKDAY) }
-        binding.btnSaturday.setOnClickListener  { vm.selectDayType(DayType.SATURDAY) }
-        binding.btnSunday.setOnClickListener    { vm.selectDayType(DayType.SUNDAY) }
-
         viewLifecycleOwner.lifecycleScope.launch {
             vm.state.collectLatest { state -> renderState(state) }
         }
@@ -81,7 +81,46 @@ class ScheduleFragment : Fragment() {
         )
     }
 
+    /** Builds the 7 day chips once, the first time the day list arrives. */
+    private fun buildDayStrip(days: List<DateHelper.DayChip>) {
+        if (chipViews.isNotEmpty()) return
+        val inflater = LayoutInflater.from(requireContext())
+        days.forEach { day ->
+            val chip = inflater.inflate(
+                R.layout.item_day_chip, binding.dayStrip, false
+            )
+            chip.findViewById<TextView>(R.id.tvChipDay).text = day.dayShortBg
+            chip.findViewById<TextView>(R.id.tvChipNum).text = day.dayNumber
+            chip.contentDescription =
+                DateHelper.chipContentDescription(day.date, day.isToday)
+            chip.setOnClickListener { vm.selectDate(day.date) }
+
+            // Distribute chips equally across the strip width.
+            val lp = chip.layoutParams as LinearLayout.LayoutParams
+            lp.width = 0
+            lp.weight = 1f
+            chip.layoutParams = lp
+
+            binding.dayStrip.addView(chip)
+            chipViews[day.date] = chip
+        }
+    }
+
     private fun renderState(state: ScheduleState) {
+        if (state.days.isNotEmpty()) buildDayStrip(state.days)
+
+        // Reflect current selection on the chips.
+        chipViews.forEach { (date, chip) ->
+            chip.isSelected = (date == state.selectedDate)
+        }
+
+        // Big header: full date of the selected day.
+        if (state.selectedDate.isNotEmpty()) {
+            val full = DateHelper.fullDateLabelBg(state.selectedDate)
+            binding.tvSelectedDate.text = full
+            binding.tvSelectedDate.contentDescription = "Разписание за $full"
+        }
+
         binding.pbLoading.visibility =
             if (state.loading) View.VISIBLE else View.GONE
 
@@ -102,30 +141,24 @@ class ScheduleFragment : Fragment() {
             binding.tvEmpty.visibility = View.GONE
             binding.rvSchedule.visibility = View.GONE
         } else if (groups.isEmpty()) {
-            binding.tvEmpty.text = state.noDataReason ?: "Няма данни"
+            binding.tvEmpty.text = state.noDataReason ?: "Няма курсове за тази дата"
             binding.tvEmpty.visibility = View.VISIBLE
             binding.rvSchedule.visibility = View.GONE
         } else {
             binding.tvEmpty.visibility = View.GONE
             binding.rvSchedule.visibility = View.VISIBLE
 
-            // Update sub-header with effective date for transparency
-            val effectiveLabel = state.effectiveDate?.let { d ->
-                val dow = DateHelper.bgDayLabel(d)
-                "Спирка: ${args.stopName} • показва се $dow"
-            } ?: "Спирка: ${args.stopName}"
-            binding.tvSubHeader.text = effectiveLabel
-
             // Announce the count for TalkBack
             val total = state.times.size
             binding.rvSchedule.announceForAccessibility(
-                "Намерени $total пътувания за избрания ден"
+                "Намерени $total курса за избрания ден"
             )
         }
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
+        chipViews.clear()
         _binding = null
     }
 }

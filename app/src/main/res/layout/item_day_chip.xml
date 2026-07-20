@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One day in the date strip. Two lines: short weekday over day-of-month.
+     Root is focusable so TalkBack reads the whole chip as one unit with a
+     full spoken description ("вторник, 20 юли, днес"). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/chipRoot"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:minWidth="44dp"
+    android:minHeight="56dp"
+    android:paddingVertical="8dp"
+    android:layout_marginHorizontal="3dp"
+    android:background="@drawable/bg_day_chip"
+    android:focusable="true"
+    android:clickable="true">
+
+    <TextView android:id="@+id/tvChipDay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="12sp"
+        android:textColor="@color/day_chip_text"
+        android:importantForAccessibility="no"/>
+
+    <TextView android:id="@+id/tvChipNum"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="@color/day_chip_text"
+        android:importantForAccessibility="no"/>
+</LinearLayout>

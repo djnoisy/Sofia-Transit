@@ -19,46 +19,34 @@
         android:paddingHorizontal="12dp"
         android:paddingBottom="8dp"/>
 
-    <!-- Day-type selector buttons -->
+    <!-- 7-day date strip. Chips are laid out equally across the full width
+         (each weight=1) so on a normal phone they read as fixed. The
+         HorizontalScrollView is only a safety net for very narrow screens
+         where 7 chips wouldn't otherwise fit. -->
     <HorizontalScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:scrollbars="none">
+        android:scrollbars="none"
+        android:fillViewport="true">
 
-        <LinearLayout
-            android:layout_width="wrap_content"
+        <LinearLayout android:id="@+id/dayStrip"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:padding="8dp">
-
-            <Button android:id="@+id/btnToday"
-                android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:text="Днес"
-                android:layout_marginEnd="4dp"
-                style="@style/Widget.Material3.Button.OutlinedButton"/>
-
-            <Button android:id="@+id/btnWeekday"
-                android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:text="Делник"
-                android:layout_marginEnd="4dp"
-                style="@style/Widget.Material3.Button.OutlinedButton"/>
-
-            <Button android:id="@+id/btnSaturday"
-                android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:text="Събота"
-                android:layout_marginEnd="4dp"
-                style="@style/Widget.Material3.Button.OutlinedButton"/>
-
-            <Button android:id="@+id/btnSunday"
-                android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:text="Неделя"
-                style="@style/Widget.Material3.Button.OutlinedButton"/>
-        </LinearLayout>
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="8dp"/>
     </HorizontalScrollView>
+
+    <!-- Selected day, full date: "вторник, 20 юли 2026 г." -->
+    <TextView android:id="@+id/tvSelectedDate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:paddingHorizontal="12dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="8dp"
+        android:accessibilityHeading="true"/>
 
     <ProgressBar android:id="@+id/pbLoading"
         android:layout_width="32dp"
