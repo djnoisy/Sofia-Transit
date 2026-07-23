@@ -12,9 +12,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.databinding.FragmentJourneyBinding
+import bg.sofia.transit.service.JourneyService
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -25,6 +28,14 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
+/**
+ * Journey tab. Two visual modes, driven by two independent flows:
+ *  - selection list (vm.selection)              — picking an arriving vehicle
+ *  - active journey (JourneyService.trackingState) — live tracking
+ * The service state wins: while Tracking, the selection UI is hidden.
+ * Because tracking state lives in the service, switching tabs or rotating
+ * never interrupts a journey.
+ */
 @AndroidEntryPoint
 class JourneyFragment : Fragment() {
 
@@ -45,8 +56,6 @@ class JourneyFragment : Fragment() {
         if (locGranted) startLocationAndLoad()
         else Toast.makeText(requireContext(),
             "Необходим е достъп до местоположение", Toast.LENGTH_LONG).show()
-        // POST_NOTIFICATIONS denial is non-fatal — the journey still works,
-        // just without the notification on the lock-screen.
     }
 
     private fun requiredPermissions(): Array<String> {
@@ -70,7 +79,6 @@ class JourneyFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
 
-        // Adapter for the upcoming trips list
         upcomingAdapter = UpcomingTripsAdapter { trip -> vm.selectUpcomingTrip(trip) }
         binding.rvUpcoming.apply {
             layoutManager = LinearLayoutManager(requireContext())
@@ -81,15 +89,17 @@ class JourneyFragment : Fragment() {
         binding.btnRefresh.setOnClickListener {
             if (hasLocation) vm.loadUpcomingTrips(lastLat, lastLon)
         }
-
         binding.btnEndJourney.setOnClickListener { vm.endJourney() }
 
         viewLifecycleOwner.lifecycleScope.launch {
-            vm.state.collectLatest { state -> renderState(state) }
-        }
-        viewLifecycleOwner.lifecycleScope.launch {
-            vm.error.collect { msg ->
-                Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch { vm.tracking.collectLatest { render() } }
+                launch { vm.selection.collectLatest { render() } }
+                launch {
+                    vm.error.collect { msg ->
+                        Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
 
@@ -103,92 +113,108 @@ class JourneyFragment : Fragment() {
         }
     }
 
-    private fun renderState(state: JourneyState) {
-        // Hide everything first
-        binding.panelUpcoming.visibility       = View.GONE
-        binding.panelActiveJourney.visibility  = View.GONE
-        binding.btnEndJourney.visibility       = View.GONE
-        binding.tvJourneyHint.visibility       = View.GONE
-
-        when (state) {
-            is JourneyState.Idle -> {
-                binding.tvJourneyHint.visibility = View.VISIBLE
-                binding.tvJourneyHint.text = "Определяне на местоположение…"
-                binding.tvJourneyHint.contentDescription =
-                    "Определяне на местоположение, моля изчакайте."
-            }
-
-            is JourneyState.SelectUpcomingTrip -> {
-                binding.panelUpcoming.visibility = View.VISIBLE
-                binding.pbRefreshing.visibility =
-                    if (state.refreshing) View.VISIBLE else View.GONE
-                binding.btnRefresh.isEnabled = !state.refreshing
-
-                val count = state.upcoming.size
-                binding.tvUpcomingTitle.text = when {
-                    state.refreshing && count == 0 -> "Зареждане…"
-                    count == 0 -> "Близки превозни средства"
-                    count == 1 -> "1 идващо превозно средство"
-                    else       -> "$count идващи превозни средства"
-                }
-                binding.tvUpcomingTitle.contentDescription =
-                    binding.tvUpcomingTitle.text
-
-                binding.tvEmptyMessage.visibility =
-                    if (count == 0 && !state.refreshing) View.VISIBLE else View.GONE
-                binding.rvUpcoming.visibility =
-                    if (count > 0) View.VISIBLE else View.GONE
-
-                upcomingAdapter.submitList(state.upcoming)
-            }
-
-            is JourneyState.Active -> {
-                binding.panelActiveJourney.visibility = View.VISIBLE
-                binding.btnEndJourney.visibility      = View.VISIBLE
-
-                val current = state.stops.getOrNull(state.currentIdx)
-                val next    = state.stops.getOrNull(state.currentIdx + 1)
-
-                val currentLabel = if (state.atStop)
-                    "Спирка: ${current?.stopName ?: "—"}"
-                else
-                    "В движение"
-                binding.tvCurrentStop.text = currentLabel
-                binding.tvCurrentStop.contentDescription = currentLabel
-
-                binding.tvNextStop.text = if (next != null)
-                    "Следваща: ${next.stopName}"
-                else
-                    "Крайна спирка"
-                binding.tvNextStop.contentDescription = binding.tvNextStop.text
-
-                binding.tvJourneyRoute.text =
-                    "Линия ${state.trip.routeShortName} → ${state.trip.headsign}"
-                binding.tvJourneyRoute.contentDescription =
-                    "Линия ${state.trip.routeShortName} към ${state.trip.headsign}"
-
-                val progress = "${state.currentIdx + 1} / ${state.stops.size} спирки"
-                binding.tvProgress.text = progress
-                binding.tvProgress.contentDescription = progress
-            }
+    /** Single render entry: decides between tracking and selection modes. */
+    private fun render() {
+        val trackingState = vm.tracking.value
+        if (trackingState is JourneyService.TrackingState.Tracking) {
+            renderTracking(trackingState)
+        } else {
+            renderSelection(vm.selection.value)
         }
     }
 
+    private fun renderTracking(state: JourneyService.TrackingState.Tracking) {
+        binding.panelUpcoming.visibility      = View.GONE
+        binding.tvJourneyHint.visibility      = View.GONE
+        binding.panelActiveJourney.visibility = View.VISIBLE
+        binding.btnEndJourney.visibility      = View.VISIBLE
+
+        binding.tvJourneyRoute.text = state.routeLabel
+        binding.tvJourneyRoute.contentDescription =
+            state.routeLabel.replace("→", "към")
+
+        val current = state.stops.getOrNull(state.currentIdx)
+        val currentLabel = if (state.atStop)
+            "Спирка: ${current?.stopName ?: "—"}"
+        else
+            "Към: ${current?.stopName ?: "—"}"
+        binding.tvCurrentStop.text = currentLabel
+        binding.tvCurrentStop.contentDescription = currentLabel
+
+        // Live distance to the stop we're heading to
+        val dist = state.distanceToNextMetres
+        binding.tvDistance.text = when {
+            dist == null -> "Определяне на разстояние…"
+            else         -> "$dist метра"
+        }
+        binding.tvDistance.contentDescription = when {
+            dist == null -> "Определяне на разстоянието до спирката"
+            else         -> "$dist метра до спирката"
+        }
+
+        val next = state.stops.getOrNull(state.currentIdx + 1)
+        binding.tvNextStop.text = if (next != null)
+            "След това: ${next.stopName}"
+        else
+            "Крайна спирка"
+        binding.tvNextStop.contentDescription = binding.tvNextStop.text
+
+        val progress = "${state.currentIdx + 1} / ${state.stops.size} спирки"
+        binding.tvProgress.text = progress
+        binding.tvProgress.contentDescription = progress
+    }
+
+    private fun renderSelection(state: SelectionState) {
+        binding.panelActiveJourney.visibility = View.GONE
+        binding.btnEndJourney.visibility      = View.GONE
+
+        if (!state.hasLocation) {
+            binding.panelUpcoming.visibility = View.GONE
+            binding.tvJourneyHint.visibility = View.VISIBLE
+            binding.tvJourneyHint.text = "Определяне на местоположение…"
+            binding.tvJourneyHint.contentDescription =
+                "Определяне на местоположение, моля изчакайте."
+            return
+        }
+
+        binding.tvJourneyHint.visibility = View.GONE
+        binding.panelUpcoming.visibility = View.VISIBLE
+        binding.pbRefreshing.visibility =
+            if (state.refreshing) View.VISIBLE else View.GONE
+        binding.btnRefresh.isEnabled = !state.refreshing
+
+        val count = state.upcoming.size
+        binding.tvUpcomingTitle.text = when {
+            state.refreshing && count == 0 -> "Зареждане…"
+            count == 0 -> "Близки превозни средства"
+            count == 1 -> "1 идващо превозно средство"
+            else       -> "$count идващи превозни средства"
+        }
+        binding.tvUpcomingTitle.contentDescription = binding.tvUpcomingTitle.text
+
+        binding.tvEmptyMessage.visibility =
+            if (count == 0 && !state.refreshing) View.VISIBLE else View.GONE
+        binding.rvUpcoming.visibility =
+            if (count > 0) View.VISIBLE else View.GONE
+
+        upcomingAdapter.submitList(state.upcoming)
+    }
+
+    // ── Location for the SELECTION list only (tracking GPS lives in the
+    //    service). Balanced accuracy is enough while waiting for the bus. ──
     @Suppress("MissingPermission")
     private fun startLocationAndLoad() {
         fusedClient = LocationServices.getFusedLocationProviderClient(requireContext())
         fusedClient.lastLocation.addOnSuccessListener { loc ->
-            if (loc != null) {
+            if (loc != null && vm.tracking.value !is JourneyService.TrackingState.Tracking) {
                 lastLat = loc.latitude
                 lastLon = loc.longitude
                 hasLocation = true
                 vm.loadUpcomingTrips(lastLat, lastLon)
             }
         }
-
-        // We use BALANCED accuracy when waiting for the bus (no need for fine
-        // GPS until a journey is actually active — that's handled by the service)
-        val req = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 30_000L)
+        val req = LocationRequest.Builder(
+            Priority.PRIORITY_BALANCED_POWER_ACCURACY, 30_000L)
             .setMinUpdateDistanceMeters(50f)
             .build()
         fusedClient.requestLocationUpdates(req, locationCb, requireActivity().mainLooper)
@@ -200,8 +226,7 @@ class JourneyFragment : Fragment() {
                 lastLat = loc.latitude
                 lastLon = loc.longitude
                 hasLocation = true
-                // Only auto-refresh if we're in the selection state (not active journey)
-                if (vm.state.value is JourneyState.SelectUpcomingTrip) {
+                if (vm.tracking.value !is JourneyService.TrackingState.Tracking) {
                     vm.loadUpcomingTrips(lastLat, lastLon)
                 }
             }

@@ -12,6 +12,17 @@
     <uses-feature android:name="android.hardware.sensor.compass" android:required="false"/>
     <uses-feature android:name="android.hardware.location.gps" android:required="true"/>
 
+    <!-- Android 11+ package visibility: without this the app cannot see
+         third-party TTS engines and silently falls back to Google TTS,
+         ignoring the engine the user picked in system Settings →
+         "Синтезиран говор". With it, TextToSpeech() binds to the user's
+         preferred engine. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
+        </intent>
+    </queries>
+
     <application
         android:name=".TransitApplication"
         android:allowBackup="true"

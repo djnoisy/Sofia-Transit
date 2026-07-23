@@ -651,6 +651,11 @@ class GtfsRepository @Inject constructor(
         return ids
     }
 
+    /** True if the route is a real trolleybus line (route_type 11 covers
+     *  both trolleybuses and electrobuses; this is the distinction). */
+    suspend fun isTrolleyRoute(routeId: String): Boolean =
+        routeId in getTrolleyRouteIds()
+
     /**
      * Determines the human-readable vehicle type for a route, for TalkBack.
      * CGM's route_type=11 lumps real trolleys and electric buses together

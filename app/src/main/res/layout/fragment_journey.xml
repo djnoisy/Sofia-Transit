@@ -65,18 +65,24 @@
             android:textSize="15sp" android:alpha="0.7" android:paddingBottom="16dp"/>
 
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="Текуща спирка" android:textSize="14sp"
+            android:text="Спирка" android:textSize="14sp"
             android:textAllCaps="true" android:alpha="0.6"/>
         <TextView android:id="@+id/tvCurrentStop"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textSize="26sp" android:textStyle="bold"
             android:paddingVertical="8dp"/>
 
+        <!-- Live distance to the stop we're heading to; updated on every GPS fix -->
+        <TextView android:id="@+id/tvDistance"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="18sp"
+            android:paddingBottom="8dp"/>
+
         <View android:layout_width="match_parent" android:layout_height="1dp"
             android:background="#E0E0E0" android:layout_marginVertical="16dp"/>
 
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="Следваща спирка" android:textSize="14sp"
+            android:text="След това" android:textSize="14sp"
             android:textAllCaps="true" android:alpha="0.6"/>
         <TextView android:id="@+id/tvNextStop"
             android:layout_width="match_parent" android:layout_height="wrap_content"
