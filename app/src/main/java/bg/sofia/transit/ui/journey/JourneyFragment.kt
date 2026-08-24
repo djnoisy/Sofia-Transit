@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import androidx.appcompat.app.AlertDialog
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -90,6 +91,15 @@ class JourneyFragment : Fragment() {
             if (hasLocation) vm.loadUpcomingTrips(lastLat, lastLon)
         }
         binding.btnEndJourney.setOnClickListener { vm.endJourney() }
+        binding.btnChooseDestination.setOnClickListener { showDestinationPicker() }
+        binding.btnClearDestination.setOnClickListener {
+            vm.setDestination(null)
+            // Announced through TalkBack, not the speech engine: this is a
+            // screen interaction, so it should queue with the screen reader
+            // instead of cutting it off. Silent when no screen reader is on —
+            // the row returning to "Не е избрана" is the visual feedback.
+            binding.root.announceForAccessibility("Спирката за слизане е премахната")
+        }
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -98,6 +108,16 @@ class JourneyFragment : Fragment() {
                 launch {
                     vm.error.collect { msg ->
                         Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+                    }
+                }
+                // Destination reached → the journey has ended; take the user
+                // to the Stops tab as agreed.
+                launch {
+                    vm.journeyEvents.collect { ev ->
+                        when (ev) {
+                            is JourneyService.JourneyEvent.DestinationReached ->
+                                goToStopsTab()
+                        }
                     }
                 }
             }
@@ -130,38 +150,119 @@ class JourneyFragment : Fragment() {
         binding.btnEndJourney.visibility      = View.VISIBLE
 
         binding.tvJourneyRoute.text = state.routeLabel
+        // The only contentDescription in this panel: "→" is a glyph a sighted
+        // user reads as "към", but a screen reader would either skip it or
+        // announce the symbol. Everywhere else the visible text is the
+        // spoken text.
         binding.tvJourneyRoute.contentDescription =
             state.routeLabel.replace("→", "към")
 
-        val current = state.stops.getOrNull(state.currentIdx)
-        val currentLabel = if (state.atStop)
-            "Спирка: ${current?.stopName ?: "—"}"
-        else
-            "Към: ${current?.stopName ?: "—"}"
-        binding.tvCurrentStop.text = currentLabel
-        binding.tvCurrentStop.contentDescription = currentLabel
+        val stopName = state.currentStop?.stopName ?: "—"
 
-        // Live distance to the stop we're heading to
-        val dist = state.distanceToNextMetres
-        binding.tvDistance.text = when {
-            dist == null -> "Определяне на разстояние…"
-            else         -> "$dist метра"
+        // Only ONE stop is shown: the one we're at, or the one we're heading
+        // to. The caption switches accordingly.
+        if (state.atStop) {
+            binding.tvStopCaption.text = "Спирка"
+            binding.tvCurrentStop.text = stopName
+            binding.tvCurrentStop.contentDescription = null
+            // Distance is meaningless while standing at the stop.
+            binding.tvDistance.visibility = View.GONE
+        } else {
+            binding.tvStopCaption.text = "Следваща спирка"
+            binding.tvCurrentStop.text = stopName
+            binding.tvCurrentStop.contentDescription = null
+            binding.tvDistance.visibility = View.VISIBLE
+            val d = state.distanceToNextMetres
+            binding.tvDistance.text =
+                if (d == null) "Определяне на разстояние…" else "Разстояние: $d метра"
+            binding.tvDistance.contentDescription = null
         }
-        binding.tvDistance.contentDescription = when {
-            dist == null -> "Определяне на разстоянието до спирката"
-            else         -> "$dist метра до спирката"
+
+        // Remaining stops — to the chosen destination when set, else to the
+        // end of the route.
+        val remaining = state.stopsRemaining
+        val progressText = when {
+            state.destinationIdx != null && remaining == 0 -> "Слизане на следващата спирка"
+            state.destinationIdx != null ->
+                "Още $remaining ${stopWord(remaining)} до края на пътуването"
+            else -> "Още $remaining ${stopWord(remaining)} до края на маршрута"
+        }
+        binding.tvProgress.text = progressText
+        binding.tvProgress.contentDescription = null
+
+        // Destination row + button label reflect whether one is chosen.
+        val destName = state.destinationStop?.stopName
+        if (destName != null) {
+            binding.tvDestination.text = destName
+            binding.tvDestination.contentDescription = null
+            binding.btnChooseDestination.text = "Промени спирката"
+            binding.btnChooseDestination.contentDescription = null
+            binding.btnClearDestination.visibility = View.VISIBLE
+
+            // Arrival estimate. A live prediction and a delay-adjusted one
+            // are close enough in practice to be worded identically; only a
+            // raw timetable time (no live data at all) is marked as such.
+            // No contentDescription is set anywhere here: TalkBack should
+            // read exactly what is on screen, nothing longer.
+            val eta = state.destinationEtaEpoch
+            if (eta != null && state.etaSource != JourneyService.EtaSource.NONE) {
+                val minutes = ((eta - System.currentTimeMillis() / 1000) / 60).toInt()
+                val whenText = when {
+                    minutes <= 0 -> "сега"
+                    minutes == 1 -> "след 1 минута"
+                    else         -> "след $minutes минути"
+                }
+                val text = if (state.etaSource == JourneyService.EtaSource.SCHEDULE)
+                    "Пристигане: $whenText (по разписание)"
+                else
+                    "Пристигане: $whenText"
+                binding.tvDestinationEta.visibility = View.VISIBLE
+                binding.tvDestinationEta.text = text
+                binding.tvDestinationEta.contentDescription = null
+            } else {
+                binding.tvDestinationEta.visibility = View.GONE
+            }
+        } else {
+            binding.tvDestination.text = "Не е избрана"
+            binding.tvDestination.contentDescription = null
+            binding.btnChooseDestination.text = "Избери спирка"
+            binding.btnChooseDestination.contentDescription = null
+            binding.btnClearDestination.visibility = View.GONE
+            binding.tvDestinationEta.visibility = View.GONE
+        }
+    }
+
+    /** Correct Bulgarian plural for the stop counter. */
+    private fun stopWord(n: Int) = if (n == 1) "спирка" else "спирки"
+
+    /**
+     * Lets the user pick (or clear) the alighting stop. Lists only stops
+     * still ahead, so a passed stop can't be chosen by accident.
+     */
+    private fun showDestinationPicker() {
+        val state = vm.tracking.value as? JourneyService.TrackingState.Tracking ?: return
+
+        // Candidates: every stop after the one we're heading to, plus the
+        // current one when we're still en route to it.
+        val firstCandidate = if (state.atStop) state.currentIdx + 1 else state.currentIdx
+        if (firstCandidate > state.stops.lastIndex) {
+            Toast.makeText(requireContext(),
+                "Няма следващи спирки по маршрута", Toast.LENGTH_SHORT).show()
+            return
         }
 
-        val next = state.stops.getOrNull(state.currentIdx + 1)
-        binding.tvNextStop.text = if (next != null)
-            "След това: ${next.stopName}"
-        else
-            "Крайна спирка"
-        binding.tvNextStop.contentDescription = binding.tvNextStop.text
+        val indices = (firstCandidate..state.stops.lastIndex).toList()
+        val names = indices.map { state.stops[it].stopName }
 
-        val progress = "${state.currentIdx + 1} / ${state.stops.size} спирки"
-        binding.tvProgress.text = progress
-        binding.tvProgress.contentDescription = progress
+        AlertDialog.Builder(requireContext())
+            .setTitle("Спирка за слизане")
+            .setItems(names.toTypedArray()) { _, which ->
+                vm.setDestination(indices[which])
+                binding.root.announceForAccessibility(
+                    "Спирка за слизане: ${names[which]}")
+            }
+            .setNegativeButton("Отказ", null)
+            .show()
     }
 
     private fun renderSelection(state: SelectionState) {
@@ -172,8 +273,7 @@ class JourneyFragment : Fragment() {
             binding.panelUpcoming.visibility = View.GONE
             binding.tvJourneyHint.visibility = View.VISIBLE
             binding.tvJourneyHint.text = "Определяне на местоположение…"
-            binding.tvJourneyHint.contentDescription =
-                "Определяне на местоположение, моля изчакайте."
+            binding.tvJourneyHint.contentDescription = null
             return
         }
 
@@ -190,7 +290,7 @@ class JourneyFragment : Fragment() {
             count == 1 -> "1 идващо превозно средство"
             else       -> "$count идващи превозни средства"
         }
-        binding.tvUpcomingTitle.contentDescription = binding.tvUpcomingTitle.text
+        binding.tvUpcomingTitle.contentDescription = null
 
         binding.tvEmptyMessage.visibility =
             if (count == 0 && !state.refreshing) View.VISIBLE else View.GONE
@@ -230,6 +330,19 @@ class JourneyFragment : Fragment() {
                     vm.loadUpcomingTrips(lastLat, lastLon)
                 }
             }
+        }
+    }
+
+    /** Switches the bottom navigation to the Stops tab. */
+    private fun goToStopsTab() {
+        try {
+            requireActivity()
+                .findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(
+                    bg.sofia.transit.R.id.bottomNav
+                )?.selectedItemId = bg.sofia.transit.R.id.nearbyFragment
+        } catch (e: Exception) {
+            bg.sofia.transit.util.FileLogger.e(
+                "JourneyFragment", "Could not switch to Stops tab: ${e.message}")
         }
     }
 

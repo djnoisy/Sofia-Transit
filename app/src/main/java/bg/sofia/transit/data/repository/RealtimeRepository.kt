@@ -98,6 +98,45 @@ class RealtimeRepository @Inject constructor() {
      * Fetches GTFS-RT TripUpdates and returns real-time arrival times
      * for the given stop, grouped by route short name and headsign.
      */
+    /**
+     * Real-time arrival of ONE specific vehicle at ONE specific stop.
+     *
+     * Used by the journey screen to show "пристигане след N мин" at the
+     * chosen alighting stop. Unlike [getArrivalsForStop] this does no
+     * headsign/dedup work — we already know exactly which trip we are
+     * riding, so we just find its entry for that stop in the TripUpdates
+     * feed.
+     *
+     * Returns the arrival time in epoch seconds, or null when the feed has
+     * nothing for this trip/stop pair. That is a normal outcome, not an
+     * error: CGM only publishes predictions a limited time ahead, so a stop
+     * far down the route simply has no entry yet.
+     */
+    suspend fun getArrivalForTripAtStop(tripId: String, stopId: String): Long? =
+        withContext(Dispatchers.IO) {
+            try {
+                val feed = fetchTripUpdates() ?: return@withContext null
+                for (entity in feed.entityList) {
+                    if (!entity.hasTripUpdate()) continue
+                    val tu = entity.tripUpdate
+                    if (tu.trip.tripId != tripId) continue
+                    for (stu in tu.stopTimeUpdateList) {
+                        if (stu.stopId != stopId) continue
+                        val t = when {
+                            stu.hasArrival()   && stu.arrival.hasTime()   -> stu.arrival.time
+                            stu.hasDeparture() && stu.departure.hasTime() -> stu.departure.time
+                            else -> continue
+                        }
+                        return@withContext t
+                    }
+                }
+                null
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "getArrivalForTripAtStop failed: ${e.message}")
+                null
+            }
+        }
+
     suspend fun getArrivalsForStop(
         stopId: String,
         routeShortNames: Map<String, String>,  // routeId -> shortName

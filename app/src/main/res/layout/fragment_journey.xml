@@ -54,7 +54,9 @@
             android:layout_width="match_parent" android:layout_height="match_parent"/>
     </LinearLayout>
 
-    <!-- Active journey panel -->
+    <!-- Active journey panel: deliberately minimal — one stop plus the
+         alighting info, so a passenger (often using TalkBack) is not made to
+         wade through a list while riding. -->
     <LinearLayout android:id="@+id/panelActiveJourney"
         android:layout_width="match_parent" android:layout_height="0dp"
         android:layout_weight="1" android:orientation="vertical"
@@ -64,39 +66,58 @@
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textSize="15sp" android:alpha="0.7" android:paddingBottom="16dp"/>
 
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="Спирка" android:textSize="14sp"
+        <!-- Either "Спирка" (inside the radius) or "Следваща спирка" -->
+        <TextView android:id="@+id/tvStopCaption"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="14sp"
             android:textAllCaps="true" android:alpha="0.6"/>
         <TextView android:id="@+id/tvCurrentStop"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textSize="26sp" android:textStyle="bold"
             android:paddingVertical="8dp"/>
 
-        <!-- Live distance to the stop we're heading to; updated on every GPS fix -->
+        <!-- Live distance; hidden while standing at a stop -->
         <TextView android:id="@+id/tvDistance"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textSize="18sp"
             android:paddingBottom="8dp"/>
 
+        <TextView android:id="@+id/tvProgress"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="15sp" android:paddingTop="8dp"/>
+
         <View android:layout_width="match_parent" android:layout_height="1dp"
             android:background="#E0E0E0" android:layout_marginVertical="16dp"/>
 
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="След това" android:textSize="14sp"
+            android:text="Спирка за слизане" android:textSize="14sp"
             android:textAllCaps="true" android:alpha="0.6"/>
-        <TextView android:id="@+id/tvNextStop"
+        <TextView android:id="@+id/tvDestination"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="20sp" android:paddingVertical="8dp"/>
+            android:textSize="18sp" android:paddingVertical="8dp"/>
 
-        <TextView android:id="@+id/tvProgress"
+        <!-- Real-time ETA of this vehicle at the chosen stop -->
+        <TextView android:id="@+id/tvDestinationEta"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="13sp" android:alpha="0.6" android:paddingTop="16dp"/>
+            android:textSize="16sp" android:paddingBottom="4dp"
+            android:visibility="gone"/>
+
+        <Button android:id="@+id/btnChooseDestination"
+            android:layout_width="match_parent" android:layout_height="56dp"
+            android:layout_marginTop="8dp"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+
+        <Button android:id="@+id/btnClearDestination"
+            android:layout_width="match_parent" android:layout_height="56dp"
+            android:layout_marginTop="8dp"
+            android:text="Премахни спирката"
+            android:visibility="gone"
+            style="@style/Widget.Material3.Button.TextButton"/>
     </LinearLayout>
 
     <Button android:id="@+id/btnEndJourney"
         android:layout_width="match_parent" android:layout_height="56dp"
-        android:text="Стоп пътуване"
-        android:contentDescription="Спри следенето на пътуването"
-        android:visibility="gone" android:layout_margin="8dp"
+        android:text="Спри пътуването"
+                android:visibility="gone" android:layout_margin="8dp"
         style="@style/Widget.Material3.Button.TonalButton"/>
 </LinearLayout>

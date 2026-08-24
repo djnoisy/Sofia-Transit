@@ -52,6 +52,32 @@ class JourneyViewModel @Inject constructor(
     /** Journey state, straight from the single source of truth. */
     val tracking = JourneyService.trackingState
 
+    /** One-shot journey events (e.g. destination reached → go to Stops). */
+    val journeyEvents = JourneyService.events
+
+    /**
+     * Sets the stop the user will get off at, by index into the trip's stop
+     * list. Passing null clears it. Requires the service binding, which we
+     * already hold while a journey is active.
+     */
+    fun setDestination(idx: Int?) {
+        journeyService?.setDestination(idx) ?: run {
+            // Binding was lost (process restart while tracking). Re-bind and
+            // apply once connected, so the tap isn't silently dropped.
+            bindToService()
+            viewModelScope.launch {
+                val svc = try {
+                    withTimeout(3_000L) {
+                        bindingDeferred = CompletableDeferred()
+                        bindingDeferred!!.await()
+                    }
+                } catch (_: Exception) { null } finally { bindingDeferred = null }
+                svc?.setDestination(idx)
+                    ?: _error.emit("Изборът не може да бъде приложен")
+            }
+        }
+    }
+
     private val _error = MutableSharedFlow<String>()
     val error: SharedFlow<String> = _error
 
@@ -178,6 +204,7 @@ class JourneyViewModel @Inject constructor(
                 }
                 svc.beginJourney(
                     label   = "$vehicle ${trip.routeShortName} → ${trip.headsign}",
+                    tripId  = trip.tripId,
                     stops   = stops,
                     latLons = latLons,
                     boardingStopIdx = boardingIdx

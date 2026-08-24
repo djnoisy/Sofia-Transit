@@ -25,7 +25,21 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import bg.sofia.transit.data.repository.RealtimeRepository
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
 import java.util.UUID
@@ -53,7 +67,13 @@ import java.util.UUID
  *      it — as agreed)
  *   3. on leaving the radius:        "Следваща спирка: Y"
  */
+@AndroidEntryPoint
 class JourneyService : Service(), TextToSpeech.OnInitListener {
+
+    @Inject lateinit var realtimeRepo: RealtimeRepository
+
+    /** Service-lifetime scope for the ETA polling loop. */
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     companion object {
         private const val TAG = "JourneyService"
@@ -76,6 +96,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          *  Covers up to that many consecutively missed stops in one gap. */
         private const val LOOKAHEAD = 3
 
+        /** Distance at which "Слизате тук" is announced. Matches the normal
+         *  arrival radius so the passenger hears it in time to reach the door. */
+        const val ALIGHT_ANNOUNCE_RADIUS = 60.0
+
+        /** Distance at which the journey is considered complete and tracking
+         *  stops. Tighter than the announcement, so the announcement always
+         *  comes first and the journey only ends once genuinely at the stop. */
+        const val ALIGHT_END_RADIUS = 30.0
+
+        /** If the vehicle makes no forward progress for this long, the
+         *  journey is assumed over (user forgot to stop tracking). */
+        private const val INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000L
+
         /**
          * Tracking state, observable without binding to the service.
          * The UI collects this; the service is the only writer.
@@ -83,9 +116,35 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         private val _trackingState = MutableStateFlow<TrackingState>(TrackingState.Idle)
         val trackingState: StateFlow<TrackingState> = _trackingState
 
+        /**
+         * One-shot events the UI must react to (navigation), separate from
+         * state. Replay 0: an event missed while the app is backgrounded is
+         * not re-fired when it returns.
+         */
+        private val _events = MutableSharedFlow<JourneyEvent>(extraBufferCapacity = 4)
+        val events: SharedFlow<JourneyEvent> = _events
+
         fun start(ctx: Context) =
             ctx.startForegroundService(Intent(ctx, JourneyService::class.java))
         fun stop(ctx: Context) = ctx.stopService(Intent(ctx, JourneyService::class.java))
+    }
+
+    /** Origin of the displayed arrival estimate. */
+    enum class EtaSource {
+        NONE,
+        /** Live prediction from the CGM feed for this exact trip and stop. */
+        REALTIME,
+        /** Static timetable, shifted by the delay currently observed on this
+         *  trip. Better than the raw timetable while the vehicle runs late. */
+        SCHEDULE_ADJUSTED,
+        /** Raw static timetable — no live data available at all. */
+        SCHEDULE
+    }
+
+    /** One-shot journey events. */
+    sealed class JourneyEvent {
+        /** The chosen alighting stop was reached — UI should go to Stops. */
+        object DestinationReached : JourneyEvent()
     }
 
     /** Immutable snapshot of the journey, re-emitted on every change. */
@@ -96,8 +155,36 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             val stops: List<StopWithSequence>,
             val currentIdx: Int,             // index of the stop we're heading to / at
             val atStop: Boolean,
-            val distanceToNextMetres: Int?   // live distance; null until first fix
-        ) : TrackingState()
+            val distanceToNextMetres: Int?,  // live distance; null until first fix
+            /** Chosen alighting stop, or null if the user hasn't picked one. */
+            val destinationIdx: Int? = null,
+            /** Arrival of THIS vehicle at the chosen stop, epoch seconds.
+             *  Null when no destination is set, or when neither the feed nor
+             *  the timetable can supply a time. */
+            val destinationEtaEpoch: Long? = null,
+            /** Where [destinationEtaEpoch] came from. The UI must label a
+             *  timetable-derived estimate differently from a live one — a
+             *  scheduled time carries no traffic information and would
+             *  otherwise be mistaken for a real prediction. */
+            val etaSource: EtaSource = EtaSource.NONE
+        ) : TrackingState() {
+
+            /** The stop currently shown as "Спирка"/"Следваща спирка". */
+            val currentStop: StopWithSequence? get() = stops.getOrNull(currentIdx)
+
+            val destinationStop: StopWithSequence?
+                get() = destinationIdx?.let { stops.getOrNull(it) }
+
+            /**
+             * Stops left to ride. Counts to the chosen destination when set,
+             * otherwise to the end of the route.
+             */
+            val stopsRemaining: Int
+                get() {
+                    val target = destinationIdx ?: stops.lastIndex
+                    return (target - currentIdx).coerceAtLeast(0)
+                }
+        }
     }
 
     inner class LocalBinder : Binder() { fun get() = this@JourneyService }
@@ -144,6 +231,22 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     /** True until the first GPS fix positions us on the route. */
     private var awaitingFirstFix = true
 
+    /** Chosen alighting stop; null until the user picks one. */
+    private var destinationIdx: Int? = null
+    /** Which of the "2 stops / 1 stop / next stop" warnings already fired. */
+    private val alightWarningsFired = mutableSetOf<Int>()
+    /** Guards the "Слизате тук" announcement so it is spoken once. */
+    private var alightAnnounced = false
+    /** Timestamp of the last forward progress, for the inactivity timeout. */
+    private var lastProgressMs = System.currentTimeMillis()
+
+    /** trip_id being ridden — needed to query its real-time predictions. */
+    private var tripId: String = ""
+    /** Latest real-time ETA at the destination stop, epoch seconds. */
+    private var destinationEtaEpoch: Long? = null
+    private var etaSource: EtaSource = EtaSource.NONE
+    private var etaJob: Job? = null
+
     private lateinit var fusedClient: FusedLocationProviderClient
 
     // ── Commands (called by the ViewModel through the binder) ─────────────
@@ -157,10 +260,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     fun beginJourney(
         label: String,
+        tripId: String,
         stops: List<StopWithSequence>,
         latLons: List<Pair<Double, Double>>,
         boardingStopIdx: Int
     ) {
+        this.tripId       = tripId
         routeLabel        = label
         orderedStops      = stops
         stopLatLon        = latLons
@@ -168,10 +273,43 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         atStop            = false
         approachAnnounced = false
         awaitingFirstFix  = true
+        destinationIdx    = null
+        alightWarningsFired.clear()
+        alightAnnounced   = false
+        lastProgressMs    = System.currentTimeMillis()
 
         publish(distance = null)
         startLocUpdates()
         announce("Следене на пътуването започна.")
+    }
+
+    /**
+     * Sets (or replaces) the stop the user intends to get off at. Can be
+     * called at any time during the journey; passing null clears it.
+     * Warnings already fired for a previous destination are reset so the
+     * new one gets its own full set.
+     */
+    fun setDestination(idx: Int?) {
+        destinationIdx = idx?.coerceIn(0, orderedStops.lastIndex)
+        alightWarningsFired.clear()
+        alightAnnounced = false
+        destinationEtaEpoch = null
+        etaSource = EtaSource.NONE
+        restartEtaPolling()
+        // NOTE: the confirmation of the choice itself is NOT spoken here.
+        // Picking or clearing a destination is an on-screen interaction, so
+        // the UI announces it through TalkBack instead — that queues with the
+        // screen reader rather than interrupting it, and stays silent for
+        // users who have no screen reader but do want travel announcements.
+        // Only travel events (approaching, arriving, alighting) go through
+        // the speech engine, because those must be heard with the phone in a
+        // pocket.
+        if (destinationIdx != null) {
+            // If the destination is already imminent, fire the right warning
+            // immediately instead of waiting for the next stop transition.
+            evaluateAlightWarnings(announceNow = true)
+        }
+        publishLastKnown()
     }
 
     fun endJourney() {
@@ -180,6 +318,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         stopLatLon   = emptyList()
         currentIdx   = 0
         atStop       = false
+        destinationIdx = null
+        alightWarningsFired.clear()
         _trackingState.value = TrackingState.Idle
         stopSelf()
     }
@@ -187,6 +327,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     // ── Progress engine ───────────────────────────────────────────────────
     private fun onFix(loc: Location) {
         if (orderedStops.isEmpty()) return
+
+        val idxBefore = currentIdx
 
         // On the very first fix, snap to the route: among ALL stops from the
         // boarding index onward, pick the nearest. This is what makes
@@ -271,7 +413,197 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             }
         }
 
+        // ── Destination handling ─────────────────────────────────────────
+        val dest = destinationIdx
+        if (dest != null) {
+
+            val destDist = distTo(loc, dest)
+
+            // 1a) Announce at 60 m — early enough to signal the driver and
+            //     reach the door.
+            if (destDist <= ALIGHT_ANNOUNCE_RADIUS && !alightAnnounced) {
+                alightAnnounced = true
+                announce("Слизате тук: ${orderedStops[dest].stopName}.")
+            }
+
+            // 1b) End the journey only once genuinely at the stop (<30 m),
+            //     so the announcement always precedes the screen switching
+            //     away to the Stops tab.
+            if (destDist <= ALIGHT_END_RADIUS) {
+                _events.tryEmit(JourneyEvent.DestinationReached)
+                endJourney()
+                return
+            }
+
+            // 2) Safety net: the destination was passed without the 30 m
+            //    radius ever registering — almost always because the user
+            //    missed their stop. Keep tracking, but drop the destination
+            //    so the journey behaves as if none had been chosen.
+            if (currentIdx > dest) {
+                FileLogger.i(TAG, "Destination passed without alighting; clearing it")
+                destinationIdx = null
+                alightWarningsFired.clear()
+                alightAnnounced = false
+                destinationEtaEpoch = null
+                etaSource = EtaSource.NONE
+                announce("Спирката за слизане е подмината.")
+            } else if (currentIdx != idxBefore) {
+                // 3) We advanced a stop — check the countdown warnings.
+                evaluateAlightWarnings(announceNow = true)
+            }
+        }
+
+        // ── Inactivity timeout ───────────────────────────────────────────
+        if (currentIdx != idxBefore) {
+            lastProgressMs = System.currentTimeMillis()
+        } else if (System.currentTimeMillis() - lastProgressMs > INACTIVITY_TIMEOUT_MS) {
+            FileLogger.i(TAG, "No progress for 10 min — ending journey automatically")
+            announce("Няма движение по маршрута. Следенето е спряно.")
+            endJourney()
+            return
+        }
+
         publish(distance = distTo(loc, currentIdx).toInt())
+    }
+
+    /**
+     * Fires the alighting countdown announcements, each at most once per
+     * chosen destination:
+     *   2 stops to go → "Остават две спирки до слизане."
+     *   1 stop to go  → "Остава една спирка до слизане."
+     *   destination is the stop we're heading to → "Слизате на следващата спирка."
+     *
+     * Keyed by the number of stops remaining, so re-selecting the same
+     * destination after passing it re-arms them.
+     */
+    private fun evaluateAlightWarnings(announceNow: Boolean) {
+        val dest = destinationIdx ?: return
+        val remaining = dest - currentIdx
+        if (remaining !in 0..2) return
+        if (!alightWarningsFired.add(remaining)) return   // already announced
+        if (!announceNow) return
+
+        when (remaining) {
+            2 -> announce("Остават две спирки до слизане.")
+            1 -> announce("Остава една спирка до слизане.")
+            0 -> announce("Слизате на следващата спирка: " +
+                          "${orderedStops[dest].stopName}.")
+        }
+    }
+
+    /** Re-emits state using the last known distance (for non-GPS changes,
+     *  e.g. the user picking a destination). */
+    private fun publishLastKnown() {
+        val prev = _trackingState.value as? TrackingState.Tracking
+        publish(distance = prev?.distanceToNextMetres)
+    }
+
+    /**
+     * Polls the real-time feed for THIS vehicle's predicted arrival at the
+     * chosen alighting stop. Every 30 s: the feed itself only refreshes on
+     * that order, so polling faster would just re-download the same bytes.
+     *
+     * A null result is expected and harmless — CGM publishes predictions
+     * only a limited time ahead, so a distant stop simply has none yet and
+     * the UI falls back to showing the stop count.
+     */
+    private fun restartEtaPolling() {
+        etaJob?.cancel()
+        val dest = destinationIdx ?: run {
+            destinationEtaEpoch = null
+            etaSource = EtaSource.NONE
+            return
+        }
+        val destStop = orderedStops.getOrNull(dest) ?: return
+        if (tripId.isBlank()) return
+
+        etaJob = serviceScope.launch {
+            while (isActive) {
+                computeEta(dest, destStop)
+                if (destinationIdx == dest) {
+                    withContext(Dispatchers.Main) { publishLastKnown() }
+                }
+                delay(30_000L)
+            }
+        }
+    }
+
+    /**
+     * Three-tier arrival estimate for the alighting stop, best source first:
+     *
+     *  1. REALTIME — the feed has a prediction for this exact trip at that
+     *     stop. Always preferred.
+     *  2. SCHEDULE_ADJUSTED — the feed has no entry for the far-off stop but
+     *     DOES have one for a nearer stop on the same trip. Comparing that
+     *     against the timetable yields the delay this vehicle is currently
+     *     running, which we apply to the destination's scheduled time. A bus
+     *     six minutes late now will still be roughly six minutes late later,
+     *     so this is markedly better than the raw timetable.
+     *  3. SCHEDULE — no live data at all; the plain timetable time.
+     *
+     * The tier is reported to the UI so a planned time is never displayed as
+     * if it were a live prediction.
+     */
+    private suspend fun computeEta(dest: Int, destStop: StopWithSequence) {
+        // Tier 1
+        realtimeRepo.getArrivalForTripAtStop(tripId, destStop.stopId)?.let { live ->
+            destinationEtaEpoch = live
+            etaSource = EtaSource.REALTIME
+            return
+        }
+
+        val scheduled = scheduledEpoch(destStop.arrivalTime)
+        if (scheduled == null) {
+            destinationEtaEpoch = null
+            etaSource = EtaSource.NONE
+            return
+        }
+
+        // Tier 2: find the delay from any nearer stop the feed does cover.
+        val delaySec = observedDelaySeconds()
+        if (delaySec != null) {
+            destinationEtaEpoch = scheduled + delaySec
+            etaSource = EtaSource.SCHEDULE_ADJUSTED
+            FileLogger.d(TAG, "ETA from schedule + ${delaySec}s observed delay")
+        } else {
+            destinationEtaEpoch = scheduled
+            etaSource = EtaSource.SCHEDULE
+        }
+    }
+
+    /**
+     * How late this vehicle is running right now, in seconds, or null if the
+     * feed covers none of the stops we can compare against. Scans forward
+     * from the current position so the sample is as fresh as possible.
+     */
+    private suspend fun observedDelaySeconds(): Int? {
+        val upTo = (currentIdx + 6).coerceAtMost(orderedStops.lastIndex)
+        for (i in currentIdx..upTo) {
+            val st = orderedStops[i]
+            val live = realtimeRepo.getArrivalForTripAtStop(tripId, st.stopId) ?: continue
+            val planned = scheduledEpoch(st.arrivalTime) ?: continue
+            return (live - planned).toInt()
+        }
+        return null
+    }
+
+    /**
+     * Converts a GTFS "HH:MM:SS" into an epoch second for today. GTFS allows
+     * hours ≥ 24 for trips running past midnight (e.g. "25:10:00" = 01:10 the
+     * next day), which plain time parsing would reject.
+     */
+    private fun scheduledEpoch(hhmmss: String): Long? = try {
+        val parts = hhmmss.split(":")
+        val h = parts[0].toInt()
+        val m = parts[1].toInt()
+        val sec = parts.getOrNull(2)?.toIntOrNull() ?: 0
+        val midnight = java.time.LocalDate.now()
+            .atStartOfDay(java.time.ZoneId.systemDefault())
+            .toEpochSecond()
+        midnight + h * 3600L + m * 60L + sec
+    } catch (e: Exception) {
+        FileLogger.w(TAG, "Bad schedule time '$hhmmss': ${e.message}")
+        null
     }
 
     private fun distTo(loc: Location, idx: Int): Double {
@@ -285,7 +617,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             stops                 = orderedStops,
             currentIdx            = currentIdx,
             atStop                = atStop,
-            distanceToNextMetres  = distance
+            distanceToNextMetres  = distance,
+            destinationIdx        = destinationIdx,
+            destinationEtaEpoch   = destinationEtaEpoch,
+            etaSource             = etaSource
         )
     }
 
@@ -332,6 +667,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         stopLocUpdates()
+        etaJob?.cancel()
+        serviceScope.cancel()
         // If the system kills us mid-journey, don't leave the UI thinking
         // a journey is still active.
         if (_trackingState.value is TrackingState.Tracking) {
