@@ -203,6 +203,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts.setLanguage(Locale("bg", "BG"))
+            tts.setSpeechRate(settings.speechRate)
 
             // Announcements stay on the default media stream — the same one
             // used by audiobook readers and by the system's own "test speech"
@@ -239,6 +240,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * Rebinds to a newly chosen speech engine mid-journey, so a change in
      * Settings takes effect without having to restart tracking.
      */
+    /** Applies the speaking rate from settings without recreating TTS. */
+    fun applySpeechRate() {
+        if (ttsReady) {
+            try { tts.setSpeechRate(settings.speechRate) } catch (_: Exception) {}
+        }
+    }
+
     fun reloadTtsEngine() {
         try { tts.shutdown() } catch (_: Exception) {}
         ttsReady = false

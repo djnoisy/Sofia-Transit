@@ -20,12 +20,31 @@ class AppSettings @Inject constructor(
     companion object {
         private const val PREFS = "app_settings"
         private const val KEY_TTS_ENGINE = "tts_engine"
+        private const val KEY_SPEECH_RATE = "speech_rate"
 
         /** Sentinel meaning "whatever the system default is". */
         const val ENGINE_SYSTEM_DEFAULT = ""
+
+        const val RATE_MIN = 0.1f
+        const val RATE_MAX = 2.0f
+        const val RATE_STEP = 0.1f
+        const val RATE_DEFAULT = 1.0f
     }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /**
+     * Speaking rate for journey announcements, 1.0 being the engine's normal
+     * speed. Stored separately from the system-wide TTS rate on purpose:
+     * screen-reader users often run their reader very fast, but want stop
+     * announcements at a calmer pace (or the reverse).
+     */
+    var speechRate: Float
+        get() = prefs.getFloat(KEY_SPEECH_RATE, RATE_DEFAULT)
+            .coerceIn(RATE_MIN, RATE_MAX)
+        set(value) {
+            prefs.edit().putFloat(KEY_SPEECH_RATE, value.coerceIn(RATE_MIN, RATE_MAX)).apply()
+        }
 
     /**
      * Package name of the speech engine journey announcements should use, or

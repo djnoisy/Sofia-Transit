@@ -17,40 +17,88 @@
             android:textAllCaps="true"
             android:alpha="0.6"
             android:accessibilityHeading="true"
-            android:paddingBottom="8dp"/>
+            android:paddingBottom="12dp"/>
 
+        <!-- Explains what the button below controls. Kept above it so a
+             screen reader meets the explanation before the control. -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Избор на речева машина за изговаряне на съобщенията по време на пътуване. За да се избегнат конфликти е препоръчително избраната машина да бъде различна от тази на екранния четец."
+            android:textSize="14sp"
+            android:alpha="0.75"
+            android:lineSpacingMultiplier="1.15"
+            android:paddingBottom="12dp"/>
+
+        <!-- Classic Spinner rather than a Material exposed dropdown: the
+             latter is an AutoCompleteTextView underneath, which TalkBack may
+             announce as an editable field. A Spinner is announced plainly as
+             a drop-down list.
+
+             The caption is an ordinary element, read on its own while
+             swiping, exactly as it appears on screen. Deliberately no
+             labelFor and no contentDescription on the spinner: either would
+             repeat the caption when the spinner takes focus, producing an
+             announcement that does not match what is displayed. -->
         <TextView android:id="@+id/tvEngineLabel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Речева машина"
-            android:textSize="18sp"/>
+            android:textSize="16sp"
+            android:paddingBottom="4dp"/>
 
-        <TextView android:id="@+id/tvEngineCurrent"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="15sp"
-            android:alpha="0.7"
-            android:paddingTop="4dp"/>
-
-        <Button android:id="@+id/btnChooseEngine"
+        <Spinner android:id="@+id/spinnerEngine"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:layout_marginTop="8dp"
-            android:text="Избери речева машина"
-            style="@style/Widget.Material3.Button.OutlinedButton"/>
+            android:minHeight="48dp"/>
 
-        <TextView
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#E0E0E0" android:layout_marginVertical="24dp"/>
+
+        <TextView android:id="@+id/tvRateLabel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Речевата машина обработва заявките една по една. Ако изберете машина, различна от тази на екранния четец, съобщенията по време на пътуване няма да бъдат прекъсвани от четеца."
-            android:textSize="14sp"
-            android:alpha="0.7"
-            android:paddingTop="12dp"/>
+            android:text="Скорост на изговаряне"
+            android:textSize="16sp"/>
+
+        <SeekBar android:id="@+id/seekRate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"/>
+
+        <!-- All three are ordinary accessible elements: anything visible on
+             screen should be reachable by touch exploration, so the screen
+             reader's picture matches the visual one. The value is therefore
+             heard twice — once from the slider, once as this text — which is
+             the same duplication a sighted user sees (thumb position and
+             number), not an artefact. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="бавно" android:textSize="13sp" android:alpha="0.6"/>
+
+            <TextView android:id="@+id/tvRateValue"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:textSize="14sp"/>
+
+            <TextView
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:gravity="end"
+                android:text="бързо" android:textSize="13sp" android:alpha="0.6"/>
+        </LinearLayout>
 
         <Button android:id="@+id/btnTestSpeech"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="20dp"
             android:text="Изпробвай гласа"
             style="@style/Widget.Material3.Button.TextButton"/>
 
