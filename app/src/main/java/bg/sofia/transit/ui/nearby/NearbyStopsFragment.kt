@@ -42,6 +42,12 @@ class NearbyStopsFragment : Fragment() {
             )
         }
 
+        binding.btnSettings.setOnClickListener {
+            findNavController().navigate(
+                NearbyStopsFragmentDirections.actionNearbyToSettings()
+            )
+        }
+
         binding.viewPager.adapter = StopsTabsAdapter(childFragmentManager, lifecycle)
 
         TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->

@@ -16,7 +16,15 @@
 
         <action android:id="@+id/actionNearbyToDiagnostics"
             app:destination="@id/diagnosticsFragment"/>
+
+        <action android:id="@+id/actionNearbyToSettings"
+            app:destination="@id/settingsFragment"/>
     </fragment>
+
+    <fragment android:id="@+id/settingsFragment"
+        android:name="bg.sofia.transit.ui.settings.SettingsFragment"
+        android:label="Настройки"
+        tools:layout="@layout/fragment_settings"/>
 
     <fragment android:id="@+id/diagnosticsFragment"
         android:name="bg.sofia.transit.ui.diagnostics.DiagnosticsFragment"

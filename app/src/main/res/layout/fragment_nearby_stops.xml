@@ -21,6 +21,12 @@
             android:textStyle="bold"
             android:accessibilityHeading="true"/>
 
+        <Button android:id="@+id/btnSettings"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:text="Настройки"
+            style="@style/Widget.Material3.Button.TextButton"/>
+
         <Button android:id="@+id/btnDiagnostics"
             android:layout_width="wrap_content"
             android:layout_height="48dp"

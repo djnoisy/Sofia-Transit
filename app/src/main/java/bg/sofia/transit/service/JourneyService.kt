@@ -17,6 +17,7 @@ import androidx.core.app.NotificationCompat
 import bg.sofia.transit.MainActivity
 import bg.sofia.transit.R
 import bg.sofia.transit.data.db.dao.StopWithSequence
+import bg.sofia.transit.util.AppSettings
 import bg.sofia.transit.util.FileLogger
 import bg.sofia.transit.util.LocationHelper
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -71,6 +72,7 @@ import java.util.UUID
 class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     @Inject lateinit var realtimeRepo: RealtimeRepository
+    @Inject lateinit var settings: AppSettings
 
     /** Service-lifetime scope for the ETA polling loop. */
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -145,6 +147,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     sealed class JourneyEvent {
         /** The chosen alighting stop was reached — UI should go to Stops. */
         object DestinationReached : JourneyEvent()
+        /** The route's final stop was reached — the journey is over. */
+        object RouteEnded : JourneyEvent()
     }
 
     /** Immutable snapshot of the journey, re-emitted on every change. */
@@ -199,6 +203,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts.setLanguage(Locale("bg", "BG"))
+
+            // Announcements stay on the default media stream — the same one
+            // used by audiobook readers and by the system's own "test speech"
+            // button. Two reasons not to move them to the accessibility
+            // stream: its volume is managed separately and on many devices has
+            // no user-facing slider, so the passenger could not turn
+            // announcements up or down with the hardware keys; and a screen
+            // reader does not duck media by default anyway, so there is
+            // nothing to escape. We never request audio focus, so we mix with
+            // whatever else is playing rather than interrupting it.
             ttsReady = true
             synchronized(pendingAnnouncements) {
                 pendingAnnouncements.forEach {
@@ -209,6 +223,26 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         } else {
             FileLogger.e(TAG, "TTS init failed with status $status")
         }
+    }
+
+    /** Binds TTS to the engine currently chosen in app settings. */
+    private fun createTts() {
+        val engine = settings.ttsEngine
+        tts = if (engine.isNotBlank()) {
+            TextToSpeech(this, this, engine)
+        } else {
+            TextToSpeech(this, this)
+        }
+    }
+
+    /**
+     * Rebinds to a newly chosen speech engine mid-journey, so a change in
+     * Settings takes effect without having to restart tracking.
+     */
+    fun reloadTtsEngine() {
+        try { tts.shutdown() } catch (_: Exception) {}
+        ttsReady = false
+        createTts()
     }
 
     private fun announce(text: String) {
@@ -374,6 +408,21 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     atStop = true
                     approachAnnounced = false
                     announce("Спирка: ${orderedStops[nearest].stopName}")
+
+                    // Final stop reached → the journey is over. Ending here
+                    // rather than on departure matters: a vehicle standing at
+                    // its terminus may never trigger a "departed" event, which
+                    // would leave tracking running indefinitely.
+                    // Skipped when the chosen alighting stop IS the terminus,
+                    // so the destination logic can own the ending (it warns at
+                    // 60 m and finishes at 30 m).
+                    if (nearest == orderedStops.lastIndex &&
+                        destinationIdx != orderedStops.lastIndex) {
+                        announce("Крайна спирка. Пристигнахте.")
+                        _events.tryEmit(JourneyEvent.RouteEnded)
+                        endJourney()
+                        return
+                    }
                 }
             }
 
@@ -384,11 +433,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 if (currentIdx < orderedStops.lastIndex) {
                     currentIdx += 1
                     announce("Следваща спирка: ${orderedStops[currentIdx].stopName}")
-                } else {
-                    announce("Крайна спирка. Пристигнахте.")
-                    endJourney()
-                    return
                 }
+                // No terminus case here any more — arriving at the final stop
+                // already ended the journey above.
             }
 
             // ── Moving; did we silently pass the current stop? ────────────
@@ -650,10 +697,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     // ── Lifecycle ─────────────────────────────────────────────────────────
     override fun onCreate() {
         super.onCreate()
-        // No engine name passed → binds to the engine chosen by the user in
-        // system Settings → "Синтезиран говор" (works together with the
-        // <queries> TTS_SERVICE declaration in the manifest).
-        tts = TextToSpeech(this, this)
+        // Engine selection: the app setting wins when set, otherwise we bind
+        // to the system default from Settings → "Синтезиран говор". Picking a
+        // different engine from TalkBack's is what lets both speak at once —
+        // one engine serialises its clients, so sharing it means whoever
+        // speaks second cuts off the first.
+        createTts()
         fusedClient = LocationServices.getFusedLocationProviderClient(this)
         createChannel()
 

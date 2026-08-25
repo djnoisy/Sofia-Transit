@@ -115,7 +115,10 @@ class JourneyFragment : Fragment() {
                 launch {
                     vm.journeyEvents.collect { ev ->
                         when (ev) {
-                            is JourneyService.JourneyEvent.DestinationReached ->
+                            // Both endings return the user to the Stops tab:
+                            // the journey is over either way.
+                            is JourneyService.JourneyEvent.DestinationReached,
+                            is JourneyService.JourneyEvent.RouteEnded ->
                                 goToStopsTab()
                         }
                     }
