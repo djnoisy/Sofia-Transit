@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Closed-state view of the engine spinner. A plain TextView, not the
+     platform's CheckedTextView: that one carries a checkable state, which a
+     screen reader announces as "не е отметнато" — meaningless here, since
+     picking an item is not ticking a checkbox. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="48dp"
+    android:gravity="center_vertical"
+    android:paddingHorizontal="12dp"
+    android:textSize="16sp"
+    android:textColor="@color/on_background"/>

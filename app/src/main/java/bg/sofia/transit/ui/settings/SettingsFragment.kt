@@ -10,6 +10,7 @@ import android.widget.ArrayAdapter
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import bg.sofia.transit.R
 import bg.sofia.transit.databinding.FragmentSettingsBinding
 import bg.sofia.transit.service.JourneyService
 import bg.sofia.transit.util.AppSettings
@@ -47,11 +48,16 @@ class SettingsFragment : Fragment() {
      */
     private var suppressSpinnerCallback = true
 
+    /** Pending debounced preview of the speaking rate. */
+    private var previewRunnable: Runnable? = null
+
     companion object {
         private const val TAG = "SettingsFragment"
         private const val SAMPLE = "Следваща спирка: Люлин център."
         /** Slider steps: 0.1 … 2.0 in 0.1 increments → 20 positions. */
         private const val STEPS = 19
+        /** Debounce before previewing a new rate, in milliseconds. */
+        private const val PREVIEW_DELAY_MS = 600L
     }
 
     override fun onCreateView(
@@ -112,9 +118,13 @@ class SettingsFragment : Fragment() {
         engines.forEach { labels.add(it.label); packages.add(it.packageName) }
         enginePackages = packages
 
+        // Custom item layouts, not the platform ones: the stock dropdown row
+        // is a CheckedTextView (screen reader says "не е отметнато") and it
+        // follows the system theme, which rendered a dark popup inside this
+        // light app.
         val adapter = ArrayAdapter(
-            requireContext(), android.R.layout.simple_spinner_item, labels)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            requireContext(), R.layout.item_spinner_selected, labels)
+        adapter.setDropDownViewResource(R.layout.item_spinner_dropdown)
 
         suppressSpinnerCallback = true
         binding.spinnerEngine.adapter = adapter
@@ -152,23 +162,41 @@ class SettingsFragment : Fragment() {
         binding.seekRate.setOnSeekBarChangeListener(
             object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
-                    // Label follows the thumb; speaking waits for release so
-                    // dragging doesn't fire a preview on every increment.
                     updateRateLabel(progressToRate(p))
+                    // Persist and apply here, NOT in onStopTrackingTouch:
+                    // a screen-reader user adjusts a SeekBar with swipe
+                    // gestures, which never produce start/stop tracking
+                    // callbacks. Relying on those meant the rate was silently
+                    // discarded for exactly the users who need it most.
+                    if (fromUser) applyRate(progressToRate(p))
                 }
 
                 override fun onStartTrackingTouch(sb: SeekBar) {}
 
                 override fun onStopTrackingTouch(sb: SeekBar) {
-                    val rate = progressToRate(sb.progress)
-                    settings.speechRate = rate
-                    tts?.setSpeechRate(rate)
-                    notifyServiceSettingsChanged(engineChanged = false)
-                    // Preview at the new rate, so the choice can be judged by
-                    // ear rather than by the number.
+                    // Touch drag ends: speak immediately rather than waiting
+                    // out the debounce.
+                    previewRunnable?.let { binding.seekRate.removeCallbacks(it) }
                     speak(SAMPLE)
                 }
             })
+    }
+
+    /**
+     * Saves the rate, applies it to this screen's TTS and to any running
+     * journey, then previews it — debounced, so dragging or swiping through
+     * several steps speaks once at the end instead of on every increment.
+     */
+    private fun applyRate(rate: Float) {
+        settings.speechRate = rate
+        tts?.setSpeechRate(rate)
+        notifyServiceSettingsChanged(engineChanged = false)
+
+        val sb = _binding?.seekRate ?: return
+        previewRunnable?.let { sb.removeCallbacks(it) }
+        val r = Runnable { speak(SAMPLE) }
+        previewRunnable = r
+        sb.postDelayed(r, PREVIEW_DELAY_MS)
     }
 
     private fun progressToRate(progress: Int): Float =
@@ -228,6 +256,8 @@ class SettingsFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        previewRunnable?.let { _binding?.seekRate?.removeCallbacks(it) }
+        previewRunnable = null
         tts?.shutdown()
         tts = null
         _binding = null
