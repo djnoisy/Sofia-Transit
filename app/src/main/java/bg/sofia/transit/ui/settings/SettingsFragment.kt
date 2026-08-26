@@ -72,8 +72,10 @@ class SettingsFragment : Fragment() {
 
         initTts()
         setUpRateSlider()
+        showBatteryStatus()
 
         binding.btnTestSpeech.setOnClickListener { speak(SAMPLE) }
+        binding.btnBatterySettings.setOnClickListener { openBatterySettings() }
     }
 
     // ── Speech engine ─────────────────────────────────────────────────────
@@ -243,6 +245,72 @@ class SettingsFragment : Fragment() {
         } catch (e: Exception) {
             FileLogger.w(TAG, "Could not notify service: ${e.message}")
         }
+    }
+
+    // ── Battery optimisation ──────────────────────────────────────────────
+
+    /**
+     * Reflects whether the system currently exempts us from battery
+     * optimisation. Re-read in onResume, since the user changes it in a
+     * system screen and returns.
+     */
+    private fun showBatteryStatus() {
+        val exempt = isIgnoringBatteryOptimisations()
+        binding.tvBatteryStatus.text = if (exempt)
+            "Ограниченията са изключени"
+        else
+            "Ограниченията са включени"
+        binding.btnBatterySettings.text = if (exempt)
+            "Отвори системните настройки"
+        else
+            "Изключи ограниченията"
+    }
+
+    private fun isIgnoringBatteryOptimisations(): Boolean = try {
+        val pm = requireContext().getSystemService(android.content.Context.POWER_SERVICE)
+                as android.os.PowerManager
+        pm.isIgnoringBatteryOptimizations(requireContext().packageName)
+    } catch (e: Exception) {
+        FileLogger.w(TAG, "Battery optimisation state unknown: ${e.message}")
+        false
+    }
+
+    /**
+     * Asks the system to exempt the app. When already exempt — or when the
+     * direct request is unavailable — falls back to opening the battery
+     * optimisation list, since manufacturers layer their own restrictions
+     * ("sleeping apps" and the like) that no API can switch off.
+     */
+    private fun openBatterySettings() {
+        val ctx = requireContext()
+        if (!isIgnoringBatteryOptimisations()) {
+            try {
+                @Suppress("BatteryLife")
+                val intent = android.content.Intent(
+                    android.provider.Settings
+                        .ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:${ctx.packageName}")
+                )
+                startActivity(intent)
+                return
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "Direct exemption request failed: ${e.message}")
+            }
+        }
+        try {
+            startActivity(android.content.Intent(
+                android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        } catch (e: Exception) {
+            Toast.makeText(ctx,
+                "Отворете Настройки → Батерия за това приложение",
+                Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The exemption is granted in a system screen, so refresh on return.
+        _binding?.let { showBatteryStatus() }
     }
 
     private fun speak(text: String) {

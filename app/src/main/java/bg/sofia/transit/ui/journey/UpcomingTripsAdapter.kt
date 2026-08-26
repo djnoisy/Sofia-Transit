@@ -5,9 +5,9 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import bg.sofia.transit.data.db.entity.TransportType
 import bg.sofia.transit.data.repository.UpcomingTripInfo
 import bg.sofia.transit.databinding.ItemUpcomingTripBinding
+import bg.sofia.transit.util.VehicleLabels
 
 /**
  * Renders one row per upcoming arrival in the Journey screen.
@@ -18,9 +18,24 @@ class UpcomingTripsAdapter(
     private val onClick: (UpcomingTripInfo) -> Unit
 ) : ListAdapter<UpcomingTripInfo, UpcomingTripsAdapter.VH>(DIFF) {
 
+    /**
+     * route_ids belonging to the real trolleybus network, so type=11 rows can
+     * be told apart as "Тролей" or "Електробус" — the same distinction the
+     * Lines and Stops screens make. Empty until the fragment supplies it,
+     * in which case type=11 reads as the more general "Електробус".
+     */
+    private var trolleyRouteIds: Set<String> = emptySet()
+
+    fun setTrolleyRouteIds(ids: Set<String>) {
+        if (ids != trolleyRouteIds) {
+            trolleyRouteIds = ids
+            notifyDataSetChanged()
+        }
+    }
+
     inner class VH(val b: ItemUpcomingTripBinding) : RecyclerView.ViewHolder(b.root) {
         fun bind(t: UpcomingTripInfo) {
-            val type = transportTypeFor(t.routeType)
+            val type = VehicleLabels.typeOf(t.routeType)
             b.tvType.text       = type.emoji
             b.tvRoute.text      = t.routeShortName
             b.tvHeadsign.text   = "→ ${t.headsign}"
@@ -40,7 +55,10 @@ class UpcomingTripsAdapter(
             b.tvStopInfo.text = "${t.stopName} • $distStr"
 
             // Comprehensive content description for TalkBack
-            val typeLabel = type.labelBg.dropLast(1)   // "Автобус" not "Автобуси"
+            // Resolved centrally: trimming a letter off the plural produced
+            // "Троле" and "Трамва".
+            val typeLabel = VehicleLabels.singular(
+                t.routeType, t.routeId in trolleyRouteIds)
             val etaText = when {
                 mins <= 0 -> "пристига сега"
                 mins == 1 -> "след 1 минута"
@@ -60,12 +78,6 @@ class UpcomingTripsAdapter(
 
     override fun onBindViewHolder(h: VH, pos: Int) = h.bind(getItem(pos))
 
-    private fun transportTypeFor(routeType: Int): TransportType = when (routeType) {
-        0    -> TransportType.TRAM
-        1    -> TransportType.METRO
-        11   -> TransportType.TROLLEYBUS
-        else -> TransportType.BUS
-    }
 
     companion object {
         val DIFF = object : DiffUtil.ItemCallback<UpcomingTripInfo>() {

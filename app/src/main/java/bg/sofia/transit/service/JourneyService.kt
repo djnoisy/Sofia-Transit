@@ -291,6 +291,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     private lateinit var fusedClient: FusedLocationProviderClient
 
+    /**
+     * Held for the duration of a journey. Without it the CPU suspends
+     * between GPS callbacks once the screen goes off, so fixes arrive
+     * batched and late — announcements then lag by tens of seconds or are
+     * skipped entirely, which is exactly the failure the user reported.
+     * A foreground service alone does not prevent this; it only prevents
+     * the process being killed.
+     */
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+
     // ── Commands (called by the ViewModel through the binder) ─────────────
 
     /**
@@ -321,6 +331,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastProgressMs    = System.currentTimeMillis()
 
         publish(distance = null)
+        acquireWakeLock()
         startLocUpdates()
         announce("Следене на пътуването започна.")
     }
@@ -356,6 +367,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     fun endJourney() {
         stopLocUpdates()
+        releaseWakeLock()
         orderedStops = emptyList()
         stopLatLon   = emptyList()
         currentIdx   = 0
@@ -698,6 +710,37 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         fusedClient.requestLocationUpdates(req, locCallback, mainLooper)
     }
 
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        try {
+            val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+            wakeLock = pm.newWakeLock(
+                android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                "SofiaTransit::Journey"
+            ).apply {
+                setReferenceCounted(false)
+                // Safety timeout: if the service somehow dies without
+                // releasing, the lock expires rather than draining the
+                // battery indefinitely. Journeys longer than this are
+                // re-acquired on the next fix.
+                acquire(3 * 60 * 60 * 1000L)
+            }
+            FileLogger.i(TAG, "Wake lock acquired")
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "Could not acquire wake lock: ${e.message}")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            wakeLock?.let { if (it.isHeld) it.release() }
+            FileLogger.i(TAG, "Wake lock released")
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "Could not release wake lock: ${e.message}")
+        }
+        wakeLock = null
+    }
+
     private fun stopLocUpdates() {
         try { fusedClient.removeLocationUpdates(locCallback) } catch (_: Exception) {}
     }
@@ -724,6 +767,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         stopLocUpdates()
+        releaseWakeLock()
         etaJob?.cancel()
         serviceScope.cancel()
         // If the system kills us mid-journey, don't leave the UI thinking

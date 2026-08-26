@@ -55,6 +55,10 @@ class JourneyViewModel @Inject constructor(
     /** One-shot journey events (e.g. destination reached → go to Stops). */
     val journeyEvents = JourneyService.events
 
+    /** Trolley route set, so the list can label type=11 rows correctly. */
+    private val _trolleyRouteIds = MutableStateFlow<Set<String>>(emptySet())
+    val trolleyRouteIds: StateFlow<Set<String>> = _trolleyRouteIds
+
     /**
      * Sets the stop the user will get off at, by index into the trip's stop
      * list. Passing null clears it. Requires the service binding, which we
@@ -97,6 +101,12 @@ class JourneyViewModel @Inject constructor(
     }
 
     init {
+        viewModelScope.launch {
+            try { _trolleyRouteIds.value = gtfsRepo.trolleyRouteIds() }
+            catch (e: Exception) {
+                FileLogger.w(TAG, "Could not load trolley routes: ${e.message}")
+            }
+        }
         // If a journey is already active (user switched tabs and came back,
         // or the fragment was recreated), re-bind so the End button works.
         if (tracking.value is JourneyService.TrackingState.Tracking) {
@@ -195,13 +205,8 @@ class JourneyViewModel @Inject constructor(
                     bindingDeferred = null
                 }
 
-                val vehicle = when (trip.routeType) {
-                    0    -> "Трамвай"
-                    1    -> "Метро"
-                    11   -> if (gtfsRepo.isTrolleyRoute(trip.routeId)) "Тролей"
-                            else "Електробус"
-                    else -> "Автобус"
-                }
+                val vehicle = bg.sofia.transit.util.VehicleLabels.singular(
+                    trip.routeType, gtfsRepo.isTrolleyRoute(trip.routeId))
                 svc.beginJourney(
                     label   = "$vehicle ${trip.routeShortName} → ${trip.headsign}",
                     tripId  = trip.tripId,

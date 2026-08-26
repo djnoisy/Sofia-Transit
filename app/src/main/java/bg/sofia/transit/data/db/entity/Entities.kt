@@ -48,11 +48,26 @@ data class Route(
     }
 }
 
-enum class TransportType(val labelBg: String, val emoji: String) {
-    BUS("Автобуси", "🚌"),
-    TRAM("Трамваи", "🚊"),
-    TROLLEYBUS("Тролеи", "🚎"),
-    METRO("Метро", "🚇")
+/**
+ * [labelBg] is the plural used for filter chips ("Автобуси"); [singularBg]
+ * names one vehicle ("Автобус"). Both are spelled out rather than derived,
+ * because Bulgarian plurals cannot be reversed by trimming a letter —
+ * "Тролеи" minus one character gives "Троле", which is what the Journey
+ * list used to announce.
+ *
+ * Note that route_type 11 covers both trolleybuses and electric buses; the
+ * two are distinguished by route, not by type, so use
+ * [bg.sofia.transit.util.VehicleLabels.singular] wherever a route is known.
+ */
+enum class TransportType(
+    val labelBg: String,
+    val singularBg: String,
+    val emoji: String
+) {
+    BUS("Автобуси", "Автобус", "🚌"),
+    TRAM("Трамваи", "Трамвай", "🚊"),
+    TROLLEYBUS("Тролеи", "Тролей", "🚎"),
+    METRO("Метро", "Метро", "🚇")
 }
 
 @Entity(

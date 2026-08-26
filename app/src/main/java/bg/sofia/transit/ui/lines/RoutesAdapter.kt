@@ -89,15 +89,9 @@ class RoutesAdapter(
          * electric bus. Keeps the row label consistent with the Stops
          * screen, which resolves the same way.
          */
-        private fun vehicleLabelFor(route: Route, type: bg.sofia.transit.data.db.entity.TransportType): String {
-            return when (route.routeType) {
-                0 -> "Трамвай"
-                1 -> "Метро"
-                3 -> "Автобус"
-                11 -> if (route.routeId in trolleyRouteIds) "Тролей" else "Електробус"
-                else -> type.labelBg
-            }
-        }
+        private fun vehicleLabelFor(route: Route, type: bg.sofia.transit.data.db.entity.TransportType): String =
+            bg.sofia.transit.util.VehicleLabels.singular(
+                route.routeType, route.routeId in trolleyRouteIds)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import bg.sofia.transit.data.repository.GtfsRepository
 import bg.sofia.transit.data.repository.RealtimeDiagnostics
 import bg.sofia.transit.data.repository.RealtimeRepository
+import bg.sofia.transit.util.FileLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -214,6 +215,9 @@ class DiagnosticsViewModel @Inject constructor(
             } catch (e: Exception) {
                 sb.appendLine("ГРЕШКА: ${e.javaClass.simpleName}: ${e.message}")
             }
+            // Also write to the log file: the on-screen report is easy to
+            // lose, and this test is usually run to be shared afterwards.
+            FileLogger.i("Diagnostics", sb.toString())
             _state.value = DiagnosticsState(running = false, report = sb.toString())
         }
     }

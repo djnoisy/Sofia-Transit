@@ -9,6 +9,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
+    <!-- Keeps the CPU awake while a journey is being tracked. A foreground
+         service prevents the app from being KILLED, but it does not stop the
+         system suspending the CPU between location callbacks once the screen
+         goes off — which is why announcements started lagging or being
+         skipped after a minute or two. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+    <!-- Lets the app ask, once, to be exempted from battery optimisation.
+         Justified here because missing a stop announcement defeats the
+         purpose of the app for a blind passenger. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+
     <uses-feature android:name="android.hardware.sensor.compass" android:required="false"/>
     <uses-feature android:name="android.hardware.location.gps" android:required="true"/>
 

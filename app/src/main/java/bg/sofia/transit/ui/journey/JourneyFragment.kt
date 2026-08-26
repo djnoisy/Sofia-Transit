@@ -108,6 +108,11 @@ class JourneyFragment : Fragment() {
                 launch { vm.tracking.collectLatest { render() } }
                 launch { vm.selection.collectLatest { render() } }
                 launch {
+                    vm.trolleyRouteIds.collect { ids ->
+                        upcomingAdapter.setTrolleyRouteIds(ids)
+                    }
+                }
+                launch {
                     vm.error.collect { msg ->
                         Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                     }

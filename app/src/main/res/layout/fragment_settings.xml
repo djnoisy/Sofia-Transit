@@ -96,6 +96,42 @@
                 android:text="бързо" android:textSize="13sp" android:alpha="0.6"/>
         </LinearLayout>
 
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#E0E0E0" android:layout_marginVertical="24dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Работа при изключен екран"
+            android:textSize="14sp"
+            android:textAllCaps="true"
+            android:alpha="0.6"
+            android:accessibilityHeading="true"
+            android:paddingBottom="12dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ако системата ограничава приложението, съобщенията по време на пътуване може да закъсняват или да бъдат пропускани при изключен екран."
+            android:textSize="14sp"
+            android:alpha="0.75"
+            android:lineSpacingMultiplier="1.15"
+            android:paddingBottom="12dp"/>
+
+        <TextView android:id="@+id/tvBatteryStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:paddingBottom="8dp"/>
+
+        <Button android:id="@+id/btnBatterySettings"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#E0E0E0" android:layout_marginVertical="24dp"/>
+
         <Button android:id="@+id/btnTestSpeech"
             android:layout_width="match_parent"
             android:layout_height="56dp"

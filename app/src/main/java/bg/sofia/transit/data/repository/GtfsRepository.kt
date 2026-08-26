@@ -2,6 +2,7 @@ package bg.sofia.transit.data.repository
 
 import android.content.Context
 import bg.sofia.transit.util.FileLogger
+import bg.sofia.transit.util.VehicleLabels
 import bg.sofia.transit.data.db.TransitDatabase
 import bg.sofia.transit.data.db.dao.StopWithSequence
 import bg.sofia.transit.data.db.entity.*
@@ -653,6 +654,9 @@ class GtfsRepository @Inject constructor(
 
     /** True if the route is a real trolleybus line (route_type 11 covers
      *  both trolleybuses and electrobuses; this is the distinction). */
+    /** The whole trolley route set, for callers labelling many rows at once. */
+    suspend fun trolleyRouteIds(): Set<String> = getTrolleyRouteIds()
+
     suspend fun isTrolleyRoute(routeId: String): Boolean =
         routeId in getTrolleyRouteIds()
 
@@ -673,13 +677,14 @@ class GtfsRepository @Inject constructor(
         routeId: String,
         trolleyRouteIds: Set<String>
     ): String? {
-        return when (routeType) {
-            0 -> "трамвай"
-            1 -> "метро"
-            3 -> "автобус"
-            11 -> if (routeId in trolleyRouteIds) "тролей" else "електробус"
-            else -> null
-        }
+        // Delegates to the single labelling source shared with the Lines and
+        // Journey screens, so a new vehicle type never has to be added in two
+        // places. Lower-cased because callers here embed it mid-sentence; the
+        // Stops adapter capitalises it when it starts a line.
+        if (routeType !in setOf(0, 1, 3, 11)) return null
+        return VehicleLabels
+            .singular(routeType, routeId in trolleyRouteIds)
+            .lowercase()
     }
 
     /**
