@@ -103,12 +103,6 @@ interface TripDao {
     @Query("SELECT * FROM trips WHERE tripId IN (:ids)")
     suspend fun getByIds(ids: List<String>): List<Trip>
 
-    /** Distinct headsigns of a route — its directions, for the picker. */
-    @Query("""
-        SELECT DISTINCT tripHeadsign FROM trips
-        WHERE routeId = :routeId AND tripHeadsign IS NOT NULL
-    """)
-    suspend fun getHeadsignsForRoute(routeId: String): List<String>
 
     /**
      * Any one trip of a route in a given direction. All trips of a route in

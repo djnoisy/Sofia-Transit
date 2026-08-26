@@ -277,7 +277,7 @@ class JourneyViewModel @Inject constructor(
 
     /** Directions of a line, for the picker shown on a search hit. */
     suspend fun directionsFor(routeId: String): List<String> =
-        try { gtfsRepo.getDirectionsForRoute(routeId) }
+        try { gtfsRepo.getDirectionHeadsigns(routeId) }
         catch (e: Exception) {
             FileLogger.e(TAG, "directionsFor failed: ${e.message}"); emptyList()
         }

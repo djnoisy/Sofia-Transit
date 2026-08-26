@@ -684,15 +684,19 @@ class GtfsRepository @Inject constructor(
     }
 
     /**
-     * The distinct directions a line runs in, as headsigns, for the direction
-     * picker shown after a search hit.
+     * The directions of a line as plain headsigns, for the Journey direction
+     * picker.
+     *
+     * Delegates to the existing [getDirectionsForRoute], which the Lines
+     * screen already uses: it keeps the two busiest headsigns and so filters
+     * out depot and one-off runs. Reusing it means both screens offer the
+     * same two directions for a line instead of disagreeing.
      */
-    suspend fun getDirectionsForRoute(routeId: String): List<String> =
-        tripDao.getHeadsignsForRoute(routeId)
-            .map { it.trim() }
+    suspend fun getDirectionHeadsigns(routeId: String): List<String> =
+        getDirectionsForRoute(routeId)
+            .mapNotNull { it.tripHeadsign?.trim() }
             .filter { it.isNotEmpty() }
             .distinctBy { it.uppercase() }
-            .sorted()
 
     /**
      * Ordered stops of a representative trip of [routeId] towards [headsign].
