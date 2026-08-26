@@ -25,10 +25,15 @@ class DiagnosticsViewModel @Inject constructor(
     private val _state = MutableStateFlow(DiagnosticsState())
     val state: StateFlow<DiagnosticsState> = _state
 
-    fun diagnoseVehicles() {
+    /**
+     * [userLat]/[userLon] let the report list the vehicles nearest to the
+     * user — the end-to-end check for position-based vehicle matching. Pass
+     * 0.0 when no fix is available; that section is then skipped.
+     */
+    fun diagnoseVehicles(userLat: Double = 0.0, userLon: Double = 0.0) {
         _state.value = DiagnosticsState(running = true, report = "Извличане на GPS данни…\n")
         viewModelScope.launch {
-            val report = realtimeRepo.diagnoseVehiclePositions()
+            val report = realtimeRepo.diagnoseVehiclePositions(userLat, userLon)
             _state.value = DiagnosticsState(running = false, report = report)
         }
     }

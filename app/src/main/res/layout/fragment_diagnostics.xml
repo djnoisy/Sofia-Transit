@@ -65,6 +65,14 @@
         android:layout_marginTop="8dp"
         style="@style/Widget.Material3.Button.OutlinedButton"/>
 
+    <Button android:id="@+id/btnDiagnoseVehicles"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Тест на GPS данни за возилата"
+        android:contentDescription="Провери свежестта на позициите и кои возила са най-близо"
+        android:layout_marginTop="8dp"
+        style="@style/Widget.Material3.Button.OutlinedButton"/>
+
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"

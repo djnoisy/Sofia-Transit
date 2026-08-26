@@ -410,12 +410,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     // skipped ones start after it.
                     val firstSkipped = if (atStop) currentIdx + 1 else currentIdx
                     for (i in firstSkipped until nearest) {
-                        announce("Спирка: ${orderedStops[i].stopName}")
+                        announce("Спирка, ${orderedStops[i].stopName}.")
                     }
                     currentIdx = nearest
                     atStop = true
                     approachAnnounced = false
-                    announce("Спирка: ${orderedStops[nearest].stopName}")
+                    announce("Спирка, ${orderedStops[nearest].stopName}.")
 
                     // Final stop reached → the journey is over. Ending here
                     // rather than on departure matters: a vehicle standing at
@@ -440,7 +440,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 approachAnnounced = false
                 if (currentIdx < orderedStops.lastIndex) {
                     currentIdx += 1
-                    announce("Следваща спирка: ${orderedStops[currentIdx].stopName}")
+                    announce("Следваща спирка, ${orderedStops[currentIdx].stopName}.")
                 }
                 // No terminus case here any more — arriving at the final stop
                 // already ended the journey above.
@@ -453,18 +453,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 // radius). Announce the passed stop(s) as agreed, then
                 // continue toward the nearest upcoming one.
                 for (i in currentIdx until nearest) {
-                    announce("Спирка: ${orderedStops[i].stopName}")
+                    announce("Спирка, ${orderedStops[i].stopName}.")
                 }
                 currentIdx = nearest
                 approachAnnounced = false
-                announce("Следваща спирка: ${orderedStops[nearest].stopName}")
+                announce("Следваща спирка, ${orderedStops[nearest].stopName}.")
             }
 
             // ── Approaching warning ───────────────────────────────────────
             !atStop && !approachAnnounced
                     && distTo(loc, currentIdx) <= APPROACH_RADIUS -> {
                 approachAnnounced = true
-                announce("Наближава спирка: ${orderedStops[currentIdx].stopName}")
+                announce("Наближава спирка, ${orderedStops[currentIdx].stopName}.")
             }
         }
 
@@ -478,7 +478,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             //     reach the door.
             if (destDist <= ALIGHT_ANNOUNCE_RADIUS && !alightAnnounced) {
                 alightAnnounced = true
-                announce("Слизате тук: ${orderedStops[dest].stopName}.")
+                announce("Слизате тук, ${orderedStops[dest].stopName}.")
             }
 
             // 1b) End the journey only once genuinely at the stop (<30 m),
@@ -541,7 +541,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         when (remaining) {
             2 -> announce("Остават две спирки до слизане.")
             1 -> announce("Остава една спирка до слизане.")
-            0 -> announce("Слизате на следващата спирка: " +
+            0 -> announce("Слизате на следващата спирка, " +
                           "${orderedStops[dest].stopName}.")
         }
     }

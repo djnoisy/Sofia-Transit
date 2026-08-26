@@ -94,11 +94,13 @@ class JourneyFragment : Fragment() {
         binding.btnChooseDestination.setOnClickListener { showDestinationPicker() }
         binding.btnClearDestination.setOnClickListener {
             vm.setDestination(null)
-            // Announced through TalkBack, not the speech engine: this is a
-            // screen interaction, so it should queue with the screen reader
-            // instead of cutting it off. Silent when no screen reader is on —
-            // the row returning to "Не е избрана" is the visual feedback.
-            binding.root.announceForAccessibility("Спирката за слизане е премахната")
+            // No announceForAccessibility here. This button disappears the
+            // moment it is pressed, so the screen reader loses its focus
+            // anchor, jumps to the top of the screen, and that jump's own
+            // announcement cuts off any message we send. Moving focus onto
+            // the row that shows the result is both more reliable and more
+            // informative: the reader simply reads "Не е избрана".
+            moveAccessibilityFocusToDestination()
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
@@ -235,6 +237,23 @@ class JourneyFragment : Fragment() {
         }
     }
 
+    /**
+     * Puts screen-reader focus on the alighting-stop row once it has been
+     * updated. Posted rather than called directly: the state change travels
+     * through the service and back, so the row still holds its old text at
+     * the moment the button is pressed.
+     */
+    private fun moveAccessibilityFocusToDestination() {
+        val v = _binding?.tvDestination ?: return
+        v.isFocusable = true
+        v.postDelayed({
+            _binding?.tvDestination?.performAccessibilityAction(
+                android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS,
+                null
+            )
+        }, 250)
+    }
+
     /** Correct Bulgarian plural for the stop counter. */
     private fun stopWord(n: Int) = if (n == 1) "спирка" else "спирки"
 
@@ -261,8 +280,9 @@ class JourneyFragment : Fragment() {
             .setTitle("Спирка за слизане")
             .setItems(names.toTypedArray()) { _, which ->
                 vm.setDestination(indices[which])
-                binding.root.announceForAccessibility(
-                    "Спирка за слизане: ${names[which]}")
+                // Focus the row that now shows the chosen stop, so the reader
+                // states the outcome as part of normal navigation.
+                moveAccessibilityFocusToDestination()
             }
             .setNegativeButton("Отказ", null)
             .show()

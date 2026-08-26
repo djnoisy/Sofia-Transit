@@ -1,6 +1,7 @@
 package bg.sofia.transit.data.repository
 
 import bg.sofia.transit.util.FileLogger
+import bg.sofia.transit.util.LocationHelper
 import com.google.transit.realtime.GtfsRealtime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -593,66 +594,138 @@ class RealtimeRepository @Inject constructor() {
      * decide whether vehicle-positions carries direction info that
      * trip-updates lacks.
      */
-    suspend fun diagnoseVehiclePositions(): String = withContext(Dispatchers.IO) {
+    /**
+     * Diagnoses the vehicle-positions feed with the questions that decide
+     * whether position-based vehicle matching is viable:
+     *
+     *  1. How many vehicles report a usable position at all?
+     *  2. How FRESH are those positions? A feed full of ten-minute-old fixes
+     *     cannot tell us which vehicle we are sitting in.
+     *  3. How many carry a trip_id? Without it we cannot get the stop list.
+     *  4. From the user's own location: which vehicles are nearest, how far,
+     *     and how stale? This is the end-to-end test — if the vehicle the
+     *     user is standing next to (or riding) shows up first with a small
+     *     distance, matching will work in practice.
+     *
+     * [userLat]/[userLon] may be 0.0 when no location is available; the
+     * proximity section is then skipped rather than reporting nonsense.
+     */
+    suspend fun diagnoseVehiclePositions(
+        userLat: Double = 0.0,
+        userLon: Double = 0.0
+    ): String = withContext(Dispatchers.IO) {
         val sb = StringBuilder()
         try {
             val feed = fetchVehiclePositions()
             if (feed == null) {
                 sb.appendLine("vehicle-positions feed е null (грешка при заявка)")
+                FileLogger.i(TAG, sb.toString())
                 return@withContext sb.toString()
             }
 
-            var withDirection = 0
-            var withHeadsign = 0
-            var withStopSeq = 0
-            var withBearing = 0
-            var withSpeed = 0
-            var withPosition = 0
+            val nowSec = System.currentTimeMillis() / 1000
+
             var total = 0
-            val activeSamples = mutableListOf<String>()
+            var withPosition = 0
+            var withTripId = 0
+            var withRouteId = 0
+            var withTimestamp = 0
+            var withBearing = 0
+
+            // Freshness buckets, in seconds
+            var fresh30 = 0; var fresh60 = 0; var fresh120 = 0
+            var fresh300 = 0; var older = 0
+
+            data class Veh(
+                val routeId: String, val tripId: String,
+                val lat: Double, val lon: Double,
+                val ageSec: Long?, val stopId: String
+            )
+            val located = mutableListOf<Veh>()
 
             for (entity in feed.entityList) {
                 if (!entity.hasVehicle()) continue
                 val v = entity.vehicle
                 val t = v.trip
                 total++
-                if (t.hasDirectionId()) withDirection++
-                if (t.tripHeadsign.isNotEmpty()) withHeadsign++
-                if (v.hasCurrentStopSequence()) withStopSeq++
-                if (v.hasPosition() && v.position.hasBearing()) withBearing++
-                if (v.hasPosition() && v.position.hasSpeed()) withSpeed++
-                if (v.hasPosition()) withPosition++
 
-                val isActive = v.hasPosition() &&
-                               (v.position.latitude != 0f || v.position.longitude != 0f)
-                if (isActive && activeSamples.size < 6) {
-                    val p = v.position
-                    val dir = if (t.hasDirectionId()) t.directionId.toString() else "none"
-                    val seq = if (v.hasCurrentStopSequence()) v.currentStopSequence.toString() else "none"
-                    val stopId = if (v.hasStopId()) v.stopId else "none"
-                    val brng = if (p.hasBearing()) "%.0f".format(p.bearing) else "none"
-                    val spd = if (p.hasSpeed()) "%.1f".format(p.speed) else "none"
-                    val status = if (v.hasCurrentStatus()) v.currentStatus.name else "none"
-                    val label = if (v.vehicle.label.isNotEmpty()) v.vehicle.label else "none"
-                    val vid = if (v.vehicle.id.isNotEmpty()) v.vehicle.id else "none"
-                    activeSamples += "route=${t.routeId} trip=${t.tripId}\n" +
-                        "  lat=${"%.5f".format(p.latitude)} lon=${"%.5f".format(p.longitude)} " +
-                        "bearing=$brng speed=$spd\n" +
-                        "  dir=$dir stopSeq=$seq stopId=$stopId status=$status vehId=$vid label=$label"
+                if (t.tripId.isNotEmpty()) withTripId++
+                if (t.routeId.isNotEmpty()) withRouteId++
+                if (v.hasPosition() && v.position.hasBearing()) withBearing++
+
+                val hasPos = v.hasPosition() &&
+                    (v.position.latitude != 0f || v.position.longitude != 0f)
+                if (!hasPos) continue
+                withPosition++
+
+                val age: Long? = if (v.timestamp > 0) {
+                    withTimestamp++
+                    nowSec - v.timestamp
+                } else null
+
+                when {
+                    age == null -> {}
+                    age <= 30  -> fresh30++
+                    age <= 60  -> fresh60++
+                    age <= 120 -> fresh120++
+                    age <= 300 -> fresh300++
+                    else       -> older++
                 }
+
+                located += Veh(
+                    routeId = t.routeId,
+                    tripId  = t.tripId,
+                    lat     = v.position.latitude.toDouble(),
+                    lon     = v.position.longitude.toDouble(),
+                    ageSec  = age,
+                    stopId  = if (v.hasStopId()) v.stopId else "—"
+                )
             }
 
-            sb.appendLine("=== GPS ДАННИ (vehicle-positions) ===")
+            sb.appendLine("=== VEHICLE-POSITIONS ===")
             sb.appendLine("Общо превозни средства: $total")
-            sb.appendLine("с позиция (lat/lon): $withPosition")
-            sb.appendLine("с bearing (посока): $withBearing")
-            sb.appendLine("с speed: $withSpeed")
-            sb.appendLine("с direction_id: $withDirection")
-            sb.appendLine("с headsign: $withHeadsign")
-            sb.appendLine("с current_stop_sequence: $withStopSeq")
+            sb.appendLine("с реална позиция: $withPosition")
+            sb.appendLine("с trip_id: $withTripId")
+            sb.appendLine("с route_id: $withRouteId")
+            sb.appendLine("с bearing: $withBearing")
             sb.appendLine()
-            sb.appendLine("=== Сурови данни от активни коли ===")
-            activeSamples.forEach { sb.appendLine(it) }
+            sb.appendLine("=== СВЕЖЕСТ на позициите ===")
+            sb.appendLine("с timestamp: $withTimestamp от $withPosition")
+            sb.appendLine("  до 30 сек:    $fresh30")
+            sb.appendLine("  30-60 сек:    $fresh60")
+            sb.appendLine("  1-2 мин:      $fresh120")
+            sb.appendLine("  2-5 мин:      $fresh300")
+            sb.appendLine("  над 5 мин:    $older")
+
+            // Distinct routes covered — tells us whether matching works for
+            // any line or only for a subset.
+            val routes = located.map { it.routeId }.filter { it.isNotEmpty() }.distinct()
+            sb.appendLine()
+            sb.appendLine("Различни линии с позиции: ${routes.size}")
+
+            if (userLat != 0.0 || userLon != 0.0) {
+                sb.appendLine()
+                sb.appendLine("=== НАЙ-БЛИЗКИ ДО ТЕБ ===")
+                val nearest = located
+                    .map { it to LocationHelper.distanceMetres(userLat, userLon, it.lat, it.lon) }
+                    .sortedBy { it.second }
+                    .take(8)
+                if (nearest.isEmpty()) {
+                    sb.appendLine("няма возила с позиция")
+                } else {
+                    nearest.forEach { (v, d) ->
+                        val ageTxt = v.ageSec?.let { "${it}с" } ?: "без време"
+                        sb.appendLine(
+                            "${d.toInt()} м | route=${v.routeId} | възраст=$ageTxt | " +
+                            "stopId=${v.stopId}"
+                        )
+                        sb.appendLine("      trip=${v.tripId}")
+                    }
+                }
+            } else {
+                sb.appendLine()
+                sb.appendLine("(няма местоположение — секцията за близост е пропусната)")
+            }
         } catch (e: Exception) {
             sb.appendLine("ГРЕШКА: ${e.javaClass.simpleName}: ${e.message}")
         }

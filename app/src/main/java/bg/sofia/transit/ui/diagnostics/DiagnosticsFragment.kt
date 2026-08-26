@@ -67,6 +67,30 @@ class DiagnosticsFragment : Fragment() {
                 }
         }
 
+        // Vehicle-position diagnostic. Uses the last known location so the
+        // report can rank vehicles by distance from the user — the practical
+        // test of whether we can identify the vehicle someone is riding.
+        binding.btnDiagnoseVehicles.setOnClickListener {
+            val ctx = requireContext()
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    ctx, android.Manifest.permission.ACCESS_FINE_LOCATION
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                // Still useful without a fix — the freshness stats do not
+                // depend on knowing where the user is.
+                vm.diagnoseVehicles()
+                return@setOnClickListener
+            }
+            @Suppress("MissingPermission")
+            com.google.android.gms.location.LocationServices
+                .getFusedLocationProviderClient(ctx)
+                .lastLocation
+                .addOnSuccessListener { loc ->
+                    if (loc == null) vm.diagnoseVehicles()
+                    else vm.diagnoseVehicles(loc.latitude, loc.longitude)
+                }
+                .addOnFailureListener { vm.diagnoseVehicles() }
+        }
+
         binding.btnShareLog.setOnClickListener { shareLog() }
         binding.btnClearLog.setOnClickListener {
             FileLogger.clear()
