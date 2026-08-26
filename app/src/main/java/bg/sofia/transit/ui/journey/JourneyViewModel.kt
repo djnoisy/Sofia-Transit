@@ -11,10 +11,11 @@ import androidx.lifecycle.viewModelScope
 import bg.sofia.transit.data.db.entity.Stop
 import bg.sofia.transit.data.repository.GtfsRepository
 import bg.sofia.transit.data.repository.RealtimeRepository
-import bg.sofia.transit.data.repository.UpcomingTripInfo
 import bg.sofia.transit.service.JourneyService
 import bg.sofia.transit.util.FileLogger
+import bg.sofia.transit.util.LineSearch
 import bg.sofia.transit.util.LocationHelper
+import bg.sofia.transit.util.VehicleLabels
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
@@ -31,20 +32,51 @@ import javax.inject.Inject
  * The ACTIVE journey lives entirely in JourneyService.trackingState —
  * this ViewModel never mirrors it, so the two can never diverge.
  */
+/**
+ * One row in the picker. Either a nearby arrival (line + direction known) or
+ * a search hit for a line with no vehicle nearby, in which case the direction
+ * is asked for on selection.
+ */
+data class LineChoice(
+    val routeId: String,
+    val routeShortName: String,
+    val routeType: Int,
+    /** Known for nearby arrivals; null for a search hit needing a direction. */
+    val headsign: String?,
+    /** Concrete trip when known — only a hint; the vehicle is matched by
+     *  position at journey start. */
+    val tripId: String? = null,
+    val boardingStopId: String? = null,
+    val isNearby: Boolean = true
+)
+
 data class SelectionState(
-    val upcoming: List<UpcomingTripInfo> = emptyList(),
+    val choices: List<LineChoice> = emptyList(),
     val refreshing: Boolean = false,
-    val hasLocation: Boolean = false
+    val hasLocation: Boolean = false,
+    val query: String = "",
+    /** True when showing search results rather than nearby arrivals. */
+    val searching: Boolean = false
 )
 
 @HiltViewModel
 class JourneyViewModel @Inject constructor(
     private val gtfsRepo: GtfsRepository,
     private val realtimeRepo: RealtimeRepository,
+    private val vehicleMatcher: bg.sofia.transit.data.repository.VehicleMatcher,
     application: Application
 ) : AndroidViewModel(application) {
 
-    companion object { private const val TAG = "JourneyVM" }
+    companion object {
+        private const val TAG = "JourneyVM"
+        /** Stops farther than this are not plausible boarding points. */
+        private const val NEARBY_RADIUS_M = 400.0
+        /** Arrivals further out than this are not worth listing. */
+        private const val WITHIN_MINUTES = 20
+        /** Cap on the nearby list, however many lines are in range. */
+        private const val MAX_LINES = 10
+        private const val MAX_SEARCH_RESULTS = 25
+    }
 
     private val _selection = MutableStateFlow(SelectionState())
     val selection: StateFlow<SelectionState> = _selection
@@ -123,35 +155,59 @@ class JourneyViewModel @Inject constructor(
         )
     }
 
-    // ── Loading upcoming trips at nearby stops ────────────────────────────
+    // ── Nearby arrivals and search ────────────────────────────────────────
+
+    /** Last nearby result, reused when the search box is cleared. */
+    private var nearbyChoices: List<LineChoice> = emptyList()
+    private var lastLat = 0.0
+    private var lastLon = 0.0
+
     fun loadUpcomingTrips(lat: Double, lon: Double) {
-        // Selection is irrelevant while a journey is active
         if (tracking.value is JourneyService.TrackingState.Tracking) return
+        lastLat = lat
+        lastLon = lon
 
         _selection.value = _selection.value.copy(refreshing = true, hasLocation = true)
 
         viewModelScope.launch {
             try {
-                // Same battle-tested pipeline as the Stops tab: clock-sector
-                // stop picking + trip resolution with all the phantom-stop
-                // and dedup fixes.
+                // Same stop-picking pipeline as the Stops tab — clock sectors
+                // over the nearest stops — so both screens agree on what
+                // "nearby" means. Capped at NEARBY_RADIUS_M: a line whose stop
+                // is half a kilometre away is not one you are about to board.
                 val nearby     = gtfsRepo.getNearestStops(lat, lon, limit = 20)
                 val clockStops = LocationHelper.pickClockStops(nearby, lat, lon, 0.0)
+                    .filter { it.distanceMetres <= NEARBY_RADIUS_M }
 
                 val stopInfo = clockStops.associate { cs ->
                     cs.stop.stopId to Pair(cs.stop.stopName, cs.distanceMetres)
                 }
                 if (stopInfo.isEmpty()) {
+                    nearbyChoices = emptyList()
                     _selection.value = SelectionState(hasLocation = true)
                     return@launch
                 }
 
                 val raw = realtimeRepo.getUpcomingTripsForStops(
-                    stopInfo.keys, withinMinutes = 30)
+                    stopInfo.keys, withinMinutes = WITHIN_MINUTES)
                 val resolved = gtfsRepo.resolveUpcomingTrips(raw, stopInfo)
 
-                _selection.value = SelectionState(
-                    upcoming = resolved, refreshing = false, hasLocation = true)
+                nearbyChoices = resolved
+                    .take(MAX_LINES)
+                    .map { t ->
+                        LineChoice(
+                            routeId        = t.routeId,
+                            routeShortName = t.routeShortName,
+                            routeType      = t.routeType,
+                            headsign       = t.headsign,
+                            tripId         = t.tripId,
+                            boardingStopId = t.stopId,
+                            isNearby       = true
+                        )
+                    }
+
+                // Keep whatever the user has typed applied to the fresh data.
+                applyQuery(_selection.value.query, refreshing = false)
             } catch (e: Exception) {
                 FileLogger.e(TAG, "loadUpcomingTrips failed: ${e.message}")
                 _error.emit("Грешка при зареждане: ${e.message ?: "няма връзка"}")
@@ -160,30 +216,117 @@ class JourneyViewModel @Inject constructor(
         }
     }
 
-    // ── Selecting a trip → hand everything to the service ─────────────────
-    fun selectUpcomingTrip(trip: UpcomingTripInfo) {
+    /** Called on every keystroke in the search box. */
+    fun onQueryChanged(query: String) {
+        applyQuery(query, refreshing = _selection.value.refreshing)
+    }
+
+    private fun applyQuery(query: String, refreshing: Boolean) {
+        if (query.isBlank()) {
+            _selection.value = SelectionState(
+                choices    = nearbyChoices,
+                refreshing = refreshing,
+                hasLocation = true,
+                query      = "",
+                searching  = false
+            )
+            return
+        }
+
         viewModelScope.launch {
             try {
-                // Full ordered stop list for THIS exact trip_id. Because the
-                // trip comes from the realtime feed, this is the vehicle's
-                // REAL path — a depot short-run yields its actual truncated
-                // stop list, not the standard route.
-                val stops = gtfsRepo.getRemainingStops(trip.tripId, fromSequence = 0)
+                // Search covers the WHOLE network, not just what is nearby —
+                // the case the search box exists for is being already aboard,
+                // where your line is by definition not waiting at a stop near
+                // you. Lines that do have a vehicle nearby still rank first.
+                val all = gtfsRepo.getTrackableRoutes()
+                val nearbyIds = nearbyChoices.map { it.routeId }.toSet()
+
+                val ranked = LineSearch.rank(
+                    items = all,
+                    query = query,
+                    nameOf = { it.routeShortName },
+                    isNearby = { it.routeId in nearbyIds }
+                ).take(MAX_SEARCH_RESULTS)
+
+                val choices = ranked.map { route ->
+                    // Reuse the nearby entry when we have one: it already
+                    // knows the direction, so no picker is needed.
+                    nearbyChoices.firstOrNull { it.routeId == route.routeId }
+                        ?: LineChoice(
+                            routeId        = route.routeId,
+                            routeShortName = route.routeShortName,
+                            routeType      = route.routeType,
+                            headsign       = null,
+                            isNearby       = false
+                        )
+                }
+
+                _selection.value = SelectionState(
+                    choices     = choices,
+                    refreshing  = refreshing,
+                    hasLocation = true,
+                    query       = query,
+                    searching   = true
+                )
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "search failed: ${e.message}")
+            }
+        }
+    }
+
+    /** Directions of a line, for the picker shown on a search hit. */
+    suspend fun directionsFor(routeId: String): List<String> =
+        try { gtfsRepo.getDirectionsForRoute(routeId) }
+        catch (e: Exception) {
+            FileLogger.e(TAG, "directionsFor failed: ${e.message}"); emptyList()
+        }
+
+    // ── Starting a journey ────────────────────────────────────────────────
+
+    /**
+     * Starts tracking the chosen line in the chosen direction.
+     *
+     * The concrete vehicle is resolved by POSITION, not taken from the
+     * arrival the user tapped. That covers boarding the vehicle behind the
+     * one you tapped, starting mid-journey, and shortened depot runs whose
+     * stop list differs. When no vehicle can be matched we still start: the
+     * stop list comes from the line and direction, and announcements are
+     * driven by the passenger's own GPS. Only the arrival prediction at the
+     * alighting stop needs a specific vehicle.
+     */
+    fun startJourney(choice: LineChoice, headsign: String) {
+        viewModelScope.launch {
+            try {
+                val match = if (lastLat != 0.0 || lastLon != 0.0) {
+                    vehicleMatcher.findVehicle(
+                        choice.routeId, headsign, lastLat, lastLon)
+                } else null
+
+                // Prefer the matched vehicle's own trip; fall back to the
+                // tapped arrival's trip, then to any trip of this direction.
+                val tripId = match?.vehicle?.tripId ?: choice.tripId
+
+                val stops = when {
+                    tripId != null -> gtfsRepo.getRemainingStops(tripId, fromSequence = 0)
+                    else -> gtfsRepo.getStopsForRouteDirection(choice.routeId, headsign)
+                }
                 if (stops.isEmpty()) {
-                    _error.emit("Няма данни за маршрута на това превозно средство")
+                    _error.emit("Няма данни за маршрута на тази линия")
                     return@launch
                 }
 
                 val latLons = stops.map { sw ->
-                    val s: Stop? = gtfsRepo.getStopById(sw.stopId)
-                    Pair(s?.stopLat ?: 0.0, s?.stopLon ?: 0.0)
+                    val st: Stop? = gtfsRepo.getStopById(sw.stopId)
+                    Pair(st?.stopLat ?: 0.0, st?.stopLon ?: 0.0)
                 }
 
-                // Boarding index = the stop whose arrival entry was tapped.
-                // Only a SEED: the service snaps to the nearest upcoming stop
-                // on its first GPS fix, so starting mid-journey also works.
-                val boardingIdx = stops.indexOfFirst { it.stopId == trip.stopId }
-                                       .coerceAtLeast(0)
+                // Only a seed: the service snaps to the nearest upcoming stop
+                // on its first fix, which is what makes starting mid-journey
+                // work.
+                val boardingIdx = choice.boardingStopId
+                    ?.let { id -> stops.indexOfFirst { it.stopId == id } }
+                    ?.coerceAtLeast(0) ?: 0
 
                 val ctx = getApplication<Application>()
                 JourneyService.start(ctx)
@@ -205,17 +348,20 @@ class JourneyViewModel @Inject constructor(
                     bindingDeferred = null
                 }
 
-                val vehicle = bg.sofia.transit.util.VehicleLabels.singular(
-                    trip.routeType, gtfsRepo.isTrolleyRoute(trip.routeId))
+                val vehicle = VehicleLabels.singular(
+                    choice.routeType, gtfsRepo.isTrolleyRoute(choice.routeId))
+
                 svc.beginJourney(
-                    label   = "$vehicle ${trip.routeShortName} → ${trip.headsign}",
-                    tripId  = trip.tripId,
-                    stops   = stops,
-                    latLons = latLons,
+                    label    = "$vehicle ${choice.routeShortName} → $headsign",
+                    tripId   = tripId ?: "",
+                    routeId  = choice.routeId,
+                    headsign = headsign,
+                    stops    = stops,
+                    latLons  = latLons,
                     boardingStopIdx = boardingIdx
                 )
             } catch (e: Exception) {
-                FileLogger.e(TAG, "selectUpcomingTrip failed: ${e.message}")
+                FileLogger.e(TAG, "startJourney failed: ${e.message}")
                 _error.emit("Грешка при стартиране: ${e.message}")
             }
         }

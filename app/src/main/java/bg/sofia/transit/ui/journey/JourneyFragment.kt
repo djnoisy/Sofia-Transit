@@ -80,12 +80,20 @@ class JourneyFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
 
-        upcomingAdapter = UpcomingTripsAdapter { trip -> vm.selectUpcomingTrip(trip) }
+        upcomingAdapter = UpcomingTripsAdapter { choice -> onLineChosen(choice) }
         binding.rvUpcoming.apply {
             layoutManager = LinearLayoutManager(requireContext())
             adapter = upcomingAdapter
             contentDescription = "Идващи превозни средства"
         }
+
+        binding.etSearch.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(sq: android.text.Editable?) {
+                vm.onQueryChanged(sq?.toString().orEmpty())
+            }
+            override fun beforeTextChanged(c: CharSequence?, s: Int, co: Int, a: Int) {}
+            override fun onTextChanged(c: CharSequence?, s: Int, b: Int, co: Int) {}
+        })
 
         binding.btnRefresh.setOnClickListener {
             if (hasLocation) vm.loadUpcomingTrips(lastLat, lastLon)
@@ -259,6 +267,37 @@ class JourneyFragment : Fragment() {
         }, 250)
     }
 
+    /**
+     * A nearby arrival already carries its direction, so tracking starts at
+     * once. A search hit does not — the same line runs both ways — so the
+     * direction is asked for first.
+     */
+    private fun onLineChosen(choice: LineChoice) {
+        val known = choice.headsign
+        if (known != null) {
+            vm.startJourney(choice, known)
+            return
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            val directions = vm.directionsFor(choice.routeId)
+            when {
+                directions.isEmpty() ->
+                    Toast.makeText(requireContext(),
+                        "Няма данни за направленията на тази линия",
+                        Toast.LENGTH_SHORT).show()
+                directions.size == 1 ->
+                    vm.startJourney(choice, directions.first())
+                else -> AlertDialog.Builder(requireContext())
+                    .setTitle("Направление")
+                    .setItems(directions.toTypedArray()) { _, which ->
+                        vm.startJourney(choice, directions[which])
+                    }
+                    .setNegativeButton("Отказ", null)
+                    .show()
+            }
+        }
+    }
+
     /** Correct Bulgarian plural for the stop counter. */
     private fun stopWord(n: Int) = if (n == 1) "спирка" else "спирки"
 
@@ -311,12 +350,15 @@ class JourneyFragment : Fragment() {
             if (state.refreshing) View.VISIBLE else View.GONE
         binding.btnRefresh.isEnabled = !state.refreshing
 
-        val count = state.upcoming.size
+        val count = state.choices.size
         binding.tvUpcomingTitle.text = when {
             state.refreshing && count == 0 -> "Зареждане…"
-            count == 0 -> "Близки превозни средства"
-            count == 1 -> "1 идващо превозно средство"
-            else       -> "$count идващи превозни средства"
+            state.searching && count == 0  -> "Няма намерени линии"
+            state.searching && count == 1  -> "1 намерена линия"
+            state.searching                -> "$count намерени линии"
+            count == 0 -> "Няма линии наблизо"
+            count == 1 -> "1 линия наблизо"
+            else       -> "$count линии наблизо"
         }
         binding.tvUpcomingTitle.contentDescription = null
 
@@ -325,7 +367,7 @@ class JourneyFragment : Fragment() {
         binding.rvUpcoming.visibility =
             if (count > 0) View.VISIBLE else View.GONE
 
-        upcomingAdapter.submitList(state.upcoming)
+        upcomingAdapter.submitList(state.choices)
     }
 
     // ── Location for the SELECTION list only (tracking GPS lives in the

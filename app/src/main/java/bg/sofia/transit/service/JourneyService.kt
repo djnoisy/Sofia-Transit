@@ -72,6 +72,7 @@ import java.util.UUID
 class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     @Inject lateinit var realtimeRepo: RealtimeRepository
+    @Inject lateinit var vehicleMatcher: bg.sofia.transit.data.repository.VehicleMatcher
     @Inject lateinit var settings: AppSettings
 
     /** Service-lifetime scope for the ETA polling loop. */
@@ -91,8 +92,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          *  jitter at the stop cannot fire arrive/depart repeatedly. */
         const val DEPART_RADIUS = 90.0
 
-        /** Early warning distance for "Наближава спирка X". */
+        /** Upper bound for the "Наближава спирка X" warning distance. */
         const val APPROACH_RADIUS = 300.0
+
+        /** Lower bound, so the warning never collapses onto the stop itself. */
+        const val MIN_APPROACH_RADIUS = 120.0
 
         /** How many stops ahead of the current one we scan on each fix.
          *  Covers up to that many consecutively missed stops in one gap. */
@@ -110,6 +114,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /** If the vehicle makes no forward progress for this long, the
          *  journey is assumed over (user forgot to stop tracking). */
         private const val INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000L
+
+        /** How often we confirm which vehicle we are in. */
+        private const val VEHICLE_CHECK_INTERVAL_MS = 60_000L
+        /** Grace period after boarding, so the first GPS fixes can arrive. */
+        private const val FIRST_VEHICLE_CHECK_DELAY_MS = 45_000L
+        /** Within this, we and the vehicle count as travelling together. */
+        private const val SAME_VEHICLE_RADIUS = 150.0
+        /** Consecutive far readings before we accept the passenger has left. */
+        private const val DIVERGENCE_STREAK_LIMIT = 3
 
         /**
          * Tracking state, observable without binding to the service.
@@ -289,6 +302,20 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var etaSource: EtaSource = EtaSource.NONE
     private var etaJob: Job? = null
 
+    /** Route and direction being ridden, for re-matching the vehicle. */
+    private var routeId = ""
+    private var headsign = ""
+    /** Last GPS fix, so background checks can use the passenger's position. */
+    private var lastLat = 0.0
+    private var lastLon = 0.0
+    private var vehicleJob: Job? = null
+    /**
+     * Consecutive checks where the tracked vehicle was far from us. Acted on
+     * only after several in a row: one stale or jumpy position must never end
+     * a journey by itself.
+     */
+    private var divergenceStreak = 0
+
     private lateinit var fusedClient: FusedLocationProviderClient
 
     /**
@@ -300,6 +327,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * the process being killed.
      */
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+    /** Timestamp of the previous GPS fix, for measuring update cadence. */
+    private var lastFixMs = 0L
+    private var fixCount = 0
+    private var maxGapMs = 0L
+    private var lastCadenceLogMs = 0L
 
     // ── Commands (called by the ViewModel through the binder) ─────────────
 
@@ -313,11 +346,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     fun beginJourney(
         label: String,
         tripId: String,
+        routeId: String,
+        headsign: String,
         stops: List<StopWithSequence>,
         latLons: List<Pair<Double, Double>>,
         boardingStopIdx: Int
     ) {
         this.tripId       = tripId
+        this.routeId      = routeId
+        this.headsign     = headsign
+        divergenceStreak  = 0
         routeLabel        = label
         orderedStops      = stops
         stopLatLon        = latLons
@@ -330,9 +368,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightAnnounced   = false
         lastProgressMs    = System.currentTimeMillis()
 
+        lastFixMs = 0L
+        fixCount = 0
+        maxGapMs = 0L
+        lastCadenceLogMs = 0L
+
         publish(distance = null)
         acquireWakeLock()
         startLocUpdates()
+        startVehicleTracking()
         announce("Следене на пътуването започна.")
     }
 
@@ -368,6 +412,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     fun endJourney() {
         stopLocUpdates()
         releaseWakeLock()
+        vehicleJob?.cancel()
+        vehicleJob = null
         orderedStops = emptyList()
         stopLatLon   = emptyList()
         currentIdx   = 0
@@ -381,6 +427,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     // ── Progress engine ───────────────────────────────────────────────────
     private fun onFix(loc: Location) {
         if (orderedStops.isEmpty()) return
+
+        logFixCadence()
+        lastLat = loc.latitude
+        lastLon = loc.longitude
 
         val idxBefore = currentIdx
 
@@ -474,7 +524,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
             // ── Approaching warning ───────────────────────────────────────
             !atStop && !approachAnnounced
-                    && distTo(loc, currentIdx) <= APPROACH_RADIUS -> {
+                    && distTo(loc, currentIdx) <= approachRadiusFor(currentIdx) -> {
                 approachAnnounced = true
                 announce("Наближава спирка, ${orderedStops[currentIdx].stopName}.")
             }
@@ -563,6 +613,114 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private fun publishLastKnown() {
         val prev = _trackingState.value as? TrackingState.Tracking
         publish(distance = prev?.distanceToNextMetres)
+    }
+
+    /**
+     * Periodically confirms which vehicle we are actually in, and notices
+     * when we have left it.
+     *
+     * Two jobs, one loop:
+     *
+     *  - Re-matching. The vehicle chosen at boarding may not be the one we
+     *    got on. If another vehicle of the same line and direction is
+     *    consistently the nearest, we switch to its trip silently: the stop
+     *    list is identical for a given direction, so nothing the passenger
+     *    hears changes — only the arrival prediction and, for shortened depot
+     *    runs, the stop list itself become correct.
+     *
+     *  - Noticing that the passenger has got off. While riding, we and the
+     *    vehicle move together and the gap stays small. Once they alight, the
+     *    vehicle drives away and the gap grows and keeps growing. That is a
+     *    far better signal than the inactivity timer, which has to wait ten
+     *    minutes. Requires several consecutive readings, because a single
+     *    stale position must not end a journey.
+     */
+    private fun startVehicleTracking() {
+        vehicleJob?.cancel()
+        if (routeId.isBlank()) return
+
+        vehicleJob = serviceScope.launch {
+            // Let the first GPS fixes arrive before the first check.
+            delay(FIRST_VEHICLE_CHECK_DELAY_MS)
+            while (isActive) {
+                try {
+                    checkVehicle()
+                } catch (e: Exception) {
+                    FileLogger.w(TAG, "Vehicle check failed: ${e.message}")
+                }
+                delay(VEHICLE_CHECK_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun checkVehicle() {
+        if (lastLat == 0.0 && lastLon == 0.0) return
+
+        val distance = vehicleMatcher.distanceToTrackedVehicle(tripId, lastLat, lastLon)
+
+        if (distance != null && distance <= SAME_VEHICLE_RADIUS) {
+            // We are where our vehicle is: nothing to do.
+            divergenceStreak = 0
+            return
+        }
+
+        // Either the feed has nothing for this trip, or the vehicle is far
+        // away. Before concluding anything, see whether some other vehicle of
+        // the same line and direction is right here — that would mean we
+        // boarded a different one.
+        val match = vehicleMatcher.findVehicle(
+            routeId, headsign.ifBlank { null }, lastLat, lastLon)
+
+        if (match != null && match.unambiguous && match.vehicle.tripId != tripId) {
+            FileLogger.i(TAG, "Re-matched to trip=${match.vehicle.tripId} " +
+                "(${match.distanceMetres.toInt()} m); previous was " +
+                "${distance?.toInt() ?: -1} m away")
+            tripId = match.vehicle.tripId
+            divergenceStreak = 0
+            // The stop list can differ on a shortened run, so re-check that
+            // the chosen alighting stop is still on the route.
+            verifyDestinationStillReachable()
+            restartEtaPolling()
+            return
+        }
+
+        if (distance == null) {
+            // No data at all — not evidence of anything. The inactivity timer
+            // remains the fallback for this case.
+            return
+        }
+
+        divergenceStreak++
+        FileLogger.i(TAG, "Vehicle ${distance.toInt()} m away " +
+            "(streak $divergenceStreak/$DIVERGENCE_STREAK_LIMIT)")
+        if (divergenceStreak >= DIVERGENCE_STREAK_LIMIT) {
+            announce("Изглежда слязохте. Следенето се прекратява.")
+            _events.tryEmit(JourneyEvent.RouteEnded)
+            endJourney()
+        }
+    }
+
+    /**
+     * After switching vehicles, the new trip may be a shortened run that never
+     * reaches the chosen alighting stop. Silently keeping it would leave the
+     * passenger waiting for an announcement that can never come.
+     */
+    private fun verifyDestinationStillReachable() {
+        val dest = destinationIdx ?: return
+        val destStop = orderedStops.getOrNull(dest) ?: return
+        // orderedStops still describes the original trip; a mismatch shows up
+        // as the destination no longer being ahead of us on this vehicle.
+        if (dest < currentIdx) {
+            announce("Това превозно средство не стига до избраната спирка " +
+                     "за слизане.")
+            destinationIdx = null
+            alightWarningsFired.clear()
+            alightAnnounced = false
+            publishLastKnown()
+            FileLogger.i(TAG, "Destination unreachable on new trip; cleared")
+        } else {
+            FileLogger.d(TAG, "Destination ${destStop.stopName} still ahead")
+        }
     }
 
     /**
@@ -673,6 +831,62 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         null
     }
 
+    /**
+     * Records how often fixes actually arrive. Requested cadence is 1 s, so
+     * a gap of many seconds means the system is throttling us — which is what
+     * makes announcements late once the screen goes off. Individual long gaps
+     * are logged immediately; a summary follows every 30 s so the log shows
+     * the pattern without a line per second.
+     */
+    private fun logFixCadence() {
+        val now = System.currentTimeMillis()
+        if (lastFixMs != 0L) {
+            val gap = now - lastFixMs
+            if (gap > maxGapMs) maxGapMs = gap
+            if (gap >= 5_000L) {
+                FileLogger.w(TAG, "GPS gap: ${gap / 1000}s (requested 1s)")
+            }
+        }
+        lastFixMs = now
+        fixCount++
+
+        if (lastCadenceLogMs == 0L) lastCadenceLogMs = now
+        if (now - lastCadenceLogMs >= 30_000L) {
+            val secs = (now - lastCadenceLogMs) / 1000.0
+            val perMin = if (secs > 0) (fixCount / secs) * 60 else 0.0
+            FileLogger.i(TAG, "GPS cadence: $fixCount fixes in ${secs.toInt()}s " +
+                "(${String.format(java.util.Locale.US, "%.1f", perMin)}/мин), " +
+                "max gap ${maxGapMs / 1000}s")
+            fixCount = 0
+            maxGapMs = 0
+            lastCadenceLogMs = now
+        }
+    }
+
+    /**
+     * Warning distance for the stop we are heading to, adapted to how far
+     * apart the stops actually are.
+     *
+     * A fixed 300 m is useless where stops are close: riding a tram through
+     * the centre, "Наближава Женски пазар" fired one second after leaving the
+     * previous stop, because the next stop was already inside the radius.
+     * That is noise, not a warning.
+     *
+     * So the warning fires at half the gap between the previous stop and this
+     * one, capped at [APPROACH_RADIUS] and floored at [MIN_APPROACH_RADIUS]
+     * so it still arrives with a few seconds to spare. Where stops are far
+     * apart the behaviour is unchanged.
+     */
+    private fun approachRadiusFor(idx: Int): Double {
+        val prev = idx - 1
+        if (prev < 0) return APPROACH_RADIUS
+        val (pLat, pLon) = stopLatLon.getOrNull(prev) ?: return APPROACH_RADIUS
+        val (cLat, cLon) = stopLatLon.getOrNull(idx) ?: return APPROACH_RADIUS
+        val spacing = LocationHelper.distanceMetres(pLat, pLon, cLat, cLon)
+        if (spacing <= 0.0) return APPROACH_RADIUS
+        return (spacing / 2.0).coerceIn(MIN_APPROACH_RADIUS, APPROACH_RADIUS)
+    }
+
     private fun distTo(loc: Location, idx: Int): Double {
         val (lat, lon) = stopLatLon.getOrNull(idx) ?: return Double.MAX_VALUE
         return LocationHelper.distanceMetres(loc.latitude, loc.longitude, lat, lon)
@@ -733,8 +947,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     private fun releaseWakeLock() {
         try {
-            wakeLock?.let { if (it.isHeld) it.release() }
-            FileLogger.i(TAG, "Wake lock released")
+            // Only log when something was actually held: endJourney() and
+            // onDestroy() both call this, which logged the release twice.
+            wakeLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                    FileLogger.i(TAG, "Wake lock released")
+                }
+            }
         } catch (e: Exception) {
             FileLogger.w(TAG, "Could not release wake lock: ${e.message}")
         }

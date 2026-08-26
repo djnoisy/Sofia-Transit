@@ -19,6 +19,21 @@
         android:layout_weight="1" android:orientation="vertical"
         android:visibility="gone">
 
+        <!-- Search covers the whole network, for the case of boarding a line
+             that is not waiting at a stop nearby — i.e. already being aboard.
+             Filtering happens as you type; there is no search button. -->
+        <EditText android:id="@+id/etSearch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="12dp"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:hint="Търсене на линия"
+            android:inputType="textCapCharacters"
+            android:imeOptions="actionSearch"
+            android:maxLines="1"
+            android:importantForAutofill="no"/>
+
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical"
             android:paddingHorizontal="12dp" android:paddingVertical="8dp">

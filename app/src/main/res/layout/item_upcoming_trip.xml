@@ -38,24 +38,5 @@
             android:textSize="16sp"
             android:maxLines="2"
             android:importantForAccessibility="no"/>
-
-        <TextView android:id="@+id/tvStopInfo"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="13sp"
-            android:alpha="0.7"
-            android:layout_marginTop="2dp"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:importantForAccessibility="no"/>
     </LinearLayout>
-
-    <TextView android:id="@+id/tvEta"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="15sp"
-        android:textStyle="bold"
-        android:textColor="#388E3C"
-        android:layout_marginStart="8dp"
-        android:importantForAccessibility="no"/>
 </LinearLayout>

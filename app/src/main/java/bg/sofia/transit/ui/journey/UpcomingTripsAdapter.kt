@@ -5,24 +5,26 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import bg.sofia.transit.data.repository.UpcomingTripInfo
 import bg.sofia.transit.databinding.ItemUpcomingTripBinding
 import bg.sofia.transit.util.VehicleLabels
 
 /**
- * Renders one row per upcoming arrival in the Journey screen.
- * Each row shows: type icon, line number, real headsign, ETA in minutes.
- * The row's contentDescription is a complete TalkBack-friendly sentence.
+ * The line picker for starting a journey.
+ *
+ * Shows only what the choice depends on: the vehicle type, the line number
+ * and the direction. Arrival times, stop names and distances were dropped
+ * deliberately — they belong to the Stops screen, and the concrete vehicle is
+ * now matched by position at journey start, so the specific arrival a user
+ * taps carries no meaning. Ordering still encodes proximity: nearest stop
+ * first, then earliest arrival.
  */
 class UpcomingTripsAdapter(
-    private val onClick: (UpcomingTripInfo) -> Unit
-) : ListAdapter<UpcomingTripInfo, UpcomingTripsAdapter.VH>(DIFF) {
+    private val onClick: (LineChoice) -> Unit
+) : ListAdapter<LineChoice, UpcomingTripsAdapter.VH>(DIFF) {
 
     /**
-     * route_ids belonging to the real trolleybus network, so type=11 rows can
-     * be told apart as "Тролей" or "Електробус" — the same distinction the
-     * Lines and Stops screens make. Empty until the fragment supplies it,
-     * in which case type=11 reads as the more general "Електробус".
+     * route_ids on the real trolleybus network, so route_type 11 can be told
+     * apart as "Тролей" or "Електробус" like the Lines and Stops screens.
      */
     private var trolleyRouteIds: Set<String> = emptySet()
 
@@ -33,58 +35,46 @@ class UpcomingTripsAdapter(
         }
     }
 
-    inner class VH(val b: ItemUpcomingTripBinding) : RecyclerView.ViewHolder(b.root) {
-        fun bind(t: UpcomingTripInfo) {
-            val type = VehicleLabels.typeOf(t.routeType)
-            b.tvType.text       = type.emoji
-            b.tvRoute.text      = t.routeShortName
-            b.tvHeadsign.text   = "→ ${t.headsign}"
+    inner class VH(private val b: ItemUpcomingTripBinding) :
+        RecyclerView.ViewHolder(b.root) {
 
-            val mins = t.minutesUntilArrival()
-            b.tvEta.text = when {
-                mins <= 0  -> "сега"
-                mins == 1  -> "1 мин"
-                else       -> "$mins мин"
-            }
-
-            // Stop name + distance (helps the user know which stop to walk to)
-            val distStr = if (t.stopDistanceMetres < 1000)
-                "${t.stopDistanceMetres.toInt()} м"
-            else
-                "${"%.1f".format(t.stopDistanceMetres / 1000)} км"
-            b.tvStopInfo.text = "${t.stopName} • $distStr"
-
-            // Comprehensive content description for TalkBack
-            // Resolved centrally: trimming a letter off the plural produced
-            // "Троле" and "Трамва".
+        fun bind(c: LineChoice) {
+            val type = VehicleLabels.typeOf(c.routeType)
             val typeLabel = VehicleLabels.singular(
-                t.routeType, t.routeId in trolleyRouteIds)
-            val etaText = when {
-                mins <= 0 -> "пристига сега"
-                mins == 1 -> "след 1 минута"
-                else      -> "след $mins минути"
-            }
-            b.root.contentDescription =
-                "$typeLabel ${t.routeShortName} към ${t.headsign}, $etaText, " +
-                "от спирка ${t.stopName} на $distStr. " +
-                "Натиснете за стартиране на пътуването."
+                c.routeType, c.routeId in trolleyRouteIds)
 
-            b.root.setOnClickListener { onClick(t) }
+            b.tvType.text = type.emoji
+            b.tvRoute.text = c.routeShortName
+
+            // A search hit with no vehicle nearby has no direction yet; it is
+            // asked for after selection.
+            b.tvHeadsign.text = c.headsign ?: "изберете направление"
+
+            // The row is one focusable unit for a screen reader. "→" is shown
+            // visually but spoken as "към", since the glyph itself would
+            // either be skipped or read as a symbol.
+            b.root.contentDescription = if (c.headsign != null)
+                "$typeLabel ${c.routeShortName} към ${c.headsign}"
+            else
+                "$typeLabel ${c.routeShortName}, изберете направление"
+
+            b.root.setOnClickListener { onClick(c) }
         }
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, vt: Int): VH =
-        VH(ItemUpcomingTripBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = VH(
+        ItemUpcomingTripBinding.inflate(
+            LayoutInflater.from(parent.context), parent, false)
+    )
 
-    override fun onBindViewHolder(h: VH, pos: Int) = h.bind(getItem(pos))
-
+    override fun onBindViewHolder(holder: VH, position: Int) =
+        holder.bind(getItem(position))
 
     companion object {
-        val DIFF = object : DiffUtil.ItemCallback<UpcomingTripInfo>() {
-            override fun areItemsTheSame(a: UpcomingTripInfo, b: UpcomingTripInfo) =
-                a.tripId == b.tripId
-            override fun areContentsTheSame(a: UpcomingTripInfo, b: UpcomingTripInfo) =
-                a == b
+        private val DIFF = object : DiffUtil.ItemCallback<LineChoice>() {
+            override fun areItemsTheSame(a: LineChoice, b: LineChoice) =
+                a.routeId == b.routeId && a.headsign == b.headsign
+            override fun areContentsTheSame(a: LineChoice, b: LineChoice) = a == b
         }
     }
 }

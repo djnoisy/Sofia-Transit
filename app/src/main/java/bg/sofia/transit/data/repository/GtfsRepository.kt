@@ -228,6 +228,7 @@ class GtfsRepository @Inject constructor(
                 stopDao.clearTrolleyFlags()
                 stopDao.markTrolleyStops()
                 trolleyRouteIdsCache = null
+                trackableRoutesCache = null
                 val trolleyStops = stopDao.countTrolleyStops()
                 FileLogger.i(TAG, "Marked $trolleyStops trolley stops")
 
@@ -654,6 +655,59 @@ class GtfsRepository @Inject constructor(
 
     /** True if the route is a real trolleybus line (route_type 11 covers
      *  both trolleybuses and electrobuses; this is the distinction). */
+    @Volatile private var trackableRoutesCache: List<Route>? = null
+
+    /**
+     * Direction of a realtime trip, as a headsign, derived from the trip_id
+     * prefix. The vehicle feed leaves direction_id and headsign empty, so the
+     * prefix is the only direction signal available for a moving vehicle.
+     * Null when the prefix is not in the static data — typically a trip added
+     * since the last import.
+     */
+    suspend fun getHeadsignByTripIdPrefix(tripId: String): String? {
+        val prefix = tripIdDirectionPrefix(tripId) ?: return null
+        return tripDao.getHeadsignByTripIdPrefix(prefix)
+    }
+
+    /**
+     * All lines that can be tracked, for the Journey search field. Metro is
+     * excluded: underground there is no GPS, and the carriages announce their
+     * own stops. Cached after the first call, since the list changes only on
+     * a static-data re-import.
+     */
+    suspend fun getTrackableRoutes(): List<Route> {
+        trackableRoutesCache?.let { return it }
+        val list = routeDao.getAllRoutesOnce()
+            .filter { it.routeType != METRO_ROUTE_TYPE }
+        trackableRoutesCache = list
+        return list
+    }
+
+    /**
+     * The distinct directions a line runs in, as headsigns, for the direction
+     * picker shown after a search hit.
+     */
+    suspend fun getDirectionsForRoute(routeId: String): List<String> =
+        tripDao.getHeadsignsForRoute(routeId)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.uppercase() }
+            .sorted()
+
+    /**
+     * Ordered stops of a representative trip of [routeId] towards [headsign].
+     * Used when a journey starts from search, where no concrete trip has been
+     * chosen: every trip of a route in one direction shares the same stop
+     * sequence, so any of them describes the path.
+     */
+    suspend fun getStopsForRouteDirection(
+        routeId: String,
+        headsign: String
+    ): List<StopWithSequence> {
+        val tripId = tripDao.getRepresentativeTrip(routeId, headsign) ?: return emptyList()
+        return getRemainingStops(tripId, fromSequence = 0)
+    }
+
     /** The whole trolley route set, for callers labelling many rows at once. */
     suspend fun trolleyRouteIds(): Set<String> = getTrolleyRouteIds()
 
@@ -1076,13 +1130,31 @@ class GtfsRepository @Inject constructor(
             )
         }
 
-        // 3. Deduplicate by (routeId + headsign), keeping the SOONEST arrival.
-        //    Use case: same line+direction visible at two nearby stops.
-        val deduped = enriched
-            .groupBy { "${it.routeId}|${it.headsign}" }
-            .map { (_, candidates) -> candidates.minBy { it.arrivalEpoch } }
+        // 3. Drop the metro. Underground there is no GPS, and the carriages
+        //    announce their own stops, so tracking a metro journey is both
+        //    impossible and pointless. It stays in the Stops and Lines
+        //    screens; only the Journey picker excludes it.
+        val withoutMetro = enriched.filter { it.routeType != METRO_ROUTE_TYPE }
 
-        // 4. Sort by proximity to user, then by arrival time as tie-breaker.
+        // 4. Deduplicate by (routeId + headsign), keeping the entry at the
+        //    NEAREST stop — not the soonest arrival. The same line in the
+        //    same direction can be listed at two stops around the user, and
+        //    the useful one is the stop they can actually walk to; the sooner
+        //    arrival may well be at the farther stop. Ties on distance fall
+        //    back to the earlier arrival.
+        val deduped = withoutMetro
+            // Headsign is normalised for the key: CGM spells the same
+            // destination inconsistently across records ("Бъкстон" vs
+            // "БЪКСТОН"), and a literal comparison would let one line appear
+            // twice in the same direction.
+            .groupBy { "${it.routeId}|${it.headsign.trim().uppercase()}" }
+            .map { (_, candidates) ->
+                candidates.minWith(
+                    compareBy({ it.stopDistanceMetres }, { it.arrivalEpoch })
+                )
+            }
+
+        // 5. Sort by proximity to user, then by arrival time as tie-breaker.
         return deduped.sortedWith(
             compareBy({ it.stopDistanceMetres }, { it.arrivalEpoch })
         )
@@ -1092,6 +1164,9 @@ class GtfsRepository @Inject constructor(
 /**
  * Result of a sample-stops diagnostic query.
  */
+/** GTFS route_type for the metro, excluded from journey tracking. */
+const val METRO_ROUTE_TYPE = 1
+
 data class SampleStops(
     val totalCount: Int,
     val samples: List<String>
