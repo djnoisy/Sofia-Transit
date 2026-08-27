@@ -75,6 +75,8 @@ class JourneyViewModel @Inject constructor(
         private const val WITHIN_MINUTES = 20
         /** Cap on the nearby list, however many lines are in range. */
         private const val MAX_LINES = 10
+        /** Nearest stops considered, mirroring the Stops tab's limit of 10. */
+        private const val MAX_STOPS = 10
         private const val MAX_SEARCH_RESULTS = 25
     }
 
@@ -171,17 +173,29 @@ class JourneyViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                // Same stop-picking pipeline as the Stops tab — clock sectors
-                // over the nearest stops — so both screens agree on what
-                // "nearby" means. Capped at NEARBY_RADIUS_M: a line whose stop
-                // is half a kilometre away is not one you are about to board.
-                val nearby     = gtfsRepo.getNearestStops(lat, lon, limit = 20)
-                val clockStops = LocationHelper.pickClockStops(nearby, lat, lon, 0.0)
-                    .filter { it.distanceMetres <= NEARBY_RADIUS_M }
-
-                val stopInfo = clockStops.associate { cs ->
-                    cs.stop.stopId to Pair(cs.stop.stopName, cs.distanceMetres)
-                }
+                // Every stop within NEARBY_RADIUS_M, using the same distance
+                // calculation as the Stops tab.
+                //
+                // Deliberately NOT pickClockStops: that keeps one stop per
+                // compass sector, which is right for the Stops tab, where the
+                // point is to orient the user around them. Here it silently
+                // dropped lines — around a metro station most stops share a
+                // bearing, so the sector filter discarded all but a couple and
+                // the list showed 7 lines when 10 stops were in range.
+                // Exactly the Stops tab's method: getNearestStops ordered by
+                // distance, then distances computed with LocationHelper — no
+                // sector filtering, which the Stops tab does not do either.
+                // The only addition is the radius: a line whose stop is half a
+                // kilometre away is not one you are about to board.
+                val stopInfo = gtfsRepo.getNearestStops(lat, lon, limit = MAX_STOPS)
+                    .map { stop ->
+                        stop to LocationHelper.distanceMetres(
+                            lat, lon, stop.stopLat, stop.stopLon)
+                    }
+                    .filter { (_, metres) -> metres <= NEARBY_RADIUS_M }
+                    .associate { (stop, metres) ->
+                        stop.stopId to Pair(stop.stopName, metres)
+                    }
                 if (stopInfo.isEmpty()) {
                     nearbyChoices = emptyList()
                     _selection.value = SelectionState(hasLocation = true)
