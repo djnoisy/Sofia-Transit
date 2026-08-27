@@ -46,17 +46,21 @@ class UpcomingTripsAdapter(
             b.tvType.text = type.emoji
             b.tvRoute.text = c.routeShortName
 
-            // A search hit with no vehicle nearby has no direction yet; it is
-            // asked for after selection.
-            b.tvHeadsign.text = c.headsign ?: "изберете направление"
+            // Rows carry no direction — it is chosen after tapping — so the
+            // second line shows the line's corridor instead. That identifies
+            // the route without implying a direction it does not have.
+            b.tvHeadsign.text = c.headsign ?: c.routeSubtitle
 
             // The row is one focusable unit for a screen reader. "→" is shown
             // visually but spoken as "към", since the glyph itself would
             // either be skipped or read as a symbol.
-            b.root.contentDescription = if (c.headsign != null)
-                "$typeLabel ${c.routeShortName} към ${c.headsign}"
-            else
-                "$typeLabel ${c.routeShortName}, изберете направление"
+            b.root.contentDescription = when {
+                c.headsign != null ->
+                    "$typeLabel ${c.routeShortName} към ${c.headsign}"
+                c.routeSubtitle.isNotEmpty() ->
+                    "$typeLabel ${c.routeShortName}, ${c.routeSubtitle}"
+                else -> "$typeLabel ${c.routeShortName}"
+            }
 
             b.root.setOnClickListener { onClick(c) }
         }

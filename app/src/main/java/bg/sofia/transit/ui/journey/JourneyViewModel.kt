@@ -41,8 +41,13 @@ data class LineChoice(
     val routeId: String,
     val routeShortName: String,
     val routeType: Int,
-    /** Known for nearby arrivals; null for a search hit needing a direction. */
+    /** Known for nearby arrivals; null when the direction is asked for on tap. */
     val headsign: String?,
+    /**
+     * The line's two endpoints, e.g. "Ж.К. Младост-1 - Бул. Никола Петков",
+     * shown instead of a direction. Same source as the Lines screen.
+     */
+    val routeSubtitle: String = "",
     /** Concrete trip when known — only a hint; the vehicle is matched by
      *  position at journey start. */
     val tripId: String? = null,
@@ -71,8 +76,15 @@ class JourneyViewModel @Inject constructor(
         private const val TAG = "JourneyVM"
         /** Stops farther than this are not plausible boarding points. */
         private const val NEARBY_RADIUS_M = 400.0
-        /** Arrivals further out than this are not worth listing. */
-        private const val WITHIN_MINUTES = 20
+        /**
+         * Effectively "whatever the feed knows about". A tight window used to
+         * hide a line whose last vehicle had just passed and whose next one
+         * was predicted far out — yet in reality the next one may be about to
+         * arrive, and the user wanting to board it found nothing to tap.
+         * Ordering is by stop distance, so a distant prediction simply sits
+         * lower rather than being dropped.
+         */
+        private const val WITHIN_MINUTES = 180
         /** Cap on the nearby list, however many lines are in range. */
         private const val MAX_LINES = 10
         /** Nearest stops considered, mirroring the Stops tab's limit of 10. */
@@ -206,16 +218,41 @@ class JourneyViewModel @Inject constructor(
                     stopInfo.keys, withinMinutes = WITHIN_MINUTES)
                 val resolved = gtfsRepo.resolveUpcomingTrips(raw, stopInfo)
 
+                // The same endpoint pairs the Lines screen shows: the two
+                // busiest headsigns of the route, joined. Preferred over
+                // route_long_name, which repeats the start at the end
+                // ("Ж.К. Младост-1 - Бул. Никола Петков - Ж.К. Младост-1").
+                val subtitles = gtfsRepo.getRouteSubtitles()
+
+                // Nearby lines come from the realtime feed, which also carries
+                // routes that have no static stop_times. They cannot be
+                // tracked, so they are dropped here as well as in search.
+                val trackable = gtfsRepo.trackableRouteIds()
+
+                // One row per LINE, not per direction. Two reasons: a line
+                // with both directions in range used to eat two of the ten
+                // slots, and — more importantly — if only one direction
+                // happened to be in the feed, the other was unreachable even
+                // though the user might want exactly it. The direction is
+                // asked for on tap, as it already is for search results.
+                //
+                // tripId and boardingStopId are deliberately dropped: they
+                // belong to one particular arrival, possibly in the other
+                // direction, and the vehicle is matched by position at start
+                // anyway.
                 nearbyChoices = resolved
+                    .filter { it.routeId in trackable }
+                    .groupBy { it.routeId }
+                    .map { (_, arrivals) -> arrivals.minBy { it.stopDistanceMetres } }
+                    .sortedBy { it.stopDistanceMetres }
                     .take(MAX_LINES)
                     .map { t ->
                         LineChoice(
                             routeId        = t.routeId,
                             routeShortName = t.routeShortName,
                             routeType      = t.routeType,
-                            headsign       = t.headsign,
-                            tripId         = t.tripId,
-                            boardingStopId = t.stopId,
+                            headsign       = null,
+                            routeSubtitle  = subtitles[t.routeId].orEmpty(),
                             isNearby       = true
                         )
                     }
@@ -254,6 +291,7 @@ class JourneyViewModel @Inject constructor(
                 // where your line is by definition not waiting at a stop near
                 // you. Lines that do have a vehicle nearby still rank first.
                 val all = gtfsRepo.getTrackableRoutes()
+                val searchSubtitles = gtfsRepo.getRouteSubtitles()
                 val nearbyIds = nearbyChoices.map { it.routeId }.toSet()
 
                 val ranked = LineSearch.rank(
@@ -272,6 +310,13 @@ class JourneyViewModel @Inject constructor(
                             routeShortName = route.routeShortName,
                             routeType      = route.routeType,
                             headsign       = null,
+                            // No fallback to route_long_name on purpose: CGM
+                            // sometimes names a line after a shortened
+                            // variant — line 111 is officially "Ж.К.
+                            // Младост-1 - Бул. Никола Петков - Ж.К.
+                            // Младост-1" although it actually runs to Люлин.
+                            // An empty second line is better than a wrong one.
+                            routeSubtitle  = searchSubtitles[route.routeId].orEmpty(),
                             isNearby       = false
                         )
                 }

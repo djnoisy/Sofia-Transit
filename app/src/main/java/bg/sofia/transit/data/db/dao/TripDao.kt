@@ -116,6 +116,25 @@ interface TripDao {
     """)
     suspend fun getRepresentativeTrip(routeId: String, headsign: String): String?
 
+    /**
+     * route_ids that can actually be tracked: they have at least one trip
+     * which itself has stop_times.
+     *
+     * Journey tracking reads its ordered stop list from stop_times by
+     * trip_id, so a route without them cannot be announced at all — no
+     * stops to compare the passenger's position against. Such routes exist
+     * in the feed (temporary replacements like M3 are defined in routes.txt
+     * with zero trips), and they used to be listed and then refused on tap.
+     *
+     * EXISTS rather than a JOIN so SQLite stops at the first matching row
+     * per trip instead of scanning all 766k stop_times.
+     */
+    @Query("""
+        SELECT DISTINCT t.routeId FROM trips t
+        WHERE EXISTS (SELECT 1 FROM stop_times st WHERE st.tripId = t.tripId)
+    """)
+    suspend fun getTrackableRouteIds(): List<String>
+
     @Query("SELECT COUNT(*) FROM trips")
     suspend fun count(): Int
 

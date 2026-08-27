@@ -184,6 +184,12 @@ class GtfsRepository @Inject constructor(
         // tables. Also flips on subsequent reloads (weekly worker), giving
         // observers a true → false → true edge to re-trigger queries.
         _dataReady.value = false
+        // Invalidate derived caches BEFORE touching the tables as well as
+        // after: if an import fails halfway, the tables have changed but the
+        // final invalidation is never reached, and a stale cache would
+        // survive until the process restarts.
+        trolleyRouteIdsCache = null
+        trackableRoutesCache = null
         try {
             withContext(Dispatchers.IO) {
                 val dataDir = getActiveDataDir()
@@ -677,11 +683,23 @@ class GtfsRepository @Inject constructor(
      */
     suspend fun getTrackableRoutes(): List<Route> {
         trackableRoutesCache?.let { return it }
+        val withStops = tripDao.getTrackableRouteIds().toSet()
         val list = routeDao.getAllRoutesOnce()
             .filter { it.routeType != METRO_ROUTE_TYPE }
+            // A route with no stop_times cannot be tracked: the announcements
+            // compare the passenger's position against that stop list, and
+            // without it there is nothing to announce. Better to leave such a
+            // route out than to offer it and refuse on tap.
+            .filter { it.routeId in withStops }
         trackableRoutesCache = list
+        FileLogger.d(TAG, "Trackable routes: ${list.size} " +
+            "(of ${withStops.size} with stop_times)")
         return list
     }
+
+    /** route_ids that journey tracking can work with. */
+    suspend fun trackableRouteIds(): Set<String> =
+        getTrackableRoutes().map { it.routeId }.toSet()
 
     /**
      * The directions of a line as plain headsigns, for the Journey direction
