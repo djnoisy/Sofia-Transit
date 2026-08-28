@@ -87,6 +87,13 @@ class JourneyFragment : Fragment() {
             contentDescription = "Идващи превозни средства"
         }
 
+        binding.btnClearSearch.setOnClickListener {
+            binding.etSearch.setText("")
+            // Focus returns to the field so a screen-reader user is left
+            // somewhere sensible rather than on a button that just vanished.
+            binding.etSearch.requestFocus()
+        }
+
         binding.etSearch.addTextChangedListener(object : android.text.TextWatcher {
             override fun afterTextChanged(sq: android.text.Editable?) {
                 vm.onQueryChanged(sq?.toString().orEmpty())
@@ -350,6 +357,14 @@ class JourneyFragment : Fragment() {
             if (state.refreshing) View.VISIBLE else View.GONE
         binding.btnRefresh.isEnabled = !state.refreshing
 
+        // The screen keeps one layout and changes what is on it, rather than
+        // opening a separate search view. Refresh belongs to the nearby list,
+        // so it disappears while search results are shown; clearing belongs to
+        // the search, so it appears only when there is something to clear.
+        val hasQuery = state.query.isNotBlank()
+        binding.btnRefresh.visibility = if (hasQuery) View.GONE else View.VISIBLE
+        binding.btnClearSearch.visibility = if (hasQuery) View.VISIBLE else View.GONE
+
         val count = state.choices.size
         binding.tvUpcomingTitle.text = when {
             state.refreshing && count == 0 -> "Зареждане…"
@@ -362,6 +377,12 @@ class JourneyFragment : Fragment() {
         }
         binding.tvUpcomingTitle.contentDescription = null
 
+        // The two empty states have different causes and different remedies,
+        // so they must not share one message.
+        binding.tvEmptyMessage.text = if (state.searching)
+            "Опитайте с друг номер на линия"
+        else
+            "Няма идващи превозни средства в близост"
         binding.tvEmptyMessage.visibility =
             if (count == 0 && !state.refreshing) View.VISIBLE else View.GONE
         binding.rvUpcoming.visibility =

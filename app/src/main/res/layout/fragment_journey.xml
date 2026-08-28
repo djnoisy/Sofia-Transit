@@ -21,18 +21,38 @@
 
         <!-- Search covers the whole network, for the case of boarding a line
              that is not waiting at a stop nearby — i.e. already being aboard.
-             Filtering happens as you type; there is no search button. -->
-        <EditText android:id="@+id/etSearch"
-            android:layout_width="match_parent"
+             Filtering happens as you type; there is no search button.
+
+             The clear action is a real button rather than a drawable inside
+             the field: a compound drawable cannot be focused by a screen
+             reader, so it would be invisible to anyone navigating by swipe. -->
+        <LinearLayout android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:layout_marginHorizontal="12dp"
-            android:layout_marginTop="8dp"
-            android:minHeight="48dp"
-            android:hint="Търсене на линия"
-            android:inputType="textCapCharacters"
-            android:imeOptions="actionSearch"
-            android:maxLines="1"
-            android:importantForAutofill="no"/>
+            android:layout_marginTop="8dp">
+
+            <EditText android:id="@+id/etSearch"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:hint="Търсене на линия"
+                android:inputType="textCapCharacters"
+                android:imeOptions="actionSearch"
+                android:maxLines="1"
+                android:importantForAutofill="no"/>
+
+            <Button android:id="@+id/btnClearSearch"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:minWidth="48dp"
+                android:text="Изчисти"
+                android:layout_marginStart="4dp"
+                android:visibility="gone"
+                style="@style/Widget.Material3.Button.TextButton"/>
+        </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical"
