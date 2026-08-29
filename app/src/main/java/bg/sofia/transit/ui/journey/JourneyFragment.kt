@@ -169,6 +169,11 @@ class JourneyFragment : Fragment() {
     }
 
     private fun renderTracking(state: JourneyService.TrackingState.Tracking) {
+        // The selection panel is going away, so the keyboard it belongs to
+        // must go with it — otherwise it stays over the tracking screen with
+        // no field left to type into.
+        hideKeyboard()
+
         binding.panelUpcoming.visibility      = View.GONE
         binding.tvJourneyHint.visibility      = View.GONE
         binding.panelActiveJourney.visibility = View.VISIBLE
@@ -280,6 +285,9 @@ class JourneyFragment : Fragment() {
      * direction is asked for first.
      */
     private fun onLineChosen(choice: LineChoice) {
+        // Dismiss before the direction dialog opens, so the dialog is not
+        // squeezed above the keyboard.
+        hideKeyboard()
         val known = choice.headsign
         if (known != null) {
             vm.startJourney(choice, known)
@@ -303,6 +311,20 @@ class JourneyFragment : Fragment() {
                     .show()
             }
         }
+    }
+
+    /**
+     * Dismisses the soft keyboard and drops focus from the search field.
+     * Asked for unconditionally: the field may have lost focus while the
+     * keyboard stayed up, so checking focus first would sometimes skip it.
+     */
+    private fun hideKeyboard() {
+        val view = _binding?.etSearch ?: return
+        val imm = requireContext().getSystemService(
+            android.content.Context.INPUT_METHOD_SERVICE
+        ) as android.view.inputmethod.InputMethodManager
+        imm.hideSoftInputFromWindow(view.windowToken, 0)
+        view.clearFocus()
     }
 
     /** Correct Bulgarian plural for the stop counter. */

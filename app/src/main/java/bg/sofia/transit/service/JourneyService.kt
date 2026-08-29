@@ -117,6 +117,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         /** How often we confirm which vehicle we are in. */
         private const val VEHICLE_CHECK_INTERVAL_MS = 60_000L
+
+        /**
+         * How often the arrival prediction at the alighting stop is refreshed.
+         *
+         * Each poll downloads the entire trip-updates feed — over half a
+         * megabyte — to read a single number. At the previous 30 seconds that
+         * was more than a megabyte a minute, or some ten megabytes for a short
+         * ride, which is unacceptable on mobile data. CGM refresh the feed
+         * every 10–30 s, so a minute still tracks it closely enough for a
+         * figure displayed in whole minutes.
+         */
+        private const val ETA_POLL_INTERVAL_MS = 60_000L
+
+        /**
+         * Grace period between a journey ending and the service stopping, so
+         * queued speech can finish before the engine is shut down.
+         */
+        private const val TEARDOWN_DELAY_MS = 10_000L
         /** Grace period after boarding, so the first GPS fixes can arrive. */
         private const val FIRST_VEHICLE_CHECK_DELAY_MS = 45_000L
         /** Within this, we and the vehicle count as travelling together. */
@@ -295,6 +313,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     /** Timestamp of the last forward progress, for the inactivity timeout. */
     private var lastProgressMs = System.currentTimeMillis()
 
+    /**
+     * True once the journey has actually advanced past its first stop.
+     *
+     * Until then the passenger is still waiting to board, and standing beside
+     * one stop looks exactly like the "no progress" the inactivity timer
+     * watches for. Without this the timer would end a journey started ten
+     * minutes before the bus arrives — precisely when the user needs it.
+     */
+    private var hasStartedMoving = false
+
     /** trip_id being ridden — needed to query its real-time predictions. */
     private var tripId: String = ""
     /** Latest real-time ETA at the destination stop, epoch seconds. */
@@ -356,6 +384,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         this.routeId      = routeId
         this.headsign     = headsign
         divergenceStreak  = 0
+        hasStartedMoving  = false
         routeLabel        = label
         orderedStops      = stops
         stopLatLon        = latLons
@@ -412,16 +441,51 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     fun endJourney() {
         stopLocUpdates()
         releaseWakeLock()
+
+        // Every background job must stop HERE, not merely in onDestroy().
+        // stopSelf() only asks the system to stop the service, and the system
+        // waits for bound clients to unbind — so onDestroy can be minutes
+        // away. The ETA poll was left running through that window: it
+        // re-downloaded the whole trip-updates feed (over half a megabyte)
+        // every 30 seconds long after the journey had ended, and kept the
+        // service scope alive so the service never really finished.
         vehicleJob?.cancel()
         vehicleJob = null
+        etaJob?.cancel()
+        etaJob = null
+
         orderedStops = emptyList()
         stopLatLon   = emptyList()
         currentIdx   = 0
         atStop       = false
         destinationIdx = null
+        destinationEtaEpoch = null
+        etaSource = EtaSource.NONE
         alightWarningsFired.clear()
+        alightAnnounced = false
+        awaitingFirstFix = true
+        divergenceStreak = 0
+        tripId = ""
+        routeId = ""
+        headsign = ""
         _trackingState.value = TrackingState.Idle
-        stopSelf()
+
+        // Idle is published at once so the UI is correct immediately, but the
+        // service itself lingers briefly: onDestroy shuts down the speech
+        // engine, and the last announcements ("Слизате тук", "Крайна спирка")
+        // are queued at the very moment the journey ends. Stopping straight
+        // away would cut them off mid-sentence — which used not to happen only
+        // because a bound client accidentally kept the service alive.
+        android.os.Handler(mainLooper).postDelayed({
+            // A new journey may have begun during the grace period — the user
+            // ending one trip and immediately starting another is ordinary.
+            // Stopping then would kill the new journey seconds after it began.
+            if (_trackingState.value is TrackingState.Idle) {
+                stopSelf()
+            } else {
+                FileLogger.i(TAG, "New journey started; teardown cancelled")
+            }
+        }, TEARDOWN_DELAY_MS)
     }
 
     // ── Progress engine ───────────────────────────────────────────────────
@@ -573,9 +637,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // ── Inactivity timeout ───────────────────────────────────────────
         if (currentIdx != idxBefore) {
             lastProgressMs = System.currentTimeMillis()
-        } else if (System.currentTimeMillis() - lastProgressMs > INACTIVITY_TIMEOUT_MS) {
+            hasStartedMoving = true
+        } else if (hasStartedMoving &&
+                   System.currentTimeMillis() - lastProgressMs > INACTIVITY_TIMEOUT_MS) {
+            // Only after the journey has actually begun: see hasStartedMoving.
             FileLogger.i(TAG, "No progress for 10 min — ending journey automatically")
             announce("Няма движение по маршрута. Следенето е спряно.")
+            _events.tryEmit(JourneyEvent.RouteEnded)
             endJourney()
             return
         }
@@ -694,7 +762,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         FileLogger.i(TAG, "Vehicle ${distance.toInt()} m away " +
             "(streak $divergenceStreak/$DIVERGENCE_STREAK_LIMIT)")
         if (divergenceStreak >= DIVERGENCE_STREAK_LIMIT) {
-            announce("Изглежда слязохте. Следенето се прекратява.")
+            // Neutral wording: the same divergence occurs when the user
+            // never boarded at all — the bus arrived, they let it go, and it
+            // drove off. "Изглежда слязохте" was wrong in that case.
+            announce("Връзката с превозното средство е изгубена. " +
+                     "Следенето се прекратява.")
             _events.tryEmit(JourneyEvent.RouteEnded)
             endJourney()
         }
@@ -748,7 +820,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 if (destinationIdx == dest) {
                     withContext(Dispatchers.Main) { publishLastKnown() }
                 }
-                delay(30_000L)
+                delay(ETA_POLL_INTERVAL_MS)
             }
         }
     }

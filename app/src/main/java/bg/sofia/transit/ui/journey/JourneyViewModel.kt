@@ -114,14 +114,23 @@ class JourneyViewModel @Inject constructor(
         journeyService?.setDestination(idx) ?: run {
             // Binding was lost (process restart while tracking). Re-bind and
             // apply once connected, so the tap isn't silently dropped.
+            //
+            // The deferred is created BEFORE requesting the binding: the
+            // connection callback can fire immediately, and if the deferred
+            // did not exist yet, its completion went nowhere and the await
+            // below waited out its timeout for a service that had in fact
+            // already connected.
+            val deferred = CompletableDeferred<JourneyService>()
+            bindingDeferred = deferred
             bindToService()
             viewModelScope.launch {
                 val svc = try {
-                    withTimeout(3_000L) {
-                        bindingDeferred = CompletableDeferred()
-                        bindingDeferred!!.await()
-                    }
-                } catch (_: Exception) { null } finally { bindingDeferred = null }
+                    withTimeout(3_000L) { deferred.await() }
+                } catch (_: Exception) {
+                    null
+                } finally {
+                    if (bindingDeferred === deferred) bindingDeferred = null
+                }
                 svc?.setDestination(idx)
                     ?: _error.emit("Изборът не може да бъде приложен")
             }
@@ -147,6 +156,17 @@ class JourneyViewModel @Inject constructor(
     }
 
     init {
+        // Release the service binding as soon as tracking stops, however it
+        // stopped — destination reached, route ended, divergence, or the user
+        // pressing stop. stopSelf() cannot destroy the service while a client
+        // is bound, so holding the binding kept a finished service alive and
+        // blocked the next journey from starting cleanly.
+        viewModelScope.launch {
+            tracking.collect { state ->
+                if (state is JourneyService.TrackingState.Idle) unbind()
+            }
+        }
+
         viewModelScope.launch {
             try { _trolleyRouteIds.value = gtfsRepo.trolleyRouteIds() }
             catch (e: Exception) {
@@ -173,17 +193,30 @@ class JourneyViewModel @Inject constructor(
 
     /** Last nearby result, reused when the search box is cleared. */
     private var nearbyChoices: List<LineChoice> = emptyList()
+    /** In-flight nearby load, so concurrent callers do not duplicate it. */
+    private var loadJob: kotlinx.coroutines.Job? = null
     private var lastLat = 0.0
     private var lastLon = 0.0
 
     fun loadUpcomingTrips(lat: Double, lon: Double) {
         if (tracking.value is JourneyService.TrackingState.Tracking) return
+
+        // Guard against overlapping loads. The screen has two sources of
+        // position — the last known fix and the first live update — and they
+        // arrive within a millisecond of each other, so both fired a load and
+        // each downloaded the same half-megabyte feed before either could
+        // populate the cache. Guarding here covers every caller at once.
+        if (loadJob?.isActive == true) {
+            FileLogger.d(TAG, "Load already in progress; skipping duplicate")
+            return
+        }
+
         lastLat = lat
         lastLon = lon
 
         _selection.value = _selection.value.copy(refreshing = true, hasLocation = true)
 
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             try {
                 // Every stop within NEARBY_RADIUS_M, using the same distance
                 // calculation as the Stops tab.
@@ -427,9 +460,18 @@ class JourneyViewModel @Inject constructor(
     }
 
     fun endJourney() {
-        journeyService?.endJourney()
+        val svc = journeyService
+        if (svc != null) {
+            // The service tears itself down, keeping a short grace period so
+            // any queued speech finishes. Calling stopService() as well would
+            // kill it instantly and cut that off.
+            svc.endJourney()
+        } else {
+            // Not bound — e.g. the process restarted while tracking. Nothing
+            // else can stop it, so force it.
+            JourneyService.stop(getApplication())
+        }
         unbind()
-        JourneyService.stop(getApplication())
     }
 
     private fun unbind() {
