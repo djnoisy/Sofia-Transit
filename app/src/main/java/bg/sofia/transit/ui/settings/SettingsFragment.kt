@@ -72,6 +72,7 @@ class SettingsFragment : Fragment() {
 
         initTts()
         setUpRateSlider()
+        setUpApproachMode()
         showBatteryStatus()
 
         binding.btnTestSpeech.setOnClickListener { speak(SAMPLE) }
@@ -244,6 +245,33 @@ class SettingsFragment : Fragment() {
                 android.content.Intent(ctx, JourneyService::class.java), conn, 0)
         } catch (e: Exception) {
             FileLogger.w(TAG, "Could not notify service: ${e.message}")
+        }
+    }
+
+    // ── Approach announcements ────────────────────────────────────────────
+
+    /**
+     * Radio buttons rather than a spinner or switch: three named states, all
+     * visible at once, and a screen reader announces each with its checked
+     * state without opening anything.
+     */
+    private fun setUpApproachMode() {
+        val checked = when (settings.approachMode) {
+            AppSettings.APPROACH_ALL -> binding.rbApproachAll.id
+            AppSettings.APPROACH_OFF -> binding.rbApproachOff.id
+            else                     -> binding.rbApproachSparse.id
+        }
+        binding.rgApproach.check(checked)
+
+        binding.rgApproach.setOnCheckedChangeListener { _, id ->
+            settings.approachMode = when (id) {
+                binding.rbApproachAll.id -> AppSettings.APPROACH_ALL
+                binding.rbApproachOff.id -> AppSettings.APPROACH_OFF
+                else                     -> AppSettings.APPROACH_SPARSE
+            }
+            // Takes effect on the next stop, including during a journey: the
+            // service reads the setting each time it evaluates a stop.
+            FileLogger.i(TAG, "Approach mode set to ${settings.approachMode}")
         }
     }
 

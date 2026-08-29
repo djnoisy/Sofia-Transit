@@ -29,7 +29,28 @@ class AppSettings @Inject constructor(
         const val RATE_MAX = 2.0f
         const val RATE_STEP = 0.1f
         const val RATE_DEFAULT = 1.0f
+
+        private const val KEY_APPROACH_MODE = "approach_mode"
+
+        /** Warn only where stops are far enough apart for it to be useful. */
+        const val APPROACH_SPARSE = 0
+        /** Never warn; the "Следваща спирка" announcement stands alone. */
+        const val APPROACH_OFF = 1
+        /** Warn before every stop, however close together they are. */
+        const val APPROACH_ALL = 2
     }
+
+    /**
+     * When the "Наближава спирка" warning is spoken.
+     *
+     * Defaults to [APPROACH_SPARSE]: on line 76 half the gaps are under 400 m,
+     * where the warning would follow the previous stop by seconds and add
+     * noise rather than notice. Riders who want it everywhere — or nowhere —
+     * can say so.
+     */
+    var approachMode: Int
+        get() = prefs.getInt(KEY_APPROACH_MODE, APPROACH_SPARSE)
+        set(value) { prefs.edit().putInt(KEY_APPROACH_MODE, value).apply() }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 

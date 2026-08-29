@@ -102,6 +102,52 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:text="Съобщения за наближаваща спирка"
+            android:textSize="14sp"
+            android:textAllCaps="true"
+            android:alpha="0.6"
+            android:accessibilityHeading="true"
+            android:paddingBottom="12dp"/>
+
+        <RadioGroup android:id="@+id/rgApproach"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <RadioButton android:id="@+id/rbApproachSparse"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="Само при отдалечени спирки"/>
+
+            <RadioButton android:id="@+id/rbApproachAll"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="При всички спирки"/>
+
+            <RadioButton android:id="@+id/rbApproachOff"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="Изключени"/>
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Когато спирките са близо една до друга, предупреждението идва секунди след потеглянето и не е от полза."
+            android:textSize="14sp"
+            android:alpha="0.75"
+            android:lineSpacingMultiplier="1.15"
+            android:paddingTop="8dp"/>
+
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#E0E0E0" android:layout_marginVertical="24dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:text="Работа при изключен екран"
             android:textSize="14sp"
             android:textAllCaps="true"

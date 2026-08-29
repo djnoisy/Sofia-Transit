@@ -95,8 +95,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /** Upper bound for the "Наближава спирка X" warning distance. */
         const val APPROACH_RADIUS = 300.0
 
-        /** Lower bound, so the warning never collapses onto the stop itself. */
-        const val MIN_APPROACH_RADIUS = 120.0
+        /**
+         * Stops closer together than this get no approach warning: it would
+         * arrive within seconds of leaving the previous stop.
+         */
+        const val MIN_SPACING_FOR_APPROACH = 400.0
 
         /** How many stops ahead of the current one we scan on each fix.
          *  Covers up to that many consecutively missed stops in one gap. */
@@ -567,6 +570,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 if (currentIdx < orderedStops.lastIndex) {
                     currentIdx += 1
                     announce("Следваща спирка, ${orderedStops[currentIdx].stopName}.")
+                    suppressRedundantApproach(loc)
                 }
                 // No terminus case here any more — arriving at the final stop
                 // already ended the journey above.
@@ -584,11 +588,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 currentIdx = nearest
                 approachAnnounced = false
                 announce("Следваща спирка, ${orderedStops[nearest].stopName}.")
+                suppressRedundantApproach(loc)
             }
 
             // ── Approaching warning ───────────────────────────────────────
             !atStop && !approachAnnounced
-                    && distTo(loc, currentIdx) <= approachRadiusFor(currentIdx) -> {
+                    && approachRadiusFor(currentIdx)
+                        ?.let { distTo(loc, currentIdx) <= it } == true -> {
                 approachAnnounced = true
                 announce("Наближава спирка, ${orderedStops[currentIdx].stopName}.")
             }
@@ -602,9 +608,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
             // 1a) Announce at 60 m — early enough to signal the driver and
             //     reach the door.
+            //
+            //     The stop name is NOT repeated here: the ordinary "Спирка,
+            //     X" announcement fires from the same fix, so saying the name
+            //     again made it the third mention within seconds. Keeping the
+            //     familiar arrival phrasing intact and adding a bare
+            //     instruction after it is both shorter and clearer.
             if (destDist <= ALIGHT_ANNOUNCE_RADIUS && !alightAnnounced) {
                 alightAnnounced = true
-                announce("Слизате тук, ${orderedStops[dest].stopName}.")
+                announce("Слизате тук.")
             }
 
             // 1b) End the journey only once genuinely at the stop (<30 m),
@@ -671,8 +683,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         when (remaining) {
             2 -> announce("Остават две спирки до слизане.")
             1 -> announce("Остава една спирка до слизане.")
-            0 -> announce("Слизате на следващата спирка, " +
-                          "${orderedStops[dest].stopName}.")
+            // No name here: "Следваща спирка, X" has just been announced from
+            // the same fix, so repeating X would be the second mention in one
+            // breath.
+            0 -> announce("Слизате на следващата спирка.")
         }
     }
 
@@ -936,27 +950,55 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     /**
-     * Warning distance for the stop we are heading to, adapted to how far
-     * apart the stops actually are.
+     * Warning distance for the stop we are heading to, or null when no
+     * warning should be given at all.
      *
-     * A fixed 300 m is useless where stops are close: riding a tram through
-     * the centre, "Наближава Женски пазар" fired one second after leaving the
-     * previous stop, because the next stop was already inside the radius.
-     * That is noise, not a warning.
+     * Where stops are close together the warning has nowhere to fit: the
+     * departure from the previous stop is detected at DEPART_RADIUS, so with
+     * only a couple of hundred metres between stops the warning would fire
+     * seconds after pulling away — noise rather than notice. Below
+     * [MIN_SPACING_FOR_APPROACH] the "Следваща спирка" announcement is
+     * warning enough, and this returns null.
      *
-     * So the warning fires at half the gap between the previous stop and this
-     * one, capped at [APPROACH_RADIUS] and floored at [MIN_APPROACH_RADIUS]
-     * so it still arrives with a few seconds to spare. Where stops are far
-     * apart the behaviour is unchanged.
+     * Above it the warning fires at half the gap, capped at
+     * [APPROACH_RADIUS]. Measured on line 76: most gaps are 400–2000 m, so
+     * the warning is kept for nearly all of them; the exceptions are pairs
+     * like Метростанция Бизнес парк → Бл. 437, which are 130 m apart.
      */
-    private fun approachRadiusFor(idx: Int): Double {
+    private fun approachRadiusFor(idx: Int): Double? {
+        val mode = settings.approachMode
+        if (mode == AppSettings.APPROACH_OFF) return null
+
         val prev = idx - 1
         if (prev < 0) return APPROACH_RADIUS
         val (pLat, pLon) = stopLatLon.getOrNull(prev) ?: return APPROACH_RADIUS
         val (cLat, cLon) = stopLatLon.getOrNull(idx) ?: return APPROACH_RADIUS
         val spacing = LocationHelper.distanceMetres(pLat, pLon, cLat, cLon)
         if (spacing <= 0.0) return APPROACH_RADIUS
-        return (spacing / 2.0).coerceIn(MIN_APPROACH_RADIUS, APPROACH_RADIUS)
+
+        // Sparse mode drops the warning where it would arrive seconds after
+        // the previous stop. In "all" mode it is kept, though for very close
+        // stops half the gap can fall inside the arrival radius, in which case
+        // it simply never fires — nothing is broken, there is just no room.
+        if (mode == AppSettings.APPROACH_SPARSE &&
+            spacing < MIN_SPACING_FOR_APPROACH) return null
+
+        return (spacing / 2.0).coerceAtMost(APPROACH_RADIUS)
+    }
+
+    /**
+     * Called right after "Следваща спирка, X" is announced. If X is already
+     * inside its own approach radius, the warning that would follow adds
+     * nothing — the passenger has just been told the stop is next, and would
+     * hear its name again seconds later. This happens routinely when GPS is
+     * throttled: several stops pass between fixes and the tracker catches up
+     * mid-gap.
+     */
+    private fun suppressRedundantApproach(loc: Location) {
+        val radius = approachRadiusFor(currentIdx)
+        if (radius == null || distTo(loc, currentIdx) <= radius) {
+            approachAnnounced = true
+        }
     }
 
     private fun distTo(loc: Location, idx: Int): Double {
