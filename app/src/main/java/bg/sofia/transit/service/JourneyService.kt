@@ -101,6 +101,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          */
         const val MIN_SPACING_FOR_APPROACH = 400.0
 
+        /**
+         * On the first fix, a stop within this distance counts as "we are
+         * already here", so no approach warning is given for it. Wider than
+         * ARRIVAL_RADIUS because the very first fix is the least accurate one.
+         */
+        const val SNAP_SUPPRESS_APPROACH_RADIUS = 150.0
+
         /** How many stops ahead of the current one we scan on each fix.
          *  Covers up to that many consecutively missed stops in one gap. */
         private const val LOOKAHEAD = 3
@@ -144,6 +151,34 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         private const val SAME_VEHICLE_RADIUS = 150.0
         /** Consecutive far readings before we accept the passenger has left. */
         private const val DIVERGENCE_STREAK_LIMIT = 3
+
+        /**
+         * How far the vehicle must travel before its direction is called.
+         * Enough to clear GPS scatter while standing still, short enough to
+         * settle within the first stretch between stops.
+         */
+        private const val DIRECTION_MIN_MOVEMENT = 150.0
+
+        /** Speed samples averaged; at one fix a second this is ~15 seconds. */
+        private const val SPEED_SAMPLE_COUNT = 15
+
+        /** Readings above this are discarded as GPS error (90 km/h). */
+        private const val MAX_PLAUSIBLE_SPEED_MPS = 25.0
+
+        /** Fixes vaguer than this take no part in deciding the direction. */
+        private const val MAX_FIX_ACCURACY = 50.0f
+
+        /** Time the receiver is given to settle before the anchor is taken. */
+        private const val DIRECTION_SETTLE_MS = 5_000L
+
+        /**
+         * Below this the movement is a pedestrian's, not a vehicle's. Set at
+         * 10 rather than 15 km/h because the average covers the last fifteen
+         * seconds, which still include the standing still before departure —
+         * and because traffic in the centre measured 14 km/h on line 76, so a
+         * higher bar could leave the direction unresolved in a jam.
+         */
+        private const val MIN_SPEED_FOR_DIRECTION = 10.0
 
         /**
          * Tracking state, observable without binding to the service.
@@ -200,6 +235,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
              *  Null when no destination is set, or when neither the feed nor
              *  the timetable can supply a time. */
             val destinationEtaEpoch: Long? = null,
+            /**
+             * True while the direction of travel is still being worked out
+             * from the vehicle's movement. Nothing can be announced yet: the
+             * stop order itself depends on which way we are going.
+             */
+            val determiningDirection: Boolean = false,
             /** Where [destinationEtaEpoch] came from. The UI must label a
              *  timetable-derived estimate differently from a live one — a
              *  scheduled time carries no traffic information and would
@@ -333,6 +374,21 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var etaSource: EtaSource = EtaSource.NONE
     private var etaJob: Job? = null
 
+    /** One possible direction, until movement shows which one we are on. */
+    data class DirectionCandidate(
+        val headsign: String,
+        val stops: List<StopWithSequence>,
+        val latLons: List<Pair<Double, Double>>
+    )
+
+    /** Non-empty while the direction is being determined. */
+    private var candidates: List<DirectionCandidate> = emptyList()
+    /** Position where determination began, and the stop indices there. */
+    private var anchorLat = 0.0
+    private var anchorLon = 0.0
+    private var anchorIdx: List<Int> = emptyList()
+    private var determinationStartMs = 0L
+
     /** Route and direction being ridden, for re-matching the vehicle. */
     private var routeId = ""
     private var headsign = ""
@@ -358,6 +414,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * the process being killed.
      */
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+    /**
+     * Recent speed samples, in metres per second, for sizing the approach
+     * warning by speed rather than by a fixed distance. Measurements on line
+     * 76 showed 14 km/h in the centre and 58 km/h on the boulevard, so one
+     * distance cannot serve both: 300 m is 77 seconds of warning at the
+     * former and 19 at the latter. Recorded now so the thresholds can be set
+     * from real figures instead of guesses.
+     */
+    private val speedSamples = ArrayDeque<Double>()
 
     /** Timestamp of the previous GPS fix, for measuring update cadence. */
     private var lastFixMs = 0L
@@ -404,12 +470,167 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         fixCount = 0
         maxGapMs = 0L
         lastCadenceLogMs = 0L
+        speedSamples.clear()
 
         publish(distance = null)
         acquireWakeLock()
         startLocUpdates()
         startVehicleTracking()
         announce("Следене на пътуването започна.")
+    }
+
+    /**
+     * Starts tracking without knowing the direction yet, working it out from
+     * how the vehicle moves.
+     *
+     * Deliberately based on our own displacement rather than on a nearby
+     * vehicle: at a stop, and while two vehicles pass each other, the closest
+     * vehicle is often the one going the other way. Our own movement cannot
+     * mislead in that manner — if the stop we are approaching comes later in
+     * direction A's order and earlier in B's, we are travelling A.
+     *
+     * Nothing is announced until the direction is settled, because the order
+     * of the stops — and therefore which one is "next" — depends on it.
+     */
+    fun beginJourneyAuto(
+        label: String,
+        routeId: String,
+        candidates: List<DirectionCandidate>
+    ) {
+        this.routeId      = routeId
+        this.candidates   = candidates
+        tripId            = ""
+        headsign          = ""
+        routeLabel        = label
+        orderedStops      = emptyList()
+        stopLatLon        = emptyList()
+        currentIdx        = 0
+        atStop            = false
+        approachAnnounced = false
+        awaitingFirstFix  = true
+        destinationIdx    = null
+        destinationEtaEpoch = null
+        etaSource         = EtaSource.NONE
+        alightWarningsFired.clear()
+        alightAnnounced   = false
+        divergenceStreak  = 0
+        hasStartedMoving  = false
+        lastProgressMs    = System.currentTimeMillis()
+        determinationStartMs = System.currentTimeMillis()
+        anchorLat = 0.0; anchorLon = 0.0; anchorIdx = emptyList()
+
+        lastFixMs = 0L; fixCount = 0; maxGapMs = 0L; lastCadenceLogMs = 0L
+        speedSamples.clear()
+
+        publish(distance = null)
+        acquireWakeLock()
+        startLocUpdates()
+        announce("Изчаква се определяне на посоката.")
+    }
+
+    /**
+     * Decides the direction once we have moved far enough for the answer to
+     * be unambiguous. Returns true when settled.
+     *
+     * The test is which candidate's stop order we are advancing through:
+     * between the anchor position and now, the index of the nearest stop
+     * rises in the direction we are travelling and falls in the other.
+     */
+    private fun tryResolveDirection(loc: Location): Boolean {
+        if (candidates.isEmpty()) return true
+
+        // Guard 1 — accuracy. The first fixes after a cold start can be
+        // hundreds of metres out, especially between buildings. Such a fix
+        // would either look like movement while standing still, or anchor the
+        // comparison at a place we were never at. Anything vaguer than
+        // MAX_FIX_ACCURACY is ignored outright.
+        if (loc.hasAccuracy() && loc.accuracy > MAX_FIX_ACCURACY) {
+            FileLogger.d(TAG, "Direction: skipping fix, accuracy ${loc.accuracy.toInt()} m")
+            checkDirectionTimeout()
+            return false
+        }
+
+        // Guard 2 — settling time. Even accurate-looking early fixes drift, so
+        // the anchor is taken only after the receiver has been reporting for a
+        // few seconds.
+        val sinceStart = System.currentTimeMillis() - determinationStartMs
+        if (sinceStart < DIRECTION_SETTLE_MS) return false
+
+        if (anchorIdx.isEmpty()) {
+            anchorLat = loc.latitude
+            anchorLon = loc.longitude
+            anchorIdx = candidates.map { nearestIdx(it, loc.latitude, loc.longitude) }
+            FileLogger.i(TAG, "Direction: anchored after ${sinceStart / 1000}s")
+            return false
+        }
+
+        // Guard 3 — speed. Walking to the far end of the stop, or to a shop
+        // and back, can accumulate the required displacement while the vehicle
+        // has not moved at all; the direction would then be read off the
+        // pedestrian. A bus pulling away exceeds this within seconds, and a
+        // jumping fix produces no sustained speed.
+        val kmh = recentSpeedKmh()
+        if (kmh == null || kmh < MIN_SPEED_FOR_DIRECTION) {
+            checkDirectionTimeout()
+            return false
+        }
+
+        val moved = LocationHelper.distanceMetres(
+            anchorLat, anchorLon, loc.latitude, loc.longitude)
+        if (moved < DIRECTION_MIN_MOVEMENT) {
+            checkDirectionTimeout()
+            return false
+        }
+
+        val nowIdx = candidates.map { nearestIdx(it, loc.latitude, loc.longitude) }
+        val advanced = candidates.indices.filter { nowIdx[it] > anchorIdx[it] }
+
+        if (advanced.size != 1) {
+            // Both or neither advanced — near a terminus, or on a stretch the
+            // two directions share. Re-anchor here and keep watching rather
+            // than guessing.
+            anchorLat = loc.latitude
+            anchorLon = loc.longitude
+            anchorIdx = nowIdx
+            return false
+        }
+
+        val chosen = candidates[advanced.first()]
+        headsign     = chosen.headsign
+        orderedStops = chosen.stops
+        stopLatLon   = chosen.latLons
+        candidates   = emptyList()
+        awaitingFirstFix = true      // snap to the right stop in this order
+        routeLabel = "$routeLabel → ${chosen.headsign}"
+
+        FileLogger.i(TAG, "Direction resolved after ${moved.toInt()} m " +
+            "at ${kmh.toInt()} km/h: ${chosen.headsign}")
+        announce("Посока, ${chosen.headsign}.")
+        startVehicleTracking()
+        return true
+    }
+
+    /**
+     * Ends the journey if the direction has stayed unknown for too long.
+     * Shared by every branch that gives up on this fix, so the timeout cannot
+     * be skipped by whichever guard happens to reject the fix.
+     */
+    private fun checkDirectionTimeout() {
+        if (System.currentTimeMillis() - determinationStartMs <= INACTIVITY_TIMEOUT_MS) return
+        announce("Посоката не беше определена. Следенето се прекратява.")
+        _events.tryEmit(JourneyEvent.RouteEnded)
+        endJourney()
+    }
+
+    /** Index of the stop nearest the given position within a candidate. */
+    private fun nearestIdx(c: DirectionCandidate, lat: Double, lon: Double): Int {
+        var best = 0
+        var bestD = Double.MAX_VALUE
+        c.latLons.forEachIndexed { i, (sLat, sLon) ->
+            val d = LocationHelper.distanceMetres(lat, lon, sLat, sLon)
+            if (d < bestD) { bestD = d; best = i }
+        }
+        return best
     }
 
     /**
@@ -468,6 +689,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightAnnounced = false
         awaitingFirstFix = true
         divergenceStreak = 0
+        candidates = emptyList()
+        anchorIdx = emptyList()
         tripId = ""
         routeId = ""
         headsign = ""
@@ -493,11 +716,26 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     // ── Progress engine ───────────────────────────────────────────────────
     private fun onFix(loc: Location) {
-        if (orderedStops.isEmpty()) return
+        val prevLat = lastLat
+        val prevLon = lastLon
+        val gapMs = if (lastFixMs == 0L) 0L else System.currentTimeMillis() - lastFixMs
 
         logFixCadence()
+        recordSpeed(loc, prevLat, prevLon, gapMs)
+
         lastLat = loc.latitude
         lastLon = loc.longitude
+
+        // Direction not settled yet: nothing else can run, because the stop
+        // order it all depends on is not known.
+        if (candidates.isNotEmpty()) {
+            if (!tryResolveDirection(loc)) {
+                publish(distance = null)
+                return
+            }
+        }
+
+        if (orderedStops.isEmpty()) return
 
         val idxBefore = currentIdx
 
@@ -515,6 +753,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 if (d < bestDist) { bestDist = d; best = i }
             }
             currentIdx = best
+
+            // Suppress the approach warning for the stop we just snapped to
+            // when we are already at it. Standing at a stop, the first fix is
+            // often tens of metres out — enough to fall outside the arrival
+            // radius but inside the approach one — so tracking would open with
+            // "Наближава спирка X" and then, once the position settled a
+            // couple of seconds later, "Спирка X". The rider is standing there
+            // and needs no warning about it. Beyond this distance the stop is
+            // genuinely ahead and the warning is left to fire normally.
+            if (bestDist <= SNAP_SUPPRESS_APPROACH_RADIUS) {
+                approachAnnounced = true
+            }
+
             FileLogger.i(TAG, "First fix: snapped to stop #$best " +
                 "(${orderedStops[best].stopName}, ${bestDist.toInt()} m)")
         }
@@ -544,6 +795,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     currentIdx = nearest
                     atStop = true
                     approachAnnounced = false
+                    FileLogger.i(TAG, "ARRIVE at ${nearestDist.toInt()} m, " +
+                        "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → " +
+                        orderedStops[nearest].stopName)
                     announce("Спирка, ${orderedStops[nearest].stopName}.")
 
                     // Final stop reached → the journey is over. Ending here
@@ -596,6 +850,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     && approachRadiusFor(currentIdx)
                         ?.let { distTo(loc, currentIdx) <= it } == true -> {
                 approachAnnounced = true
+                // Logged with speed and distance so the warning's lead time
+                // can be worked out afterwards from the log alone.
+                FileLogger.i(TAG, "APPROACH at ${distTo(loc, currentIdx).toInt()} m, " +
+                    "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → " +
+                    orderedStops[currentIdx].stopName)
                 announce("Наближава спирка, ${orderedStops[currentIdx].stopName}.")
             }
         }
@@ -826,7 +1085,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return
         }
         val destStop = orderedStops.getOrNull(dest) ?: return
-        if (tripId.isBlank()) return
+
+        // No early exit when the vehicle is unknown. The timetable does not
+        // depend on which vehicle we are in — it comes from the stop list,
+        // which we always have — so a scheduled time can still be shown,
+        // clearly labelled as such. Bailing out here left the row blank in
+        // exactly the case where the rider has least other information.
 
         etaJob = serviceScope.launch {
             while (isActive) {
@@ -856,11 +1120,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * if it were a live prediction.
      */
     private suspend fun computeEta(dest: Int, destStop: StopWithSequence) {
-        // Tier 1
-        realtimeRepo.getArrivalForTripAtStop(tripId, destStop.stopId)?.let { live ->
-            destinationEtaEpoch = live
-            etaSource = EtaSource.REALTIME
-            return
+        // Tier 1 — only possible once a vehicle has been identified.
+        if (tripId.isNotBlank()) {
+            realtimeRepo.getArrivalForTripAtStop(tripId, destStop.stopId)?.let { live ->
+                destinationEtaEpoch = live
+                etaSource = EtaSource.REALTIME
+                return
+            }
         }
 
         val scheduled = scheduledEpoch(destStop.arrivalTime)
@@ -888,6 +1154,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * from the current position so the sample is as fresh as possible.
      */
     private suspend fun observedDelaySeconds(): Int? {
+        if (tripId.isBlank()) return null   // no vehicle, no delay to observe
         val upTo = (currentIdx + 6).coerceAtMost(orderedStops.lastIndex)
         for (i in currentIdx..upTo) {
             val st = orderedStops[i]
@@ -924,6 +1191,31 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * are logged immediately; a summary follows every 30 s so the log shows
      * the pattern without a line per second.
      */
+    /**
+     * Speed in m/s, preferring the receiver's own figure — it comes from
+     * Doppler shift and does not accumulate the error of differencing two
+     * positions. Falls back to displacement over time when absent.
+     */
+    private fun recordSpeed(loc: Location, prevLat: Double, prevLon: Double, gapMs: Long) {
+        val mps = when {
+            loc.hasSpeed() && loc.speed > 0f -> loc.speed.toDouble()
+            gapMs in 1..30_000 && (prevLat != 0.0 || prevLon != 0.0) ->
+                LocationHelper.distanceMetres(prevLat, prevLon, loc.latitude, loc.longitude) /
+                    (gapMs / 1000.0)
+            else -> return
+        }
+        // 25 m/s is 90 km/h — above anything a city bus or tram does, so a
+        // higher reading is a bad fix and must not skew the average.
+        if (mps.isNaN() || mps > MAX_PLAUSIBLE_SPEED_MPS) return
+        speedSamples.addLast(mps)
+        while (speedSamples.size > SPEED_SAMPLE_COUNT) speedSamples.removeFirst()
+    }
+
+    /** Average of the recent samples in km/h, or null before any arrive. */
+    private fun recentSpeedKmh(): Double? =
+        if (speedSamples.isEmpty()) null
+        else speedSamples.average() * 3.6
+
     private fun logFixCadence() {
         val now = System.currentTimeMillis()
         if (lastFixMs != 0L) {
@@ -940,9 +1232,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (now - lastCadenceLogMs >= 30_000L) {
             val secs = (now - lastCadenceLogMs) / 1000.0
             val perMin = if (secs > 0) (fixCount / secs) * 60 else 0.0
+            val spd = recentSpeedKmh()
+                ?.let { String.format(java.util.Locale.US, ", speed %.0f km/h", it) }
+                ?: ""
             FileLogger.i(TAG, "GPS cadence: $fixCount fixes in ${secs.toInt()}s " +
                 "(${String.format(java.util.Locale.US, "%.1f", perMin)}/мин), " +
-                "max gap ${maxGapMs / 1000}s")
+                "max gap ${maxGapMs / 1000}s$spd")
             fixCount = 0
             maxGapMs = 0
             lastCadenceLogMs = now
@@ -1008,6 +1303,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     private fun publish(distance: Int?) {
         _trackingState.value = TrackingState.Tracking(
+            determiningDirection  = candidates.isNotEmpty(),
             routeLabel            = routeLabel,
             stops                 = orderedStops,
             currentIdx            = currentIdx,

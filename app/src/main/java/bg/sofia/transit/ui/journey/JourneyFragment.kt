@@ -187,6 +187,23 @@ class JourneyFragment : Fragment() {
         binding.tvJourneyRoute.contentDescription =
             state.routeLabel.replace("→", "към")
 
+        // Direction not settled yet: there is no stop order, so there is
+        // nothing meaningful to show beyond what we are waiting for.
+        if (state.determiningDirection) {
+            binding.tvStopCaption.text = "Посока"
+            binding.tvCurrentStop.text = "Изчаква се определяне на посоката"
+            binding.tvCurrentStop.contentDescription = null
+            binding.tvDistance.visibility = View.GONE
+            binding.tvProgress.text = "Изчакайте превозното средство да потегли"
+            binding.tvProgress.contentDescription = null
+            binding.tvDestination.text = "—"
+            binding.tvDestinationEta.visibility = View.GONE
+            binding.btnChooseDestination.isEnabled = false
+            binding.btnClearDestination.visibility = View.GONE
+            return
+        }
+        binding.btnChooseDestination.isEnabled = true
+
         val stopName = state.currentStop?.stopName ?: "—"
 
         // Only ONE stop is shown: the one we're at, or the one we're heading
@@ -288,6 +305,14 @@ class JourneyFragment : Fragment() {
         // Dismiss before the direction dialog opens, so the dialog is not
         // squeezed above the keyboard.
         hideKeyboard()
+
+        // Automatic mode never asks: the whole point is that the rider cannot
+        // tell the two termini apart. The service settles it from movement.
+        if (vm.autoDirectionEnabled) {
+            vm.startJourneyAuto(choice)
+            return
+        }
+
         val known = choice.headsign
         if (known != null) {
             vm.startJourney(choice, known)

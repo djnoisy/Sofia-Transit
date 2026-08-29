@@ -73,6 +73,7 @@ class SettingsFragment : Fragment() {
         initTts()
         setUpRateSlider()
         setUpApproachMode()
+        setUpAutoDirection()
         showBatteryStatus()
 
         binding.btnTestSpeech.setOnClickListener { speak(SAMPLE) }
@@ -245,6 +246,18 @@ class SettingsFragment : Fragment() {
                 android.content.Intent(ctx, JourneyService::class.java), conn, 0)
         } catch (e: Exception) {
             FileLogger.w(TAG, "Could not notify service: ${e.message}")
+        }
+    }
+
+    // ── Direction of travel ───────────────────────────────────────────────
+
+    private fun setUpAutoDirection() {
+        binding.cbAutoDirection.isChecked = settings.autoDirection
+        binding.cbAutoDirection.setOnCheckedChangeListener { _, checked ->
+            settings.autoDirection = checked
+            // Applies to the next journey; an active one keeps whatever
+            // direction it already settled on.
+            FileLogger.i(TAG, "Auto direction set to $checked")
         }
     }
 

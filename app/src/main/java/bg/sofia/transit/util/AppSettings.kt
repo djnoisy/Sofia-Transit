@@ -31,6 +31,7 @@ class AppSettings @Inject constructor(
         const val RATE_DEFAULT = 1.0f
 
         private const val KEY_APPROACH_MODE = "approach_mode"
+        private const val KEY_AUTO_DIRECTION = "auto_direction"
 
         /** Warn only where stops are far enough apart for it to be useful. */
         const val APPROACH_SPARSE = 0
@@ -51,6 +52,19 @@ class AppSettings @Inject constructor(
     var approachMode: Int
         get() = prefs.getInt(KEY_APPROACH_MODE, APPROACH_SPARSE)
         set(value) { prefs.edit().putInt(KEY_APPROACH_MODE, value).apply() }
+
+    /**
+     * Determine the direction of travel automatically instead of asking.
+     *
+     * Off by default: picking a direction takes one tap for anyone who knows
+     * the line, whereas the automatic mode has to wait for the vehicle to
+     * move before it can announce anything. It exists for riders who cannot
+     * tell which terminus they are heading for — the destination names mean
+     * nothing if you don't know the city's layout.
+     */
+    var autoDirection: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_DIRECTION, false)
+        set(value) { prefs.edit().putBoolean(KEY_AUTO_DIRECTION, value).apply() }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 

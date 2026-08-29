@@ -69,6 +69,7 @@ class JourneyViewModel @Inject constructor(
     private val gtfsRepo: GtfsRepository,
     private val realtimeRepo: RealtimeRepository,
     private val vehicleMatcher: bg.sofia.transit.data.repository.VehicleMatcher,
+    private val settings: bg.sofia.transit.util.AppSettings,
     application: Application
 ) : AndroidViewModel(application) {
 
@@ -367,6 +368,84 @@ class JourneyViewModel @Inject constructor(
         }
     }
 
+    /** True when the user has asked for the direction to be worked out. */
+    val autoDirectionEnabled: Boolean get() = settings.autoDirection
+
+    /**
+     * Starts a journey without asking which way the line runs, letting the
+     * service settle it from the vehicle's movement. Both directions are
+     * prepared up front so the service can compare our progress through each.
+     */
+    fun startJourneyAuto(choice: LineChoice) {
+        viewModelScope.launch {
+            try {
+                val headsigns = gtfsRepo.getDirectionHeadsigns(choice.routeId)
+                if (headsigns.isEmpty()) {
+                    _error.emit("Няма данни за направленията на тази линия")
+                    return@launch
+                }
+                // Only one direction on record: nothing to determine.
+                if (headsigns.size == 1) {
+                    startJourney(choice, headsigns.first())
+                    return@launch
+                }
+
+                val candidates = headsigns.mapNotNull { hs ->
+                    val stops = gtfsRepo.getStopsForRouteDirection(choice.routeId, hs)
+                    if (stops.isEmpty()) return@mapNotNull null
+                    val latLons = stops.map { sw ->
+                        val st: Stop? = gtfsRepo.getStopById(sw.stopId)
+                        Pair(st?.stopLat ?: 0.0, st?.stopLon ?: 0.0)
+                    }
+                    JourneyService.DirectionCandidate(hs, stops, latLons)
+                }
+                if (candidates.size < 2) {
+                    // Not enough usable data to tell them apart; fall back to
+                    // the first direction rather than leaving the user waiting.
+                    startJourney(choice, headsigns.first())
+                    return@launch
+                }
+
+                val svc = bindAndAwaitService() ?: return@launch
+                val vehicle = VehicleLabels.singular(
+                    choice.routeType, gtfsRepo.isTrolleyRoute(choice.routeId))
+                svc.beginJourneyAuto(
+                    label = "$vehicle ${choice.routeShortName}",
+                    routeId = choice.routeId,
+                    candidates = candidates
+                )
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "startJourneyAuto failed: ${e.message}")
+                _error.emit("Грешка при стартиране: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Starts the service and waits for the binding, shared by both entry
+     * points. Returns null (after reporting) when it cannot be reached.
+     */
+    private suspend fun bindAndAwaitService(): JourneyService? {
+        val ctx = getApplication<Application>()
+        JourneyService.start(ctx)
+
+        val deferred = CompletableDeferred<JourneyService>()
+        bindingDeferred = deferred
+        bound = ctx.bindService(
+            Intent(ctx, JourneyService::class.java),
+            serviceConn,
+            Context.BIND_AUTO_CREATE
+        )
+        return try {
+            withTimeout(5_000L) { deferred.await() }
+        } catch (_: TimeoutCancellationException) {
+            _error.emit("Не може да се стартира услугата за пътуване")
+            null
+        } finally {
+            if (bindingDeferred === deferred) bindingDeferred = null
+        }
+    }
+
     /** Directions of a line, for the picker shown on a search hit. */
     suspend fun directionsFor(routeId: String): List<String> =
         try { gtfsRepo.getDirectionHeadsigns(routeId) }
@@ -420,25 +499,7 @@ class JourneyViewModel @Inject constructor(
                     ?.let { id -> stops.indexOfFirst { it.stopId == id } }
                     ?.coerceAtLeast(0) ?: 0
 
-                val ctx = getApplication<Application>()
-                JourneyService.start(ctx)
-
-                val deferred = CompletableDeferred<JourneyService>()
-                bindingDeferred = deferred
-                bound = ctx.bindService(
-                    Intent(ctx, JourneyService::class.java),
-                    serviceConn,
-                    Context.BIND_AUTO_CREATE
-                )
-
-                val svc = try {
-                    withTimeout(5_000L) { deferred.await() }
-                } catch (_: TimeoutCancellationException) {
-                    _error.emit("Не може да се стартира услугата за пътуване")
-                    return@launch
-                } finally {
-                    bindingDeferred = null
-                }
+                val svc = bindAndAwaitService() ?: return@launch
 
                 val vehicle = VehicleLabels.singular(
                     choice.routeType, gtfsRepo.isTrolleyRoute(choice.routeId))
