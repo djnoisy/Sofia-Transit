@@ -146,6 +146,9 @@ class GtfsUpdateWorker @AssistedInject constructor(
             FileLogger.i(TAG, "Bundled data dated ${bundleMs}ms; freshness clock set")
         }
 
+        /** Date of the data shipped inside the APK, epoch millis, or null. */
+        fun bundledDateMs(context: Context): Long? = readBundleDateMs(context)
+
         /** Reads assets/gtfs/bundle_date.txt (ISO yyyy-MM-dd) → epoch millis, or null. */
         private fun readBundleDateMs(context: Context): Long? = try {
             val text = context.assets.open("gtfs/bundle_date.txt")

@@ -147,6 +147,26 @@ class GtfsRepository @Inject constructor(
             if (initialLoadJob?.isActive == true) return
             initialLoadJob = appScope.launch {
                 try {
+                    // A new app version can ship newer bundled data than the
+                    // database already holds. Without this check the import is
+                    // skipped (the DB is "ready") and the refresh is skipped
+                    // too (the bundle looks fresh), so the app keeps running on
+                    // months-old data while claiming to be current — which is
+                    // how line 88 stayed invisible after its stops were added
+                    // to the feed.
+                    val bundleMs = GtfsUpdateWorker.bundledDateMs(context)
+                    val haveMs   = GtfsUpdateWorker.lastSuccessMs(context)
+                    val bundleIsNewer = bundleMs != null && bundleMs > haveMs
+
+                    if (isDatabaseReady() && bundleIsNewer) {
+                        FileLogger.i(TAG, "Bundled data is newer than the database " +
+                            "($bundleMs > $haveMs) — reimporting from assets")
+                        loadStaticData()
+                        GtfsUpdateWorker.recordBundledDate(context)
+                        _initialLoadDone.value = true
+                        return@launch
+                    }
+
                     if (!isDatabaseReady()) {
                         // Remember whether we're about to import bundled or
                         // downloaded data BEFORE the import runs. If bundled,
@@ -573,6 +593,21 @@ class GtfsRepository @Inject constructor(
         //    Static "top-up" of routes that DO have realtime stays disabled:
         //    mixing a live time with a scheduled one in the same row would
         //    blur which is which.
+        // Deliberately NOT repaired here. Both producers fall back to the raw
+        // route_id when a short name is missing, and one row reached the
+        // screen as "A220" — the internal id of bus 184. Silently substituting
+        // the proper name would hide the fault from the only person able to
+        // report it, and this is rare enough that hiding it costs more than
+        // the ugly row does. The log below carries what is needed to find the
+        // cause if it recurs.
+        (realtimeArrivals + scheduledArrivals)
+            .filter { it.routeShortName == it.routeId }
+            .forEach {
+                FileLogger.w("GtfsRepo", "Route name unresolved at $stopId: " +
+                    "id=${it.routeId}, headsign=${it.headsign}, " +
+                    "scheduled=${it.scheduled}")
+            }
+
         val combinedRaw = realtimeArrivals + scheduledArrivals
 
         // 5b. Loop / terminal handling. For each (routeId, headsign) decide
@@ -850,6 +885,11 @@ class GtfsRepository @Inject constructor(
      * Builds [ArrivalInfo] records for the given routes from the static
      * schedule, taking only the next 3 future arrivals per (route, headsign).
      */
+    /**
+     * How far ahead a timetable-only arrival may be to still be worth showing.
+     */
+    private val SCHEDULE_LOOKAHEAD_MINUTES = 90L
+
     private suspend fun buildScheduledArrivals(
         stopId: String,
         routeIds: List<String>,
@@ -865,11 +905,28 @@ class GtfsRepository @Inject constructor(
         val nowStr = java.time.LocalTime.now(java.time.ZoneId.of("Europe/Sofia"))
             .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
 
+        // Upper bound as well as lower. Without it, "the next scheduled
+        // arrivals today" includes departures many hours away: at 17:42 the
+        // night line N1 appeared at stop 0169 showing its first run near
+        // midnight. A stop board answers "what can I catch now", so anything
+        // beyond the next hour and a half is noise — and for a line that is
+        // genuinely out of service today, its trips fall outside this window
+        // too, which is the behaviour we want.
+        val cutoffStr = java.time.LocalTime.now(java.time.ZoneId.of("Europe/Sofia"))
+            .plusMinutes(SCHEDULE_LOOKAHEAD_MINUTES)
+            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
+
         val rows = stopTimeDao.getScheduledArrivalsAtStop(
             stopId       = stopId,
             serviceIds   = activeServices,
             currentTime  = nowStr
         ).filter { it.routeId in routeIds }
+            .filter { row ->
+                // A trip crossing midnight has "25:10:00" in GTFS, which sorts
+                // after any same-day cutoff, so such rows are excluded here —
+                // correct, since they are hours away by definition.
+                row.arrivalTime <= cutoffStr || cutoffStr < nowStr
+            }
 
         val zone = java.time.ZoneId.of("Europe/Sofia")
         val todayDate = java.time.LocalDate.now(zone)
@@ -1040,19 +1097,27 @@ class GtfsRepository @Inject constructor(
     suspend fun getTripById(id: String) = tripDao.getById(id)
 
     /**
-     * Returns the ordered list of stops for the *first* trip that matches
-     * the given route + headsign. Sufficient for showing the route map.
+     * Returns the ordered list of stops for the FULLEST trip matching the
+     * given route + headsign — the one calling at the most stops.
      *
-     * The `arrivalTime` field on each stop is the schedule of one specific
-     * (arbitrary) trip — it should NOT be shown directly in the UI as it
-     * would imply that's the time for "this" run. Instead we compute
-     * `minutesFromStart` here, which IS a stable property of the route.
+     * Not the first matching trip. Routes mix full runs with short ones:
+     * line 76 towards Гоце Делчев has trips of 31 stops alongside trips of
+     * 16 that start halfway along at УМБАЛ Св. Анна. Taking whichever trip
+     * came first listed the route as beginning in the middle, while the
+     * heading above it — computed from trip counts, not from one trip —
+     * correctly named the real terminus.
+     *
+     * The `arrivalTime` field on each stop is the schedule of that one trip —
+     * it should NOT be shown directly in the UI as it would imply that's the
+     * time for "this" run. Instead we compute `minutesFromStart` here, which
+     * IS a stable property of the route.
      */
     suspend fun getStopsForDirection(routeId: String, headsign: String): List<StopWithSequence> {
-        val trip = tripDao.getByRoute(routeId)
-                         .firstOrNull { it.tripHeadsign == headsign }
-                   ?: return emptyList()
-        val raw = stopTimeDao.getStopsForTrip(trip.tripId)
+        val tripId = tripDao.getRepresentativeTrip(routeId, headsign)
+            ?: tripDao.getByRoute(routeId)
+                .firstOrNull { it.tripHeadsign == headsign }?.tripId
+            ?: return emptyList()
+        val raw = stopTimeDao.getStopsForTrip(tripId)
 
         // Compute minutes of travel from the FIRST stop on this route.
         val startMinutes = raw.firstOrNull()?.arrivalTime?.let { parseHmsToMinutes(it) }
