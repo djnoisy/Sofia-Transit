@@ -45,6 +45,13 @@ class VehicleMatcher @Inject constructor(
          * each other; without a margin we would flip between them.
          */
         private const val AMBIGUITY_MARGIN = 40.0
+
+        /**
+         * Within this, a vehicle is close enough to be the one we are sitting
+         * in. Tighter than MAX_MATCH_DISTANCE: here we are asserting that the
+         * passenger is aboard, not merely that the vehicle is a candidate.
+         */
+        private const val RIDING_WITH_RADIUS = 60.0
     }
 
     /** A vehicle we believe the passenger could be travelling in. */
@@ -101,6 +108,53 @@ class VehicleMatcher @Inject constructor(
         FileLogger.i(TAG, "Matched $routeId: ${bestDist.toInt()} m, " +
             "trip=${best.tripId}, unambiguous=$unambiguous")
         return Match(best, bestDist, unambiguous)
+    }
+
+    /** A vehicle of a different line, riding alongside the passenger. */
+    data class ForeignVehicle(
+        val routeId: String,
+        val routeShortName: String,
+        val distanceMetres: Double
+    )
+
+    /**
+     * Looks for a vehicle of a DIFFERENT line right next to the passenger.
+     *
+     * This is the direct evidence of having boarded the wrong bus, and it
+     * arrives far sooner than the alternative: waiting for the tracked
+     * vehicle to drift away takes minutes of travelling in the wrong
+     * direction, while the vehicle actually being ridden is a few metres away
+     * from the first check onwards.
+     *
+     * Only reported when a single vehicle is convincingly nearest — at a busy
+     * stop several vehicles pass within metres of each other, and naming one
+     * of them would be a guess.
+     */
+    suspend fun findForeignVehicle(
+        trackedRouteId: String,
+        userLat: Double,
+        userLon: Double
+    ): ForeignVehicle? {
+        val nearby = realtimeRepo.getAllVehicles()
+            .map { it to LocationHelper.distanceMetres(userLat, userLon, it.lat, it.lon) }
+            .filter { (_, d) -> d <= RIDING_WITH_RADIUS }
+            .sortedBy { it.second }
+
+        if (nearby.isEmpty()) return null
+
+        val (best, bestDist) = nearby.first()
+        if (best.routeId == trackedRouteId) return null      // our own line
+
+        // Anything else close by makes the identification a guess.
+        val runnerUp = nearby.getOrNull(1)
+        if (runnerUp != null && runnerUp.second - bestDist < AMBIGUITY_MARGIN) return null
+
+        val name = try {
+            gtfsRepo.getRouteById(best.routeId)?.routeShortName
+        } catch (e: Exception) { null } ?: return null
+
+        FileLogger.i(TAG, "Foreign vehicle ${bestDist.toInt()} m away: route $name")
+        return ForeignVehicle(best.routeId, name, bestDist)
     }
 
     /**

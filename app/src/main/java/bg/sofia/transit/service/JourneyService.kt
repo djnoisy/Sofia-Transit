@@ -153,11 +153,30 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          */
         private const val TEARDOWN_DELAY_MS = 10_000L
         /** Grace period after boarding, so the first GPS fixes can arrive. */
-        private const val FIRST_VEHICLE_CHECK_DELAY_MS = 45_000L
+        private const val FIRST_VEHICLE_CHECK_DELAY_MS = 30_000L
+
+        /** How long the faster early checking lasts. */
+        private const val EARLY_PHASE_MS = 4 * 60 * 1000L
+        /** Interval during that early phase. */
+        private const val EARLY_CHECK_INTERVAL_MS = 30_000L
         /** Within this, we and the vehicle count as travelling together. */
         private const val SAME_VEHICLE_RADIUS = 150.0
         /** Consecutive far readings before we accept the passenger has left. */
         private const val DIVERGENCE_STREAK_LIMIT = 3
+
+        /** Within this of the tracked vehicle, we are unmistakably in it. */
+        private const val RIDING_TOGETHER_RADIUS = 60.0
+
+        /** Consecutive checks naming the same other line before we speak. */
+        private const val FOREIGN_STREAK_LIMIT = 2
+
+        /**
+         * Below this we are standing, not riding, so the wrong-line check is
+         * skipped. Matches the threshold used for deciding direction: a
+         * pedestrian and a stationary passenger both fall under it, while a
+         * vehicle in traffic stays above.
+         */
+        private const val MIN_SPEED_FOR_FOREIGN_CHECK = 10.0
 
         /**
          * How far the vehicle must travel before its direction is called.
@@ -376,6 +395,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     /** trip_id being ridden — needed to query its real-time predictions. */
     private var tripId: String = ""
+    /**
+     * True while [orderedStops] really belongs to [tripId].
+     *
+     * It stops being true after a mid-journey re-match: the stop list is kept
+     * from the original trip, so its scheduled times belong to that run, not
+     * to the vehicle now being ridden. Two runs of one line can depart twenty
+     * minutes apart, so the timetable tiers must be skipped until the lists
+     * agree again — the live prediction, which is keyed by trip, stays valid.
+     */
+    private var stopsMatchTrip = false
+
     /** Latest real-time ETA at the destination stop, epoch seconds. */
     private var destinationEtaEpoch: Long? = null
     private var etaSource: EtaSource = EtaSource.NONE
@@ -409,6 +439,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * a journey by itself.
      */
     private var divergenceStreak = 0
+
+    /**
+     * The other line we appear to be riding, and how many checks in a row it
+     * has looked that way. Two are required: at a stop, vehicles of several
+     * lines pass within metres, and one snapshot would accuse the rider of
+     * boarding the wrong bus every time another pulls alongside.
+     */
+    private var foreignRouteId: String? = null
+    private var foreignStreak = 0
 
     private lateinit var fusedClient: FusedLocationProviderClient
 
@@ -459,7 +498,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         this.tripId       = tripId
         this.routeId      = routeId
         this.headsign     = headsign
+        stopsMatchTrip    = tripId.isNotBlank()
         divergenceStreak  = 0
+        foreignRouteId    = null
+        foreignStreak     = 0
         hasStartedMoving  = false
         routeLabel        = label
         orderedStops      = stops
@@ -507,6 +549,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         this.routeId      = routeId
         this.candidates   = candidates
         tripId            = ""
+        stopsMatchTrip    = false
         headsign          = ""
         routeLabel        = label
         orderedStops      = emptyList()
@@ -521,6 +564,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightWarningsFired.clear()
         alightAnnounced   = false
         divergenceStreak  = 0
+        foreignRouteId    = null
+        foreignStreak     = 0
         hasStartedMoving  = false
         lastProgressMs    = System.currentTimeMillis()
         determinationStartMs = System.currentTimeMillis()
@@ -696,8 +741,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightAnnounced = false
         awaitingFirstFix = true
         divergenceStreak = 0
+        foreignRouteId = null
+        foreignStreak = 0
         candidates = emptyList()
         anchorIdx = emptyList()
+        stopsMatchTrip = false
         tripId = ""
         routeId = ""
         headsign = ""
@@ -1014,13 +1062,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         vehicleJob = serviceScope.launch {
             // Let the first GPS fixes arrive before the first check.
             delay(FIRST_VEHICLE_CHECK_DELAY_MS)
+            val startedAt = System.currentTimeMillis()
             while (isActive) {
                 try {
                     checkVehicle()
                 } catch (e: Exception) {
                     FileLogger.w(TAG, "Vehicle check failed: ${e.message}")
                 }
-                delay(VEHICLE_CHECK_INTERVAL_MS)
+                // Faster early on. Boarding the wrong line is only worth
+                // catching while few stops have passed, so the first minutes
+                // are checked twice as often; afterwards the slower rate is
+                // enough for noticing that the rider has got off.
+                val early = System.currentTimeMillis() - startedAt < EARLY_PHASE_MS
+                delay(if (early) EARLY_CHECK_INTERVAL_MS else VEHICLE_CHECK_INTERVAL_MS)
             }
         }
     }
@@ -1029,6 +1083,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (lastLat == 0.0 && lastLon == 0.0) return
 
         val distance = vehicleMatcher.distanceToTrackedVehicle(tripId, lastLat, lastLon)
+
+        // Riding the wrong line is the one finding that must come quickly —
+        // it is only recoverable while few stops have passed. But it is not
+        // even asked when our own vehicle is right here: at that range we are
+        // plainly aboard it, and another line's vehicle alongside is just
+        // traffic.
+        val definitelyAboard = distance != null && distance <= RIDING_TOGETHER_RADIUS
+        if (!definitelyAboard && checkForeignVehicle()) return
+        if (definitelyAboard) {
+            foreignRouteId = null
+            foreignStreak = 0
+        }
 
         if (distance != null && distance <= SAME_VEHICLE_RADIUS) {
             // We are where our vehicle is: nothing to do.
@@ -1048,6 +1114,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 "(${match.distanceMetres.toInt()} m); previous was " +
                 "${distance?.toInt() ?: -1} m away")
             tripId = match.vehicle.tripId
+            // The stop list still describes the previous trip.
+            stopsMatchTrip = false
             divergenceStreak = 0
             // The stop list can differ on a shortened run, so re-check that
             // the chosen alighting stop is still on the route.
@@ -1075,6 +1143,59 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             endJourney()
         }
     }
+
+    /**
+     * Detects riding a vehicle of a different line. Returns true when it has
+     * acted, so the caller stops.
+     */
+    private suspend fun checkForeignVehicle(): Boolean {
+        // Only meaningful while actually moving. A vehicle of another line
+        // standing beside us is the normal picture at a stop — both while
+        // waiting to board and just after getting off — and calling that
+        // "you are on the wrong bus" would be wrong in both cases. Being
+        // aboard means moving together, so a near-zero speed rules the check
+        // out entirely.
+        val kmh = recentSpeedKmh()
+        if (kmh == null || kmh < MIN_SPEED_FOR_FOREIGN_CHECK) {
+            foreignRouteId = null
+            foreignStreak = 0
+            return false
+        }
+
+        val foreign = vehicleMatcher.findForeignVehicle(routeId, lastLat, lastLon)
+
+        if (foreign == null) {
+            foreignRouteId = null
+            foreignStreak = 0
+            return false
+        }
+
+        if (foreign.routeId == foreignRouteId) {
+            foreignStreak++
+        } else {
+            foreignRouteId = foreign.routeId
+            foreignStreak = 1
+        }
+
+        FileLogger.i(TAG, "Foreign vehicle streak $foreignStreak: " +
+            "${foreign.routeShortName} at ${foreign.distanceMetres.toInt()} m")
+
+        if (foreignStreak < FOREIGN_STREAK_LIMIT) return false
+
+        // Say what was observed, not what it means: the rider may have boarded
+        // the wrong bus, or simply be standing beside one. Naming the line
+        // lets them judge in a second.
+        announce("Изглежда пътувате с линия ${foreign.routeShortName}, " +
+                 "а не с ${routeShortNameForAnnouncement()}. " +
+                 "Следенето се прекратява.")
+        _events.tryEmit(JourneyEvent.RouteEnded)
+        endJourney()
+        return true
+    }
+
+    /** The tracked line as it should be spoken, taken from the screen label. */
+    private fun routeShortNameForAnnouncement(): String =
+        routeLabel.substringBefore(" →").trim().ifBlank { "избраната линия" }
 
     /**
      * After switching vehicles, the new trip may be a shortened run that never
@@ -1117,11 +1238,20 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
         val destStop = orderedStops.getOrNull(dest) ?: return
 
-        // No early exit when the vehicle is unknown. The timetable does not
-        // depend on which vehicle we are in — it comes from the stop list,
-        // which we always have — so a scheduled time can still be shown,
-        // clearly labelled as such. Bailing out here left the row blank in
-        // exactly the case where the rider has least other information.
+        // Without an identified vehicle there is no arrival time to give.
+        //
+        // An earlier attempt showed the timetable here, reasoning that it does
+        // not depend on the vehicle. That was wrong: with no vehicle the stop
+        // list comes from a REPRESENTATIVE trip chosen only to describe the
+        // route, and its times belong to that one run — often a five-in-the
+        // morning departure. The result was "Пристигане: сега (по разписание)"
+        // for every stop the rider picked. A blank row is honest; a wrong
+        // time is not.
+        if (tripId.isBlank()) {
+            destinationEtaEpoch = null
+            etaSource = EtaSource.NONE
+            return
+        }
 
         etaJob = serviceScope.launch {
             while (isActive) {
@@ -1151,13 +1281,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * if it were a live prediction.
      */
     private suspend fun computeEta(dest: Int, destStop: StopWithSequence) {
-        // Tier 1 — only possible once a vehicle has been identified.
-        if (tripId.isNotBlank()) {
-            realtimeRepo.getArrivalForTripAtStop(tripId, destStop.stopId)?.let { live ->
-                destinationEtaEpoch = live
-                etaSource = EtaSource.REALTIME
-                return
-            }
+        // Reached only with a known trip (see restartEtaPolling), so the stop
+        // times below belong to the vehicle actually being ridden.
+        realtimeRepo.getArrivalForTripAtStop(tripId, destStop.stopId)?.let { live ->
+            destinationEtaEpoch = live
+            etaSource = EtaSource.REALTIME
+            return
+        }
+
+        if (!stopsMatchTrip) {
+            // Only the live prediction is trustworthy here; see stopsMatchTrip.
+            destinationEtaEpoch = null
+            etaSource = EtaSource.NONE
+            return
         }
 
         val scheduled = scheduledEpoch(destStop.arrivalTime)

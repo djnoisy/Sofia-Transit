@@ -335,6 +335,50 @@ class RealtimeRepository @Inject constructor() {
     }
 
     // ── Vehicle Positions ─────────────────────────────────────────────────
+    /**
+     * Every vehicle currently reporting a fresh position, whatever its route.
+     *
+     * Used to answer the question the tracked route alone cannot: not "has my
+     * vehicle gone away", but "which vehicle am I actually in". Waiting for
+     * the tracked vehicle to drift out of range takes minutes, whereas a
+     * vehicle of another line sitting a few metres away and staying there is
+     * immediate evidence of boarding the wrong one.
+     *
+     * Reads the same cached feed as the other calls, so it costs no extra
+     * request.
+     */
+    suspend fun getAllVehicles(maxAgeSec: Long = 90): List<VehicleInfo> =
+        withContext(Dispatchers.IO) {
+            try {
+                val feed = fetchVehiclePositions() ?: return@withContext emptyList()
+                val nowSec = System.currentTimeMillis() / 1000
+                feed.entityList.mapNotNull { entity ->
+                    if (!entity.hasVehicle()) return@mapNotNull null
+                    val v = entity.vehicle
+                    if (!v.hasPosition()) return@mapNotNull null
+                    if (v.position.latitude == 0f && v.position.longitude == 0f)
+                        return@mapNotNull null
+                    if (v.timestamp > 0 && nowSec - v.timestamp > maxAgeSec)
+                        return@mapNotNull null
+                    VehicleInfo(
+                        vehicleId = v.vehicle.id,
+                        tripId    = v.trip.tripId,
+                        routeId   = v.trip.routeId,
+                        lat       = v.position.latitude.toDouble(),
+                        lon       = v.position.longitude.toDouble(),
+                        bearing   = if (v.position.hasBearing()) v.position.bearing else null,
+                        currentStopSequence =
+                            if (v.hasCurrentStopSequence()) v.currentStopSequence else null,
+                        currentStopId = if (v.hasStopId()) v.stopId else null,
+                        timestamp = v.timestamp
+                    )
+                }
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "getAllVehicles failed: ${e.message}")
+                emptyList()
+            }
+        }
+
     suspend fun getVehiclesForRoute(routeId: String): List<VehicleInfo> =
         withContext(Dispatchers.IO) {
             try {
