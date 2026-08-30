@@ -108,6 +108,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          */
         const val SNAP_SUPPRESS_APPROACH_RADIUS = 150.0
 
+        /**
+         * How much nearer to the following stop we must be before deciding a
+         * stop is behind us. Guards the case of standing at the stop itself,
+         * where the comparison is otherwise decided by GPS noise.
+         */
+        const val PASSED_STOP_MARGIN = 30.0
+
         /** How many stops ahead of the current one we scan on each fix.
          *  Covers up to that many consecutively missed stops in one gap. */
         private const val LOOKAHEAD = 3
@@ -752,6 +759,30 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 val d = distTo(loc, i)
                 if (d < bestDist) { bestDist = d; best = i }
             }
+
+            // The nearest stop may already be behind us. Starting tracking
+            // between two stops, the one just left can easily be the closer of
+            // the two, and announcing it as "next" is wrong — for the journey
+            // it is done with.
+            //
+            // Test: are we nearer to the stop AFTER the candidate than the
+            // candidate itself is? If so we lie beyond it along the route and
+            // have passed it. The margin keeps a rider standing AT the stop,
+            // where the two distances are nearly equal, from being pushed
+            // forward by GPS scatter.
+            if (best < orderedStops.lastIndex) {
+                val toNext = distTo(loc, best + 1)
+                val (bLat, bLon) = stopLatLon.getOrNull(best) ?: Pair(0.0, 0.0)
+                val (nLat, nLon) = stopLatLon.getOrNull(best + 1) ?: Pair(0.0, 0.0)
+                val segment = LocationHelper.distanceMetres(bLat, bLon, nLat, nLon)
+                if (segment > 0 && toNext < segment - PASSED_STOP_MARGIN) {
+                    FileLogger.i(TAG, "First fix: ${orderedStops[best].stopName} " +
+                        "already passed (${toNext.toInt()} m to next of ${segment.toInt()} m)")
+                    best += 1
+                    bestDist = toNext
+                }
+            }
+
             currentIdx = best
 
             // Suppress the approach warning for the stop we just snapped to
