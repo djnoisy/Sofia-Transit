@@ -73,11 +73,21 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
                 b.tvRoute.text    = label
                 val headsignText = if (info.dropOffOnly) "само слизане" else info.headsign
                 b.tvHeadsign.text = headsignText
-                b.tvTimes.text    = info.arrivals.joinToString("  •  ")
+                // Timetable times are marked as such. They carry no traffic
+                // information, so presenting them like live predictions would
+                // invite more trust than they deserve.
+                val timesText = info.arrivals.joinToString("  •  ")
+                b.tvTimes.text = if (info.scheduled && info.arrivals.isNotEmpty())
+                    "$timesText  (по разписание)"
+                else
+                    timesText
 
                 val timesDesc = when (info.arrivals.size) {
                     0    -> "без информация"
-                    else -> info.arrivals.take(3).joinToString(", ") { describeTime(it) }
+                    else -> {
+                        val list = info.arrivals.take(3).joinToString(", ") { describeTime(it) }
+                        if (info.scheduled) "$list, по разписание" else list
+                    }
                 }
                 // TalkBack: "Автобус 84, само за слизане: …" or
                 // "Автобус 84 към ЛЕТИЩЕ…: след 3 мин, …"

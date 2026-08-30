@@ -538,28 +538,41 @@ class GtfsRepository @Inject constructor(
         FileLogger.i("GtfsRepo", "Realtime returned ${realtimeArrivals.size} records " +
             "covering ${realtimeRouteIds.size} routes")
 
-        // 4. Static fallback — applied ONLY to metro lines (route_type == 1).
-        //    Metro vehicles are essentially never in the realtime feed, so
-        //    without this the metro would show nothing. All other modes
-        //    (bus/trolley/tram) show realtime only; if they're not in the
-        //    feed right now, they simply aren't displayed.
+        // 4. Static fallback for every route that serves this stop but has
+        //    nothing in the realtime feed right now.
+        //
+        //    This used to be restricted to the metro, whose vehicles are
+        //    never in the feed. The restriction assumed that a missing bus
+        //    means "not running", but CGM's feed also drops lines that are
+        //    running perfectly well: line 88 serves stops 0233 and 0234 with
+        //    a hundred scheduled trips a day, and disappeared from the feed
+        //    for both of them, so the app showed an empty board at a stop
+        //    where buses kept arriving. A timetable time, labelled as such,
+        //    is far better than nothing — and the arrival rows already
+        //    distinguish scheduled entries from live ones.
         val routeIdsWithoutRealtime = routes
-            .filter { it.routeType == 1 }          // metro only
             .map { it.routeId }
             .filter { it !in realtimeRouteIds }
 
         val scheduledArrivals = if (routeIdsWithoutRealtime.isNotEmpty()) {
             buildScheduledArrivals(stopId, routeIdsWithoutRealtime, routeShortNames, routeTypes)
         } else emptyList()
-        FileLogger.i("GtfsRepo", "Metro schedule fallback returned ${scheduledArrivals.size} records")
+        FileLogger.i("GtfsRepo", "Schedule fallback returned ${scheduledArrivals.size} records " +
+            "for ${routeIdsWithoutRealtime.size} routes without realtime")
 
-        // 5. Combine realtime arrivals with schedule-only records (the
-        //    latter only for routes with NO realtime at all, e.g. metro).
-        //    NOTE: static "top-up" of realtime arrivals is intentionally
-        //    disabled for now — the virtual boards show realtime times only,
-        //    so it's clear during testing which data is live. Routes with no
-        //    realtime still fall back to schedule (otherwise metro would
-        //    show nothing).
+        // 5. Combine realtime arrivals with schedule-only records — the
+        //    latter for any route with NO realtime entry at this stop.
+        //
+        //    Note the direction of the check: the schedule can only ADD lines
+        //    the static data says call here, never invent one. The phantom
+        //    arrivals fixed earlier (line 280 appearing at stop 1289) came
+        //    the other way round, from the realtime feed claiming a stop the
+        //    timetable denies, so widening this fallback cannot bring them
+        //    back.
+        //
+        //    Static "top-up" of routes that DO have realtime stays disabled:
+        //    mixing a live time with a scheduled one in the same row would
+        //    blur which is which.
         val combinedRaw = realtimeArrivals + scheduledArrivals
 
         // 5b. Loop / terminal handling. For each (routeId, headsign) decide
@@ -882,7 +895,8 @@ class GtfsRepository @Inject constructor(
                     routeShortName = routeShortNames[routeId] ?: routeId,
                     headsign       = headsign,
                     arrivals       = emptyList(), // formatted later
-                    arrivalEpochs  = epochs
+                    arrivalEpochs  = epochs,
+                    scheduled      = true
                 )
             }
             .sortedBy { it.routeShortName }
@@ -970,9 +984,17 @@ class GtfsRepository @Inject constructor(
         // on the Directions screen the first entry should be B — the
         // destination someone would head TOWARDS from A. Works whether the
         // two counts are equal or not.
+        // Pick the FULLEST trip per headsign, not the first one found. Some
+        // routes mix full runs with short ones — line 76 towards Гоце Делчев
+        // has trips of 31 stops and of 16, the latter starting halfway along
+        // at УМБАЛ Св. Анна. Taking whichever the database happened to return
+        // first showed a truncated route on the Directions screen and left
+        // journey tracking unable to match the earlier stops.
         val allTrips = tripDao.getByRoute(routeId)
         return topHeadsigns.reversed().mapNotNull { hs ->
-            allTrips.firstOrNull { it.tripHeadsign == hs }
+            val fullestId = tripDao.getRepresentativeTrip(routeId, hs)
+            allTrips.firstOrNull { it.tripId == fullestId }
+                ?: allTrips.firstOrNull { it.tripHeadsign == hs }
         }
     }
 

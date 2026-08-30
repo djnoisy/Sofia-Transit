@@ -105,13 +105,23 @@ interface TripDao {
 
 
     /**
-     * Any one trip of a route in a given direction. All trips of a route in
-     * one direction visit the same stops in the same order, so one is enough
-     * to describe the path when the concrete vehicle is not yet known.
+     * The FULLEST trip of a route in a given direction — the one calling at
+     * the most stops.
+     *
+     * Not just any trip: the earlier assumption that every trip of a route in
+     * one direction visits the same stops is wrong. Line 76 towards Гоце
+     * Делчев runs 230 trips, of which some call at 31 stops and others at
+     * only 16, starting halfway along at УМБАЛ Св. Анна. Picking arbitrarily
+     * returned one of the short ones, so the Lines screen listed a truncated
+     * route and journey tracking could not find the earlier stops at all.
+     * The longest trip describes the full path.
      */
     @Query("""
-        SELECT tripId FROM trips
-        WHERE routeId = :routeId AND tripHeadsign = :headsign
+        SELECT t.tripId FROM trips t
+        WHERE t.routeId = :routeId AND t.tripHeadsign = :headsign
+        ORDER BY (
+            SELECT COUNT(*) FROM stop_times st WHERE st.tripId = t.tripId
+        ) DESC
         LIMIT 1
     """)
     suspend fun getRepresentativeTrip(routeId: String, headsign: String): String?

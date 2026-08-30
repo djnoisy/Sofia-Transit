@@ -39,7 +39,14 @@ data class ArrivalInfo(
      * the vehicle terminates here and passengers can only get off, not on.
      * The UI shows "само слизане" instead of a destination for these.
      */
-    val dropOffOnly: Boolean = false
+    val dropOffOnly: Boolean = false,
+    /**
+     * True when the times come from the timetable rather than the live feed.
+     * The UI must say so: a scheduled time knows nothing about traffic, and
+     * presenting it like a live prediction would have the rider trust it more
+     * than it deserves.
+     */
+    val scheduled: Boolean = false
 )
 
 data class VehicleInfo(
