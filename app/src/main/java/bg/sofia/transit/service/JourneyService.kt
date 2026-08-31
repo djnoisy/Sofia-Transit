@@ -83,17 +83,35 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         const val CHANNEL_ID = "journey_channel"
         const val NOTIF_ID   = 1001
 
-        /** "At the stop" radius. 60 m keeps adjacent city-centre stops from
-         *  overlapping; timeliness is preserved by the 1-second GPS interval
-         *  below (a bus at 50 km/h covers 60 m in ~4 s → several fixes). */
-        const val ARRIVAL_RADIUS = 60.0
+        /**
+         * "At the stop" radius, measured as the crow flies.
+         *
+         * Lowered from 60 m because straight-line distance shortcuts corners:
+         * approaching the turn from Ал. Малинов into Цариградско шосе, the
+         * bus came within 53 m of ДЪРЖАВНА ПЕЧАТНИЦА while still a couple of
+         * hundred metres from it by road, and the stop was announced early.
+         * A tighter radius costs nothing here — measured fixes arrive 60 per
+         * minute with a maximum gap of one second, so even at 65 km/h the
+         * zone spans four or five of them.
+         */
+        const val ARRIVAL_RADIUS = 45.0
 
         /** Hysteresis: we only count as "departed" beyond this, so GPS
          *  jitter at the stop cannot fire arrive/depart repeatedly. */
         const val DEPART_RADIUS = 90.0
 
         /** Upper bound for the "Наближава спирка X" warning distance. */
-        const val APPROACH_RADIUS = 300.0
+        const val APPROACH_RADIUS = 500.0
+
+        /** Lower bound, for crawling traffic where speed says almost nothing. */
+        const val APPROACH_MIN_RADIUS = 120.0
+
+        /**
+         * How much notice the warning aims to give, in seconds. Measured
+         * warnings on line 213 came 13–16 s before arrival at boulevard speed,
+         * which is short for signalling the driver and reaching the door.
+         */
+        const val APPROACH_TARGET_SECONDS = 25.0
 
         /**
          * Stops closer together than this get no approach warning: it would
@@ -119,14 +137,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          *  Covers up to that many consecutively missed stops in one gap. */
         private const val LOOKAHEAD = 3
 
-        /** Distance at which "Слизате тук" is announced. Matches the normal
-         *  arrival radius so the passenger hears it in time to reach the door. */
-        const val ALIGHT_ANNOUNCE_RADIUS = 60.0
-
-        /** Distance at which the journey is considered complete and tracking
-         *  stops. Tighter than the announcement, so the announcement always
-         *  comes first and the journey only ends once genuinely at the stop. */
-        const val ALIGHT_END_RADIUS = 30.0
+        /**
+         * Distance at which "Слизате тук" is announced — the same radius as a
+         * normal arrival, deliberately.
+         *
+         * They were separate while the arrival radius was 60 m and this one
+         * matched it by coincidence. Lowering arrival to 45 m silently
+         * reversed the order: the instruction to alight arrived before the
+         * stop it referred to had been named. One value keeps "Спирка, X"
+         * first and "Слизате тук" straight after it, which is the order
+         * agreed.
+         */
+        const val ALIGHT_ANNOUNCE_RADIUS = ARRIVAL_RADIUS
 
         /** If the vehicle makes no forward progress for this long, the
          *  journey is assumed over (user forgot to stop tracking). */
@@ -164,8 +186,22 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /** Consecutive far readings before we accept the passenger has left. */
         private const val DIVERGENCE_STREAK_LIMIT = 3
 
+        /**
+         * A stop can only be treated as passed while we are this close to the
+         * one we are catching up to. Without the bound, distance comparisons
+         * alone declare stops passed from kilometres away.
+         */
+        const val CATCHUP_MAX_DISTANCE = 250.0
+
         /** Within this of the tracked vehicle, we are unmistakably in it. */
         private const val RIDING_TOGETHER_RADIUS = 60.0
+
+        /**
+         * Beyond this the vehicle has plainly gone on without us. Wider than
+         * SAME_VEHICLE_RADIUS so that a single imprecise position cannot end a
+         * journey, yet close enough to notice within a stop's distance.
+         */
+        private const val PARTED_RADIUS = 250.0
 
         /** Consecutive checks naming the same other line before we speak. */
         private const val FOREIGN_STREAK_LIMIT = 2
@@ -440,6 +476,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     private var divergenceStreak = 0
 
+    /** Set once we have concluded the vehicle went on without us. */
+    private var partedFromVehicle = false
+
     /**
      * The other line we appear to be riding, and how many checks in a row it
      * has looked that way. Two are required: at a stop, vehicles of several
@@ -500,6 +539,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         this.headsign     = headsign
         stopsMatchTrip    = tripId.isNotBlank()
         divergenceStreak  = 0
+        partedFromVehicle = false
         foreignRouteId    = null
         foreignStreak     = 0
         hasStartedMoving  = false
@@ -564,6 +604,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightWarningsFired.clear()
         alightAnnounced   = false
         divergenceStreak  = 0
+        partedFromVehicle = false
         foreignRouteId    = null
         foreignStreak     = 0
         hasStartedMoving  = false
@@ -741,6 +782,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightAnnounced = false
         awaitingFirstFix = true
         divergenceStreak = 0
+        partedFromVehicle = false
         foreignRouteId = null
         foreignStreak = 0
         candidates = emptyList()
@@ -910,7 +952,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             }
 
             // ── Moving; did we silently pass the current stop? ────────────
+            // Catching up on stops the GPS never saw inside their radius.
+            // Requires being genuinely NEAR the stop we are catching up to:
+            // comparing distances alone is not enough, because a route that
+            // bends can put a later stop closer in a straight line than the
+            // next one. Leaving Хотел Плиска, Военна академия lies 2212 m
+            // away while Орлов мост — the actual next stop — lies 2355 m, so
+            // the tracker announced Орлов мост as passed while still two
+            // kilometres short of it.
             !atStop && nearest > currentIdx
+                    && nearestDist <= CATCHUP_MAX_DISTANCE
                     && nearestDist < distTo(loc, currentIdx) - 30.0 -> {
                 // The GPS gap swallowed the stop entirely (never inside the
                 // radius). Announce the passed stop(s) as agreed, then
@@ -957,14 +1008,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 announce("Слизате тук.")
             }
 
-            // 1b) End the journey only once genuinely at the stop (<30 m),
-            //     so the announcement always precedes the screen switching
-            //     away to the Stops tab.
-            if (destDist <= ALIGHT_END_RADIUS) {
-                _events.tryEmit(JourneyEvent.DestinationReached)
-                endJourney()
-                return
-            }
+            // The journey is NOT ended by distance here any more.
+            //
+            // A vehicle stops at the stop whether or not this passenger gets
+            // off, so ending at 30 m cut the journey short for anyone who
+            // chose to stay aboard — and the safety net for a missed stop
+            // could never run, because the end came first. Getting off is
+            // instead recognised generally: the vehicle pulls away and we do
+            // not. See checkVehicle.
 
             // 2) Safety net: the destination was passed without the 30 m
             //    radius ever registering — almost always because the user
@@ -1099,8 +1150,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (distance != null && distance <= SAME_VEHICLE_RADIUS) {
             // We are where our vehicle is: nothing to do.
             divergenceStreak = 0
+            partedFromVehicle = false
             return
         }
+
 
         // Either the feed has nothing for this trip, or the vehicle is far
         // away. Before concluding anything, see whether some other vehicle of
@@ -1121,6 +1174,33 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // the chosen alighting stop is still on the route.
             verifyDestinationStillReachable()
             restartEtaPolling()
+            return
+        }
+
+        // Only now, with no other vehicle of this line beside us, may the
+        // distance mean what it looks like: the vehicle went on without us.
+        //
+        // The order matters. Boarding the NEXT vehicle of the same line also
+        // leaves the tracked one far behind, and concluding "you got off"
+        // there would end a journey that is just beginning. The re-match above
+        // covers that case first.
+        //
+        // Recognised identically wherever it happens — at the chosen
+        // alighting stop, at any other stop, or between them — because the
+        // meaning is the same: this passenger has stopped travelling. It also
+        // replaces ending the journey by distance at the destination, which
+        // used to cut short anyone who decided to stay aboard.
+        if (distance != null && distance > PARTED_RADIUS && !partedFromVehicle) {
+            partedFromVehicle = true
+            FileLogger.i(TAG, "Vehicle left without us (${distance.toInt()} m)")
+            val reachedChosenStop = destinationIdx != null && alightAnnounced
+            if (reachedChosenStop) {
+                _events.tryEmit(JourneyEvent.DestinationReached)
+            } else {
+                announce("Изглежда слязохте. Следенето се прекратява.")
+                _events.tryEmit(JourneyEvent.RouteEnded)
+            }
+            endJourney()
             return
         }
 
@@ -1445,7 +1525,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (mode == AppSettings.APPROACH_SPARSE &&
             spacing < MIN_SPACING_FOR_APPROACH) return null
 
-        return (spacing / 2.0).coerceAtMost(APPROACH_RADIUS)
+        // Distance sized by speed, so the warning arrives a roughly constant
+        // TIME before the stop. A fixed distance cannot serve both ends of the
+        // range measured on this route: at 14 km/h in the centre 300 m is over
+        // a minute of notice, while at 56 km/h on Цариградско it was fifteen
+        // seconds — too little to signal the driver and reach the door.
+        //
+        // Never more than half the gap between stops, or the warning would
+        // land on top of the previous stop's departure.
+        val mps = (recentSpeedKmh() ?: 0.0) / 3.6
+        val bySpeed = mps * APPROACH_TARGET_SECONDS
+        return bySpeed
+            .coerceIn(APPROACH_MIN_RADIUS, APPROACH_RADIUS)
+            .coerceAtMost(spacing / 2.0)
     }
 
     /**
