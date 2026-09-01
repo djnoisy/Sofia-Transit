@@ -111,7 +111,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * warnings on line 213 came 13–16 s before arrival at boulevard speed,
          * which is short for signalling the driver and reaching the door.
          */
-        const val APPROACH_TARGET_SECONDS = 25.0
+        const val APPROACH_TARGET_SECONDS = 20.0
 
         /**
          * Stops closer together than this get no approach warning: it would
@@ -132,6 +132,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * where the comparison is otherwise decided by GPS noise.
          */
         const val PASSED_STOP_MARGIN = 30.0
+
+        /** Accuracy required to attach to a stop, eased over time. */
+        private const val SNAP_ACCURACY_STRICT = 30.0f
+        private const val SNAP_ACCURACY_MEDIUM = 70.0f
+        private const val SNAP_ACCURACY_LOOSE  = 150.0f
+        private const val SNAP_STEP1_MS = 10_000L
+        private const val SNAP_STEP2_MS = 20_000L
+        /** After this long without a usable fix the journey is abandoned. */
+        private const val SNAP_GIVE_UP_MS = 3 * 60 * 1000L
+        /** How often the "weak signal" notice repeats while waiting. */
+        private const val WEAK_SIGNAL_NOTICE_MS = 30_000L
 
         /** How many stops ahead of the current one we scan on each fix.
          *  Covers up to that many consecutively missed stops in one gap. */
@@ -160,14 +171,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /**
          * How often the arrival prediction at the alighting stop is refreshed.
          *
-         * Each poll downloads the entire trip-updates feed — over half a
-         * megabyte — to read a single number. At the previous 30 seconds that
-         * was more than a megabyte a minute, or some ten megabytes for a short
-         * ride, which is unacceptable on mobile data. CGM refresh the feed
-         * every 10–30 s, so a minute still tracks it closely enough for a
-         * figure displayed in whole minutes.
+         * Each poll downloads the entire trip-updates feed — some 725 KB — to
+         * read a single number, so a ten-minute ride cost about seven
+         * megabytes at one-minute polling.
+         *
+         * Two minutes costs the display nothing, because the figure shown is
+         * not the polled value: the poll stores an absolute arrival time, and
+         * the screen recomputes the remaining minutes against the clock on
+         * every GPS fix, once a second. The countdown therefore runs smoothly
+         * between polls; what a poll does is correct it for traffic.
          */
-        private const val ETA_POLL_INTERVAL_MS = 60_000L
+        private const val ETA_POLL_INTERVAL_MS = 120_000L
 
         /**
          * Grace period between a journey ending and the service stopping, so
@@ -204,7 +218,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         private const val PARTED_RADIUS = 250.0
 
         /** Consecutive checks naming the same other line before we speak. */
-        private const val FOREIGN_STREAK_LIMIT = 2
+        /**
+         * Three rather than two. On a shared corridor in slow traffic, two
+         * vehicles can travel abreast for a minute or more, so two sightings
+         * are attainable by coincidence; a third, with the count only ever
+         * advancing while moving, is not.
+         */
+        private const val FOREIGN_STREAK_LIMIT = 3
 
         /**
          * Below this we are standing, not riding, so the wrong-line check is
@@ -220,6 +240,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * settle within the first stretch between stops.
          */
         private const val DIRECTION_MIN_MOVEMENT = 150.0
+
+        /** Minimum spacing between ambiguity diagnostics. */
+        private const val AMBIGUITY_LOG_INTERVAL_MS = 10_000L
 
         /** Speed samples averaged; at one fix a second this is ~15 seconds. */
         private const val SPEED_SAMPLE_COUNT = 15
@@ -303,6 +326,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
              * stop order itself depends on which way we are going.
              */
             val determiningDirection: Boolean = false,
+            /**
+             * Accuracy of the latest fix in metres, or null when unknown.
+             * Shown throughout the journey: while waiting to attach it
+             * explains what is being waited for, and afterwards it tells the
+             * passenger how much to trust what they hear.
+             */
+            val fixAccuracyMetres: Int? = null,
+            /** True while waiting for a fix good enough to attach to a stop. */
+            val awaitingAccurateFix: Boolean = false,
             /** Where [destinationEtaEpoch] came from. The UI must label a
              *  timetable-derived estimate differently from a live one — a
              *  scheduled time carries no traffic information and would
@@ -409,6 +441,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var approachAnnounced = false
     /** True until the first GPS fix positions us on the route. */
     private var awaitingFirstFix = true
+    /** When the wait for an accurate enough fix began. */
+    private var snapWaitStartedMs = 0L
+    /** Last time the "weak signal" notice was spoken. */
+    private var lastWeakSignalNoticeMs = 0L
+    /** Accuracy of the most recent fix, metres. */
+    private var lastAccuracy: Float? = null
 
     /** Chosen alighting stop; null until the user picks one. */
     private var destinationIdx: Int? = null
@@ -461,6 +499,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var anchorLon = 0.0
     private var anchorIdx: List<Int> = emptyList()
     private var determinationStartMs = 0L
+    private var lastAmbiguityLogMs = 0L
 
     /** Route and direction being ridden, for re-matching the vehicle. */
     private var routeId = ""
@@ -560,6 +599,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         maxGapMs = 0L
         lastCadenceLogMs = 0L
         speedSamples.clear()
+        snapWaitStartedMs = 0L
+        lastWeakSignalNoticeMs = 0L
+        lastAccuracy = null
 
         publish(distance = null)
         acquireWakeLock()
@@ -610,6 +652,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         hasStartedMoving  = false
         lastProgressMs    = System.currentTimeMillis()
         determinationStartMs = System.currentTimeMillis()
+        lastAmbiguityLogMs = 0L
         anchorLat = 0.0; anchorLon = 0.0; anchorIdx = emptyList()
 
         lastFixMs = 0L; fixCount = 0; maxGapMs = 0L; lastCadenceLogMs = 0L
@@ -653,7 +696,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             anchorLat = loc.latitude
             anchorLon = loc.longitude
             anchorIdx = candidates.map { nearestIdx(it, loc.latitude, loc.longitude) }
-            FileLogger.i(TAG, "Direction: anchored after ${sinceStart / 1000}s")
+            FileLogger.i(TAG, "Direction: anchored after ${sinceStart / 1000}s — " +
+                describeIndices(anchorIdx, loc))
             return false
         }
 
@@ -679,12 +723,32 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val advanced = candidates.indices.filter { nowIdx[it] > anchorIdx[it] }
 
         if (advanced.size != 1) {
-            // Both or neither advanced — near a terminus, or on a stretch the
-            // two directions share. Re-anchor here and keep watching rather
-            // than guessing.
-            anchorLat = loc.latitude
-            anchorLon = loc.longitude
-            anchorIdx = nowIdx
+            // Both or neither advanced. This is not rare: several routes
+            // double back at their start — line 213 runs Бл. 480 → Ж.К.
+            // Младост-4 → Бл. 480 — and along such a stretch both directions
+            // appear to progress.
+            //
+            // The anchor is deliberately NOT moved. Re-anchoring restarted the
+            // 150 m measurement from scratch every time, so on the ride tested
+            // the direction took nearly two minutes to settle; keeping the
+            // original point lets the comparison strengthen as the vehicle
+            // travels further, and the ambiguity resolves itself once past
+            // the loop.
+            // Logged in full: which stop each direction thinks is nearest,
+            // how far away it is, and how that has changed since the anchor.
+            // Two plausible explanations have already been proposed and
+            // disproved from memory alone, so the comparison is recorded
+            // rather than reasoned about.
+            // Throttled: this branch is reached on every fix, once a second,
+            // and an unthrottled line would bury the rest of the log.
+            val now = System.currentTimeMillis()
+            if (now - lastAmbiguityLogMs >= AMBIGUITY_LOG_INTERVAL_MS) {
+                lastAmbiguityLogMs = now
+                FileLogger.i(TAG, "Direction ambiguous after ${moved.toInt()} m — " +
+                    "anchor: ${describeIndices(anchorIdx, null)} | " +
+                    "now: ${describeIndices(nowIdx, loc)} | " +
+                    "advanced=${advanced.size}")
+            }
             return false
         }
 
@@ -713,6 +777,70 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         announce("Посоката не беше определена. Следенето се прекратява.")
         _events.tryEmit(JourneyEvent.RouteEnded)
         endJourney()
+    }
+
+    /**
+     * Renders one index per candidate as "headsign #idx name (dist)", for the
+     * direction diagnostics. [loc] may be null, in which case distances are
+     * omitted — used for the anchor, whose position is no longer current.
+     */
+    private fun describeIndices(indices: List<Int>, loc: Location?): String =
+        candidates.mapIndexed { i, c ->
+            val idx = indices.getOrNull(i) ?: -1
+            val name = c.stops.getOrNull(idx)?.stopName ?: "?"
+            val dist = if (loc == null) "" else {
+                val (lat, lon) = c.latLons.getOrNull(idx) ?: Pair(0.0, 0.0)
+                " ${LocationHelper.distanceMetres(loc.latitude, loc.longitude, lat, lon).toInt()}m"
+            }
+            "${c.headsign.take(14)} #$idx $name$dist"
+        }.joinToString(" || ")
+
+    /**
+     * Whether the current fix is precise enough to choose a stop, easing the
+     * requirement the longer we wait:
+     *   first 10 s — under 30 m, which makes the choice certain;
+     *   to 20 s    — under 70 m, still well inside typical stop spacing;
+     *   afterwards — under 150 m, below which the nearest stop is still
+     *                meaningful for stops a few hundred metres apart.
+     *
+     * The bar is not lowered further: with worse accuracy the choice would be
+     * a guess. If it is still not met after [SNAP_GIVE_UP_MS] the journey is
+     * ended, because tracking that cannot place the passenger on the route
+     * announces nothing useful and would merely drain the battery.
+     */
+    private fun accuracyGoodEnoughToSnap(): Boolean {
+        val acc = lastAccuracy ?: return true      // no figure: proceed
+        val now = System.currentTimeMillis()
+        if (snapWaitStartedMs == 0L) snapWaitStartedMs = now
+        val waited = now - snapWaitStartedMs
+
+        val required = when {
+            waited < SNAP_STEP1_MS -> SNAP_ACCURACY_STRICT
+            waited < SNAP_STEP2_MS -> SNAP_ACCURACY_MEDIUM
+            else                   -> SNAP_ACCURACY_LOOSE
+        }
+        if (acc <= required) return true
+
+        if (waited >= SNAP_GIVE_UP_MS) {
+            announce("Няма достатъчно точен сигнал. Следенето се прекратява.")
+            _events.tryEmit(JourneyEvent.RouteEnded)
+            endJourney()
+            return false
+        }
+
+        // Spoken every 30 s so the silence is explained rather than looking
+        // like a failure — but never at once. Accuracy is usually poor for
+        // the first seconds after the receiver wakes and settles by itself,
+        // and announcing "weak signal" immediately would alarm the passenger
+        // about something that resolves before they can react.
+        val sinceLastNotice =
+            if (lastWeakSignalNoticeMs == 0L) waited
+            else now - lastWeakSignalNoticeMs
+        if (sinceLastNotice >= WEAK_SIGNAL_NOTICE_MS) {
+            lastWeakSignalNoticeMs = now
+            announce("Определяне на местоположението.")
+        }
+        return false
     }
 
     /** Index of the stop nearest the given position within a candidate. */
@@ -817,6 +945,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val prevLon = lastLon
         val gapMs = if (lastFixMs == 0L) 0L else System.currentTimeMillis() - lastFixMs
 
+        lastAccuracy = if (loc.hasAccuracy()) loc.accuracy else null
+
         logFixCadence()
         recordSpeed(loc, prevLat, prevLon, gapMs)
 
@@ -842,7 +972,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // after boarding, we land on the right stop immediately instead of
         // announcing ancient history.
         if (awaitingFirstFix) {
+            // Attaching to the wrong stop is not self-correcting: the choice
+            // is locked in and the first thing the passenger hears may name a
+            // stop they have long passed. With an accuracy of, say, 500 m,
+            // several stops fall inside the circle of possible positions and
+            // "the nearest" becomes arbitrary — so the requirement is
+            // relaxed in steps rather than accepting whatever arrives first.
+            if (!accuracyGoodEnoughToSnap()) {
+                publish(distance = null)
+                return
+            }
             awaitingFirstFix = false
+            snapWaitStartedMs = 0L
             var best = currentIdx
             var bestDist = Double.MAX_VALUE
             for (i in currentIdx..orderedStops.lastIndex) {
@@ -1237,8 +1378,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // out entirely.
         val kmh = recentSpeedKmh()
         if (kmh == null || kmh < MIN_SPEED_FOR_FOREIGN_CHECK) {
-            foreignRouteId = null
-            foreignStreak = 0
+            // Standing still is neither evidence for nor against: the check is
+            // ignored outright and the count is left exactly as it was.
+            //
+            // Clearing it would make the requirement "three sightings with no
+            // stop in between", which in city traffic depends on where the
+            // lights happen to fall rather than on anything about the journey.
+            // Counting it would be worse still: at a stop, vehicles of other
+            // lines stand beside us as a matter of course.
             return false
         }
 
@@ -1266,16 +1413,23 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // the wrong bus, or simply be standing beside one. Naming the line
         // lets them judge in a second.
         announce("Изглежда пътувате с линия ${foreign.routeShortName}, " +
-                 "а не с ${routeShortNameForAnnouncement()}. " +
+                 "а не с линия ${routeNumberForAnnouncement()}. " +
                  "Следенето се прекратява.")
         _events.tryEmit(JourneyEvent.RouteEnded)
         endJourney()
         return true
     }
 
-    /** The tracked line as it should be spoken, taken from the screen label. */
-    private fun routeShortNameForAnnouncement(): String =
-        routeLabel.substringBefore(" →").trim().ifBlank { "избраната линия" }
+    /**
+     * Just the number of the tracked line. The screen label reads "Автобус
+     * 305 → …", and using it whole produced "а не с Автобус 305", which reads
+     * awkwardly after "с линия".
+     */
+    private fun routeNumberForAnnouncement(): String =
+        routeLabel.substringBefore(" →")
+            .trim()
+            .substringAfterLast(' ')
+            .ifBlank { "избраната" }
 
     /**
      * After switching vehicles, the new trip may be a shortened run that never
@@ -1568,6 +1722,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             currentIdx            = currentIdx,
             atStop                = atStop,
             distanceToNextMetres  = distance,
+            fixAccuracyMetres     = lastAccuracy?.toInt(),
+            awaitingAccurateFix   = awaitingFirstFix && orderedStops.isNotEmpty(),
             destinationIdx        = destinationIdx,
             destinationEtaEpoch   = destinationEtaEpoch,
             etaSource             = etaSource

@@ -204,6 +204,28 @@ class JourneyFragment : Fragment() {
         }
         binding.btnChooseDestination.isEnabled = true
 
+        // Accuracy is shown for the whole journey, not only while waiting: a
+        // screen reader announces a changing value only when that element has
+        // focus, so it costs nothing, and it tells the passenger how much to
+        // trust what they are hearing.
+        val acc = state.fixAccuracyMetres
+        binding.tvAccuracy.text = when {
+            acc == null -> "Точност: неизвестна"
+            else        -> "Точност: $acc метра"
+        }
+        binding.tvAccuracy.contentDescription = null
+
+        if (state.awaitingAccurateFix) {
+            binding.tvStopCaption.text = "Местоположение"
+            binding.tvCurrentStop.text = "Определяне на местоположението"
+            binding.tvCurrentStop.contentDescription = null
+            binding.tvDistance.visibility = View.GONE
+            binding.tvProgress.text = ""
+            binding.btnChooseDestination.isEnabled = false
+            return
+        }
+        binding.btnChooseDestination.isEnabled = true
+
         val stopName = state.currentStop?.stopName ?: "—"
 
         // Only ONE stop is shown: the one we're at, or the one we're heading
