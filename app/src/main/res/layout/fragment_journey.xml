@@ -117,11 +117,6 @@
             android:textSize="18sp"
             android:paddingBottom="8dp"/>
 
-        <TextView android:id="@+id/tvAccuracy"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="14sp" android:alpha="0.7"
-            android:paddingTop="4dp"/>
-
         <TextView android:id="@+id/tvProgress"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textSize="15sp" android:paddingTop="8dp"/>
@@ -154,6 +149,19 @@
             android:visibility="gone"
             style="@style/Widget.Material3.Button.TextButton"/>
     </LinearLayout>
+
+    <!-- Sits outside the tracking panel so it is shown in every phase,
+         including while the direction or the position is still being worked
+         out — those are exactly the moments when the passenger wants to know
+         how good the signal is. -->
+    <TextView android:id="@+id/tvAccuracy"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="14sp"
+        android:alpha="0.7"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="4dp"
+        android:visibility="gone"/>
 
     <Button android:id="@+id/btnEndJourney"
         android:layout_width="match_parent" android:layout_height="56dp"

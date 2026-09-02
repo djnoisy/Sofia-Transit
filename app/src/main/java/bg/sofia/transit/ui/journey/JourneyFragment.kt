@@ -174,6 +174,19 @@ class JourneyFragment : Fragment() {
         // no field left to type into.
         hideKeyboard()
 
+        // Signal quality and speed, shown in every phase of the journey.
+        // A screen reader announces a changing value only while that element
+        // has focus, so keeping it on screen throughout costs nothing and
+        // tells the passenger how much to trust what they are hearing.
+        binding.tvAccuracy.visibility = View.VISIBLE
+        val acc = state.fixAccuracyMetres
+        val spd = state.speedKmh
+        binding.tvAccuracy.text = buildString {
+            append(if (acc == null) "Точност: неизвестна" else "Точност: $acc метра")
+            if (spd != null) append(" · Скорост: $spd км/ч")
+        }
+        binding.tvAccuracy.contentDescription = null
+
         binding.panelUpcoming.visibility      = View.GONE
         binding.tvJourneyHint.visibility      = View.GONE
         binding.panelActiveJourney.visibility = View.VISIBLE
@@ -203,17 +216,6 @@ class JourneyFragment : Fragment() {
             return
         }
         binding.btnChooseDestination.isEnabled = true
-
-        // Accuracy is shown for the whole journey, not only while waiting: a
-        // screen reader announces a changing value only when that element has
-        // focus, so it costs nothing, and it tells the passenger how much to
-        // trust what they are hearing.
-        val acc = state.fixAccuracyMetres
-        binding.tvAccuracy.text = when {
-            acc == null -> "Точност: неизвестна"
-            else        -> "Точност: $acc метра"
-        }
-        binding.tvAccuracy.contentDescription = null
 
         if (state.awaitingAccurateFix) {
             binding.tvStopCaption.text = "Местоположение"
@@ -411,6 +413,7 @@ class JourneyFragment : Fragment() {
     private fun renderSelection(state: SelectionState) {
         binding.panelActiveJourney.visibility = View.GONE
         binding.btnEndJourney.visibility      = View.GONE
+        binding.tvAccuracy.visibility         = View.GONE
 
         if (!state.hasLocation) {
             binding.panelUpcoming.visibility = View.GONE

@@ -73,6 +73,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     @Inject lateinit var realtimeRepo: RealtimeRepository
     @Inject lateinit var vehicleMatcher: bg.sofia.transit.data.repository.VehicleMatcher
+    @Inject lateinit var gtfsRepo: bg.sofia.transit.data.repository.GtfsRepository
     @Inject lateinit var settings: AppSettings
 
     /** Service-lifetime scope for the ETA polling loop. */
@@ -227,6 +228,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         private const val FOREIGN_STREAK_LIMIT = 3
 
         /**
+         * Sightings older than this no longer count towards the total, so the
+         * evidence has to come from one continuous stretch of the journey
+         * rather than from scattered moments.
+         */
+        private const val FOREIGN_SIGHTING_WINDOW_MS = 4 * 60 * 1000L
+
+        /**
          * Below this we are standing, not riding, so the wrong-line check is
          * skipped. Matches the threshold used for deciding direction: a
          * pedestrian and a stationary passenger both fall under it, while a
@@ -235,11 +243,21 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         private const val MIN_SPEED_FOR_FOREIGN_CHECK = 10.0
 
         /**
-         * How far the vehicle must travel before its direction is called.
-         * Enough to clear GPS scatter while standing still, short enough to
-         * settle within the first stretch between stops.
+         * How far the vehicle must travel before the direction test is even
+         * attempted. Lowered from 150 m once the test itself became fine
+         * grained: the old index comparison needed hundreds of metres to
+         * register anything, whereas closing distance is measurable almost at
+         * once. The speed guard already excludes a stationary vehicle, so this
+         * only has to clear ordinary scatter.
          */
-        private const val DIRECTION_MIN_MOVEMENT = 150.0
+        private const val DIRECTION_MIN_MOVEMENT = 80.0
+
+        /**
+         * How much closer to its next stop a direction must have come, and by
+         * how much it must beat the other, before the direction is called.
+         * Comfortably above the scatter of a good fix.
+         */
+        private const val DIRECTION_MIN_PROGRESS = 60.0
 
         /** Minimum spacing between ambiguity diagnostics. */
         private const val AMBIGUITY_LOG_INTERVAL_MS = 10_000L
@@ -333,6 +351,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
              * passenger how much to trust what they hear.
              */
             val fixAccuracyMetres: Int? = null,
+            /** Current speed in km/h, or null before enough samples. */
+            val speedKmh: Int? = null,
             /** True while waiting for a fix good enough to attach to a stop. */
             val awaitingAccurateFix: Boolean = false,
             /** Where [destinationEtaEpoch] came from. The UI must label a
@@ -526,6 +546,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     private var foreignRouteId: String? = null
     private var foreignStreak = 0
+    /** When the previous foreign sighting was recorded. */
+    private var lastForeignSightingMs = 0L
 
     private lateinit var fusedClient: FusedLocationProviderClient
 
@@ -581,6 +603,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         partedFromVehicle = false
         foreignRouteId    = null
         foreignStreak     = 0
+        lastForeignSightingMs = 0L
         hasStartedMoving  = false
         routeLabel        = label
         orderedStops      = stops
@@ -649,6 +672,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         partedFromVehicle = false
         foreignRouteId    = null
         foreignStreak     = 0
+        lastForeignSightingMs = 0L
         hasStartedMoving  = false
         lastProgressMs    = System.currentTimeMillis()
         determinationStartMs = System.currentTimeMillis()
@@ -719,38 +743,54 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return false
         }
 
+        // Which direction are we making progress along?
+        //
+        // The test used to be whether the index of the nearest stop had
+        // increased. That index only changes once the vehicle passes the
+        // midpoint between two stops, so with stops 700 m apart it stood
+        // still for over two minutes while the answer was plainly visible in
+        // the data: on one ride the distance to the next stop ahead fell from
+        // 91 m to 79 m within eighteen seconds, while in the other direction
+        // it rose from 278 m to 430 m.
+        //
+        // So the decision is made on that distance instead. For each
+        // direction we take the stop that follows the one we anchored at, and
+        // ask whether we are getting closer to it. Travelling a route means
+        // closing on its next stop; travelling the opposite way means leaving
+        // it behind. The measure changes with every metre rather than every
+        // few hundred, so the answer arrives in seconds.
         val nowIdx = candidates.map { nearestIdx(it, loc.latitude, loc.longitude) }
-        val advanced = candidates.indices.filter { nowIdx[it] > anchorIdx[it] }
 
-        if (advanced.size != 1) {
-            // Both or neither advanced. This is not rare: several routes
-            // double back at their start — line 213 runs Бл. 480 → Ж.К.
-            // Младост-4 → Бл. 480 — and along such a stretch both directions
-            // appear to progress.
-            //
-            // The anchor is deliberately NOT moved. Re-anchoring restarted the
-            // 150 m measurement from scratch every time, so on the ride tested
-            // the direction took nearly two minutes to settle; keeping the
-            // original point lets the comparison strengthen as the vehicle
-            // travels further, and the ambiguity resolves itself once past
-            // the loop.
-            // Logged in full: which stop each direction thinks is nearest,
-            // how far away it is, and how that has changed since the anchor.
-            // Two plausible explanations have already been proposed and
-            // disproved from memory alone, so the comparison is recorded
-            // rather than reasoned about.
-            // Throttled: this branch is reached on every fix, once a second,
-            // and an unthrottled line would bury the rest of the log.
+        val progress = candidates.indices.map { i ->
+            val c = candidates[i]
+            val nextIdx = (anchorIdx[i] + 1).coerceAtMost(c.latLons.lastIndex)
+            val (lat, lon) = c.latLons.getOrNull(nextIdx) ?: return@map 0.0
+            val atAnchor = LocationHelper.distanceMetres(anchorLat, anchorLon, lat, lon)
+            val atNow    = LocationHelper.distanceMetres(loc.latitude, loc.longitude, lat, lon)
+            atAnchor - atNow          // positive = closing in
+        }
+
+        // One direction must be closing while the other is not, by a margin
+        // wide enough that GPS scatter cannot produce it.
+        val best = progress.indices.maxByOrNull { progress[it] } ?: return false
+        val others = progress.indices.filter { it != best }
+        val decisive = progress[best] >= DIRECTION_MIN_PROGRESS &&
+            others.all { progress[best] - progress[it] >= DIRECTION_MIN_PROGRESS }
+
+        if (!decisive) {
             val now = System.currentTimeMillis()
             if (now - lastAmbiguityLogMs >= AMBIGUITY_LOG_INTERVAL_MS) {
                 lastAmbiguityLogMs = now
-                FileLogger.i(TAG, "Direction ambiguous after ${moved.toInt()} m — " +
-                    "anchor: ${describeIndices(anchorIdx, null)} | " +
-                    "now: ${describeIndices(nowIdx, loc)} | " +
-                    "advanced=${advanced.size}")
+                FileLogger.i(TAG, "Direction unclear after ${moved.toInt()} m — " +
+                    "progress=" + progress.mapIndexed { i, v ->
+                        "${candidates[i].headsign.take(14)}:${v.toInt()}m"
+                    }.joinToString(", ") +
+                    " | now: ${describeIndices(nowIdx, loc)}")
             }
             return false
         }
+
+        val advanced = listOf(best)
 
         val chosen = candidates[advanced.first()]
         headsign     = chosen.headsign
@@ -913,6 +953,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         partedFromVehicle = false
         foreignRouteId = null
         foreignStreak = 0
+        lastForeignSightingMs = 0L
         candidates = emptyList()
         anchorIdx = emptyList()
         stopsMatchTrip = false
@@ -1026,6 +1067,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // genuinely ahead and the warning is left to fire normally.
             if (bestDist <= SNAP_SUPPRESS_APPROACH_RADIUS) {
                 approachAnnounced = true
+            }
+
+            // Say which stop is coming, unless we are standing at it — in
+            // which case the arrival announcement follows within seconds
+            // anyway. Without this the passenger could be left in silence
+            // right after tracking begins: the approach warning may be
+            // switched off, and then nothing at all is spoken until the stop
+            // is reached. It matters most after switching lines mid-journey,
+            // where the route has just changed under them.
+            if (bestDist > ARRIVAL_RADIUS) {
+                announce("Следваща спирка, ${orderedStops[best].stopName}.")
             }
 
             FileLogger.i(TAG, "First fix: snapped to stop #$best " +
@@ -1392,10 +1444,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val foreign = vehicleMatcher.findForeignVehicle(routeId, lastLat, lastLon)
 
         if (foreign == null) {
-            foreignRouteId = null
-            foreignStreak = 0
+            // Nothing identifiable nearby is not evidence that the earlier
+            // sightings were wrong. Clearing the count here was the main
+            // reason the wrong line took nine minutes to report on one ride:
+            // the count reached two, one check near a stop found the choice
+            // ambiguous, and everything started again — while the vehicle in
+            // question sat four metres away throughout.
             return false
         }
+
+        // Sightings must belong to the same episode. Without this the count
+        // could accumulate from unrelated moments far apart.
+        val now = System.currentTimeMillis()
+        if (foreignStreak > 0 && now - lastForeignSightingMs > FOREIGN_SIGHTING_WINDOW_MS) {
+            FileLogger.i(TAG, "Foreign sightings expired; restarting count")
+            foreignStreak = 0
+            foreignRouteId = null
+        }
+        lastForeignSightingMs = now
 
         if (foreign.routeId == foreignRouteId) {
             foreignStreak++
@@ -1409,27 +1475,99 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         if (foreignStreak < FOREIGN_STREAK_LIMIT) return false
 
-        // Say what was observed, not what it means: the rider may have boarded
-        // the wrong bus, or simply be standing beside one. Naming the line
-        // lets them judge in a second.
-        announce("Изглежда пътувате с линия ${foreign.routeShortName}, " +
-                 "а не с линия ${routeNumberForAnnouncement()}. " +
-                 "Следенето се прекратява.")
+        // Switch to the line actually being ridden rather than stopping.
+        //
+        // Ending the journey here left the passenger with nothing at the
+        // moment they most needed help — aboard an unfamiliar vehicle, having
+        // to start again by hand. Everything required to continue is already
+        // known: the vehicle, its trip, and from that its direction and stop
+        // list. Only if any of it is missing do we fall back to stopping,
+        // since announcing stops from the wrong route would be worse than
+        // silence.
+        if (switchToForeignLine(foreign)) return true
+
+        announce("Изглежда пътувате с ${foreignVehicleWord(foreign)} " +
+                 "${foreign.routeShortName}. Следенето се прекратява.")
         _events.tryEmit(JourneyEvent.RouteEnded)
         endJourney()
         return true
     }
 
+    /** Vehicle word for a foreign line, lower case, for mid-sentence use. */
+    private suspend fun foreignVehicleWord(
+        foreign: bg.sofia.transit.data.repository.VehicleMatcher.ForeignVehicle
+    ): String = try {
+        bg.sofia.transit.util.VehicleLabels
+            .singular(foreign.routeType, gtfsRepo.isTrolleyRoute(foreign.routeId))
+            .lowercase()
+    } catch (e: Exception) { "превозно средство" }
+
     /**
-     * Just the number of the tracked line. The screen label reads "Автобус
-     * 305 → …", and using it whole produced "а не с Автобус 305", which reads
-     * awkwardly after "с линия".
+     * Re-points tracking at the line the passenger is actually on. Returns
+     * false when the data needed to continue is incomplete, leaving the
+     * caller to stop instead.
      */
-    private fun routeNumberForAnnouncement(): String =
-        routeLabel.substringBefore(" →")
-            .trim()
-            .substringAfterLast(' ')
-            .ifBlank { "избраната" }
+    private suspend fun switchToForeignLine(
+        foreign: bg.sofia.transit.data.repository.VehicleMatcher.ForeignVehicle
+    ): Boolean {
+        val hs = foreign.headsign ?: return false
+        val stops = try {
+            gtfsRepo.getRemainingStops(foreign.tripId, fromSequence = 0)
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "Switch failed loading stops: ${e.message}")
+            return false
+        }
+        if (stops.isEmpty()) return false
+
+        val latLons = stops.map { sw ->
+            val st = try { gtfsRepo.getStopById(sw.stopId) } catch (e: Exception) { null }
+            Pair(st?.stopLat ?: 0.0, st?.stopLon ?: 0.0)
+        }
+
+        val vehicle = try {
+            bg.sofia.transit.util.VehicleLabels.singular(
+                foreign.routeType, gtfsRepo.isTrolleyRoute(foreign.routeId))
+        } catch (e: Exception) { "Линия" }
+
+        FileLogger.i(TAG, "Switching to ${foreign.routeShortName} → $hs " +
+            "(trip=${foreign.tripId})")
+
+        routeId        = foreign.routeId
+        headsign       = hs
+        tripId         = foreign.tripId
+        orderedStops   = stops
+        stopLatLon     = latLons
+        stopsMatchTrip = true
+        routeLabel     = "$vehicle ${foreign.routeShortName} → $hs"
+
+        // Start afresh on the new route: our position along it is unknown, and
+        // any chosen alighting stop belonged to the old one.
+        awaitingFirstFix  = true
+        atStop            = false
+        approachAnnounced = false
+        currentIdx        = 0
+        destinationIdx    = null
+        destinationEtaEpoch = null
+        etaSource         = EtaSource.NONE
+        alightWarningsFired.clear()
+        alightAnnounced   = false
+        divergenceStreak  = 0
+        partedFromVehicle = false
+        foreignRouteId    = null
+        foreignStreak     = 0
+        lastForeignSightingMs = 0L
+
+        // "Автобус 76" rather than "линия 76": the passenger may well be on a
+        // trolleybus or a tram, and naming the wrong kind of vehicle is both
+        // wrong and confusing when it is the thing they are sitting in.
+        announce("Изглежда пътувате с ${vehicle.lowercase()} " +
+                 "${foreign.routeShortName}, посока $hs. " +
+                 "Проследяването на спирките се превключва.")
+        publishLastKnown()
+        restartEtaPolling()
+        return true
+    }
+
 
     /**
      * After switching vehicles, the new trip may be a shortened run that never
@@ -1723,6 +1861,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             atStop                = atStop,
             distanceToNextMetres  = distance,
             fixAccuracyMetres     = lastAccuracy?.toInt(),
+            speedKmh              = recentSpeedKmh()?.toInt(),
             awaitingAccurateFix   = awaitingFirstFix && orderedStops.isNotEmpty(),
             destinationIdx        = destinationIdx,
             destinationEtaEpoch   = destinationEtaEpoch,

@@ -114,7 +114,12 @@ class VehicleMatcher @Inject constructor(
     data class ForeignVehicle(
         val routeId: String,
         val routeShortName: String,
-        val distanceMetres: Double
+        val distanceMetres: Double,
+        /** The vehicle's own trip, so tracking can switch to it. */
+        val tripId: String,
+        val routeType: Int,
+        /** Direction, resolved from the trip id; null when unknown. */
+        val headsign: String?
     )
 
     /**
@@ -153,8 +158,16 @@ class VehicleMatcher @Inject constructor(
             gtfsRepo.getRouteById(best.routeId)?.routeShortName
         } catch (e: Exception) { null } ?: return null
 
-        FileLogger.i(TAG, "Foreign vehicle ${bestDist.toInt()} m away: route $name")
-        return ForeignVehicle(best.routeId, name, bestDist)
+        val headsign = try {
+            gtfsRepo.getHeadsignByTripIdPrefix(best.tripId)
+        } catch (e: Exception) { null }
+        val type = try {
+            gtfsRepo.getRouteById(best.routeId)?.routeType ?: 3
+        } catch (e: Exception) { 3 }
+
+        FileLogger.i(TAG, "Foreign vehicle ${bestDist.toInt()} m away: route $name" +
+            (headsign?.let { " → $it" } ?: " (direction unknown)"))
+        return ForeignVehicle(best.routeId, name, bestDist, best.tripId, type, headsign)
     }
 
     /**
