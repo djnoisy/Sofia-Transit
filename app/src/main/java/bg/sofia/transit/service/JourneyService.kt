@@ -226,6 +226,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * advancing while moving, is not.
          */
         private const val FOREIGN_STREAK_LIMIT = 3
+        /** Enough when nothing else is anywhere near the candidate. */
+        private const val FOREIGN_STREAK_UNCONTESTED = 2
 
         /**
          * Sightings older than this no longer count towards the total, so the
@@ -538,6 +540,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     /** Set once we have concluded the vehicle went on without us. */
     private var partedFromVehicle = false
 
+    /** When the vehicle first got under way, for timing the faster checks. */
+    private var movingSinceMs = 0L
+
     /**
      * The other line we appear to be riding, and how many checks in a row it
      * has looked that way. Two are required: at a stop, vehicles of several
@@ -548,6 +553,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var foreignStreak = 0
     /** When the previous foreign sighting was recorded. */
     private var lastForeignSightingMs = 0L
+    /** Guards the "not on the chosen line" notice so it is said once. */
+    private var notAboardAnnounced = false
 
     private lateinit var fusedClient: FusedLocationProviderClient
 
@@ -601,9 +608,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         stopsMatchTrip    = tripId.isNotBlank()
         divergenceStreak  = 0
         partedFromVehicle = false
+        movingSinceMs     = 0L
         foreignRouteId    = null
         foreignStreak     = 0
         lastForeignSightingMs = 0L
+        notAboardAnnounced = false
         hasStartedMoving  = false
         routeLabel        = label
         orderedStops      = stops
@@ -670,9 +679,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightAnnounced   = false
         divergenceStreak  = 0
         partedFromVehicle = false
+        movingSinceMs     = 0L
         foreignRouteId    = null
         foreignStreak     = 0
         lastForeignSightingMs = 0L
+        notAboardAnnounced = false
         hasStartedMoving  = false
         lastProgressMs    = System.currentTimeMillis()
         determinationStartMs = System.currentTimeMillis()
@@ -954,6 +965,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         foreignRouteId = null
         foreignStreak = 0
         lastForeignSightingMs = 0L
+        notAboardAnnounced = false
         candidates = emptyList()
         anchorIdx = emptyList()
         stopsMatchTrip = false
@@ -1306,7 +1318,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         vehicleJob = serviceScope.launch {
             // Let the first GPS fixes arrive before the first check.
             delay(FIRST_VEHICLE_CHECK_DELAY_MS)
-            val startedAt = System.currentTimeMillis()
             while (isActive) {
                 try {
                     checkVehicle()
@@ -1317,7 +1328,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 // catching while few stops have passed, so the first minutes
                 // are checked twice as often; afterwards the slower rate is
                 // enough for noticing that the rider has got off.
-                val early = System.currentTimeMillis() - startedAt < EARLY_PHASE_MS
+                //
+                // Timed from DEPARTURE, not from the journey being started.
+                // Waiting four minutes at the stop used to consume the whole
+                // fast period before the bus had even arrived, so the checks
+                // that mattered ran at the slow rate.
+                val since = if (movingSinceMs == 0L) 0L
+                            else System.currentTimeMillis() - movingSinceMs
+                val early = movingSinceMs == 0L || since < EARLY_PHASE_MS
                 delay(if (early) EARLY_CHECK_INTERVAL_MS else VEHICLE_CHECK_INTERVAL_MS)
             }
         }
@@ -1441,7 +1459,33 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return false
         }
 
-        val foreign = vehicleMatcher.findForeignVehicle(routeId, lastLat, lastLon)
+        val mps = kmh / 3.6
+
+        // Rule the chosen line out first. Establishing that we are NOT on it
+        // is a far cheaper judgement than establishing which line we ARE on,
+        // and it is the one the passenger needs immediately: knowing the
+        // tracking is wrong lets them get off at the next shared stop, while
+        // the identification can follow at its own pace.
+        if (!notAboardAnnounced) {
+            when (vehicleMatcher.isAnyVehicleOfRouteNear(routeId, lastLat, lastLon, mps)) {
+                false -> {
+                    notAboardAnnounced = true
+                    announce("Изглежда не пътувате с избраната линия. " +
+                             "Определя се действителната.")
+                    FileLogger.i(TAG, "No vehicle of $routeId anywhere near")
+                }
+                null -> {
+                    // The line reports no vehicles at all. That is silence,
+                    // not evidence — it happens when CGM stop publishing a
+                    // line — so nothing is concluded and nothing is said.
+                    FileLogger.d(TAG, "No vehicles published for $routeId; no conclusion")
+                }
+                true -> { /* a vehicle of the chosen line is nearby: fine */ }
+            }
+        }
+
+        val foreign = vehicleMatcher.findForeignVehicle(
+            routeId, lastLat, lastLon, userSpeedMps = mps)
 
         if (foreign == null) {
             // Nothing identifiable nearby is not evidence that the earlier
@@ -1473,7 +1517,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         FileLogger.i(TAG, "Foreign vehicle streak $foreignStreak: " +
             "${foreign.routeShortName} at ${foreign.distanceMetres.toInt()} m")
 
-        if (foreignStreak < FOREIGN_STREAK_LIMIT) return false
+        // Fewer confirmations when the identification is clear-cut: one
+        // vehicle beside us and nothing else within a hundred metres is
+        // already strong evidence, and demanding a third sighting only delays
+        // acting on it. Where several vehicles are about, the full count
+        // stands.
+        val needed = if (foreign.uncontested) FOREIGN_STREAK_UNCONTESTED
+                     else FOREIGN_STREAK_LIMIT
+        if (foreignStreak < needed) return false
 
         // Switch to the line actually being ridden rather than stopping.
         //
@@ -1553,9 +1604,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightAnnounced   = false
         divergenceStreak  = 0
         partedFromVehicle = false
+        movingSinceMs     = 0L
         foreignRouteId    = null
         foreignStreak     = 0
         lastForeignSightingMs = 0L
+        notAboardAnnounced = false
 
         // "Автобус 76" rather than "линия 76": the passenger may well be on a
         // trolleybus or a tram, and naming the wrong kind of vehicle is both
@@ -1746,6 +1799,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // 25 m/s is 90 km/h — above anything a city bus or tram does, so a
         // higher reading is a bad fix and must not skew the average.
         if (mps.isNaN() || mps > MAX_PLAUSIBLE_SPEED_MPS) return
+        if (movingSinceMs == 0L && mps * 3.6 >= MIN_SPEED_FOR_FOREIGN_CHECK) {
+            movingSinceMs = System.currentTimeMillis()
+        }
         speedSamples.addLast(mps)
         while (speedSamples.size > SPEED_SAMPLE_COUNT) speedSamples.removeFirst()
     }

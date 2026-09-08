@@ -52,6 +52,20 @@ class VehicleMatcher @Inject constructor(
          * passenger is aboard, not merely that the vehicle is a candidate.
          */
         private const val RIDING_WITH_RADIUS = 60.0
+
+        /**
+         * Beyond this, no vehicle of the line can be the one we are in.
+         *
+         * Deliberately generous — several times the riding radius. The point
+         * is not to decide which vehicle we are aboard but to rule the line
+         * out altogether, and that judgement must survive stale reports,
+         * a poor fix and a bend in the road. What it does catch is the case
+         * that matters: the chosen line's nearest vehicle being streets away.
+         */
+        private const val NOT_ABOARD_RADIUS = 250.0
+
+        /** Gap to the next candidate that makes an identification clear-cut. */
+        private const val UNCONTESTED_MARGIN = 120.0
     }
 
     /** A vehicle we believe the passenger could be travelling in. */
@@ -115,6 +129,11 @@ class VehicleMatcher @Inject constructor(
         val routeId: String,
         val routeShortName: String,
         val distanceMetres: Double,
+        /**
+         * True when this vehicle stands clearly apart from anything else
+         * nearby, so fewer confirmations are needed before acting on it.
+         */
+        val uncontested: Boolean,
         /** The vehicle's own trip, so tracking can switch to it. */
         val tripId: String,
         val routeType: Int,
@@ -138,12 +157,30 @@ class VehicleMatcher @Inject constructor(
     suspend fun findForeignVehicle(
         trackedRouteId: String,
         userLat: Double,
-        userLon: Double
+        userLon: Double,
+        userSpeedMps: Double = 0.0
     ): ForeignVehicle? {
+        val nowSec = System.currentTimeMillis() / 1000
+
+        // The measured distance is to where the vehicle WAS when it last
+        // reported, not where it is now. On a ride tested, the vehicle the
+        // passenger was sitting in read 52, 57, 55, 58 and 54 m away — always
+        // just outside a fixed 60 m radius — because at 45 km/h a report a few
+        // seconds old is already half a block behind. Only when the bus stood
+        // still did it read 7 m.
+        //
+        // So the radius is widened by however far we ourselves have travelled
+        // since the report was made. Stationary, it stays at the base value.
         val nearby = realtimeRepo.getAllVehicles()
-            .map { it to LocationHelper.distanceMetres(userLat, userLon, it.lat, it.lon) }
-            .filter { (_, d) -> d <= RIDING_WITH_RADIUS }
-            .sortedBy { it.second }
+            .map { v ->
+                val age = if (v.timestamp > 0) (nowSec - v.timestamp).coerceAtLeast(0) else 0
+                val allowance = userSpeedMps * age
+                val d = LocationHelper.distanceMetres(userLat, userLon, v.lat, v.lon)
+                Triple(v, d, d - allowance)      // third = staleness-corrected
+            }
+            .filter { (_, _, corrected) -> corrected <= RIDING_WITH_RADIUS }
+            .sortedBy { it.third }
+            .map { it.first to it.third }
 
         if (nearby.isEmpty()) return null
 
@@ -153,6 +190,10 @@ class VehicleMatcher @Inject constructor(
         // Anything else close by makes the identification a guess.
         val runnerUp = nearby.getOrNull(1)
         if (runnerUp != null && runnerUp.second - bestDist < AMBIGUITY_MARGIN) return null
+        // No second candidate at all, or one far behind: the identification is
+        // as clear as this data can be.
+        val uncontested = runnerUp == null ||
+            runnerUp.second - bestDist >= UNCONTESTED_MARGIN
 
         val name = try {
             gtfsRepo.getRouteById(best.routeId)?.routeShortName
@@ -167,7 +208,41 @@ class VehicleMatcher @Inject constructor(
 
         FileLogger.i(TAG, "Foreign vehicle ${bestDist.toInt()} m away: route $name" +
             (headsign?.let { " → $it" } ?: " (direction unknown)"))
-        return ForeignVehicle(best.routeId, name, bestDist, best.tripId, type, headsign)
+        return ForeignVehicle(
+            best.routeId, name, bestDist, uncontested, best.tripId, type, headsign)
+    }
+
+    /**
+     * Whether ANY vehicle of [routeId] is plausibly near the passenger.
+     *
+     * Answers the cheaper of the two questions. Establishing which line
+     * someone is on needs several agreeing observations, because one
+     * coincidence proves nothing; establishing that they are NOT on a
+     * particular line needs only to see that none of its vehicles is
+     * anywhere near — and a vehicle a kilometre away cannot be explained by a
+     * few seconds of stale reporting.
+     *
+     * Returns null when the feed has no vehicles for the route at all, which
+     * is not the same as "far away": the line may simply not be reporting,
+     * and no conclusion should be drawn from that.
+     */
+    suspend fun isAnyVehicleOfRouteNear(
+        routeId: String,
+        userLat: Double,
+        userLon: Double,
+        userSpeedMps: Double = 0.0
+    ): Boolean? {
+        val vehicles = realtimeRepo.getVehiclesForRoute(routeId)
+            .filter { it.lat != 0.0 || it.lon != 0.0 }
+        if (vehicles.isEmpty()) return null
+
+        val nowSec = System.currentTimeMillis() / 1000
+        val nearest = vehicles.minOf { v ->
+            val age = if (v.timestamp > 0) (nowSec - v.timestamp).coerceAtLeast(0) else 0
+            LocationHelper.distanceMetres(userLat, userLon, v.lat, v.lon) - userSpeedMps * age
+        }
+        FileLogger.i(TAG, "Nearest $routeId vehicle: ${nearest.toInt()} m (corrected)")
+        return nearest <= NOT_ABOARD_RADIUS
     }
 
     /**
