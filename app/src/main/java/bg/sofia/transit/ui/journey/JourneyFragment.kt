@@ -217,6 +217,23 @@ class JourneyFragment : Fragment() {
         }
         binding.btnChooseDestination.isEnabled = true
 
+        // The chosen line has been ruled out and the real one is not yet
+        // known. Everything about the route on screen belongs to the
+        // discarded line, so none of it is shown.
+        if (state.lineInDoubt) {
+            binding.tvStopCaption.text = "Линия"
+            binding.tvCurrentStop.text = "Определя се превозното средство"
+            binding.tvCurrentStop.contentDescription = null
+            binding.tvDistance.visibility = View.GONE
+            binding.tvProgress.text = "Спирките не се обявяват, докато не се потвърди"
+            binding.tvProgress.contentDescription = null
+            binding.tvDestination.text = "—"
+            binding.tvDestinationEta.visibility = View.GONE
+            binding.btnChooseDestination.isEnabled = false
+            binding.btnClearDestination.visibility = View.GONE
+            return
+        }
+
         if (state.awaitingAccurateFix) {
             binding.tvStopCaption.text = "Местоположение"
             binding.tvCurrentStop.text = "Определяне на местоположението"

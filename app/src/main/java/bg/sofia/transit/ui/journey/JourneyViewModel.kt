@@ -68,7 +68,6 @@ data class SelectionState(
 class JourneyViewModel @Inject constructor(
     private val gtfsRepo: GtfsRepository,
     private val realtimeRepo: RealtimeRepository,
-    private val vehicleMatcher: bg.sofia.transit.data.repository.VehicleMatcher,
     private val settings: bg.sofia.transit.util.AppSettings,
     application: Application
 ) : AndroidViewModel(application) {
@@ -469,19 +468,17 @@ class JourneyViewModel @Inject constructor(
     fun startJourney(choice: LineChoice, headsign: String) {
         viewModelScope.launch {
             try {
-                val match = if (lastLat != 0.0 || lastLon != 0.0) {
-                    vehicleMatcher.findVehicle(
-                        choice.routeId, headsign, lastLat, lastLon)
-                } else null
-
-                // Prefer the matched vehicle's own trip; fall back to the
-                // tapped arrival's trip, then to any trip of this direction.
-                val tripId = match?.vehicle?.tripId ?: choice.tripId
-
-                val stops = when {
-                    tripId != null -> gtfsRepo.getRemainingStops(tripId, fromSequence = 0)
-                    else -> gtfsRepo.getStopsForRouteDirection(choice.routeId, headsign)
-                }
+                // No vehicle lookup here any more. Identifying the vehicle is
+                // the service's continuous job now, and it does it from
+                // movement, which cannot be judged from a standing start. What
+                // is set up here is the fallback: the line and direction the
+                // passenger chose, which is what gets used if no vehicle can
+                // ever be identified.
+                val tripId = choice.tripId
+                val stops = if (tripId != null)
+                    gtfsRepo.getRemainingStops(tripId, fromSequence = 0)
+                else
+                    gtfsRepo.getStopsForRouteDirection(choice.routeId, headsign)
                 if (stops.isEmpty()) {
                     _error.emit("Няма данни за маршрута на тази линия")
                     return@launch
