@@ -45,6 +45,16 @@ class VehicleMatcher @Inject constructor(
         private const val AMBIGUITY_MARGIN = 40.0
 
         /**
+         * Within this — after correcting for stale reports — the vehicle is
+         * taken to be the one we are in whatever else is about. Nothing but
+         * the vehicle carrying us reads a couple of metres away fix after fix.
+         */
+        private const val CERTAIN_RIDING_RADIUS = 15.0
+
+        /** Gap required when the nearest vehicle is already within that radius. */
+        private const val CLOSE_RANGE_MARGIN = 10.0
+
+        /**
          * Within this — after correcting for how stale the report is — a
          * vehicle is close enough to be the one we are sitting in. The claim
          * being made is that the passenger is aboard it, so the figure is
@@ -94,19 +104,49 @@ class VehicleMatcher @Inject constructor(
         // a block behind at city speed, purely because both are moving. Left
         // uncorrected, the vehicle we sit in reads 50–60 m away and never
         // looks close at all.
-        val ranked = realtimeRepo.getAllVehicles()
+        val all = realtimeRepo.getAllVehicles()
             .filter { it.lat != 0.0 || it.lon != 0.0 }
             .map { v ->
                 val age = if (v.timestamp > 0) (nowSec - v.timestamp).coerceAtLeast(0) else 0
                 val raw = LocationHelper.distanceMetres(userLat, userLon, v.lat, v.lon)
                 v to (raw - userSpeedMps * age).coerceAtLeast(0.0)
             }
-            .filter { (_, d) -> d <= RIDING_WITH_RADIUS }
             .sortedBy { it.second }
 
-        val (best, dist) = ranked.firstOrNull() ?: return null
+        val ranked = all.filter { (_, d) -> d <= RIDING_WITH_RADIUS }
+
+        val (best, dist) = ranked.firstOrNull() ?: run {
+            // Says how far the nearest one was, so a run of blank checks can
+            // be read afterwards as "nothing was about" or "it was just
+            // outside the radius" — two very different things.
+            val nearestAny = all.minOfOrNull { (_, d) -> d }
+            FileLogger.d(TAG, "No vehicle within riding radius " +
+                "(nearest ${nearestAny?.toInt() ?: -1} m)")
+            return null
+        }
         val runnerUp = ranked.getOrNull(1)?.second
-        if (runnerUp != null && runnerUp - dist < AMBIGUITY_MARGIN) return null
+
+        // How large a gap to the runner-up is required depends on how close
+        // the nearest one is.
+        //
+        // A vehicle essentially on top of us needs only a small gap: in dense
+        // traffic another is often within forty metres, and insisting on that
+        // margin discarded readings of the very bus the passenger sat in —
+        // logged at 0 m — over and over, so the line was never identified.
+        //
+        // But the gap is never waived. Two vehicles a couple of metres apart
+        // differ by less than the data can resolve, and picking the closer
+        // would be a guess dressed as a measurement. Refusing costs little:
+        // the sighting count is no longer cleared by a blank check, so once
+        // they separate the answer follows at once.
+        val required = if (dist <= CERTAIN_RIDING_RADIUS) CLOSE_RANGE_MARGIN
+                       else AMBIGUITY_MARGIN
+        if (runnerUp != null && runnerUp - dist < required) {
+            FileLogger.d(TAG, "Nearest ${dist.toInt()} m, runner-up " +
+                "${runnerUp.toInt()} m — gap under ${required.toInt()} m, " +
+                "too close to call")
+            return null
+        }
 
         val name = try {
             gtfsRepo.getRouteById(best.routeId)?.routeShortName
@@ -118,8 +158,14 @@ class VehicleMatcher @Inject constructor(
             gtfsRepo.getHeadsignByTripIdPrefix(best.tripId)
         } catch (e: Exception) { null }
 
+        // Age of the report is logged with every sighting: the pair of
+        // observations required to identify a vehicle must come from
+        // different reports, so how often CGM refresh them sets the pace at
+        // which identification can possibly happen. Guessing at that pace has
+        // already cost one round of changes.
+        val ageSec = if (best.timestamp > 0) nowSec - best.timestamp else -1
         FileLogger.i(TAG, "Riding vehicle: $name → ${headsign ?: "?"} " +
-            "at ${dist.toInt()} m (trip=${best.tripId})")
+            "at ${dist.toInt()} m, report ${ageSec}s old (trip=${best.tripId})")
         return RidingVehicle(
             best.routeId, name, type, best.tripId, headsign, dist, best.timestamp)
     }

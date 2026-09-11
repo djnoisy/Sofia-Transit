@@ -158,6 +158,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         /** Below this we are standing, and no vehicle can be identified. */
         private const val MIN_SPEED_FOR_IDENTIFY = 10.0
+
+        /**
+         * How long a sighting counts towards the pair. Long enough to bridge
+         * the blank checks that dense traffic produces, short enough that two
+         * unrelated moments cannot be mistaken for one continuous ride.
+         */
+        private const val IDENTIFY_SIGHTING_WINDOW_MS = 4 * 60 * 1000L
         /** How often the "weak signal" notice repeats while waiting. */
         private const val WEAK_SIGNAL_NOTICE_MS = 30_000L
 
@@ -560,6 +567,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var identifyVote: String? = null
     /** Its report time, so the confirmation comes from new data. */
     private var identifyVoteStamp = 0L
+    /** When that sighting was made, so stale evidence is not carried over. */
+    private var lastIdentifySightingMs = 0L
 
     /** When the vehicle first got under way, for timing the faster checks. */
     private var movingSinceMs = 0L
@@ -620,6 +629,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         identifyGraceLapsed = false
         identifyVote      = null
         identifyVoteStamp = 0L
+        lastIdentifySightingMs = 0L
         pendingDirectionAnnouncement = false
         stopsMatchTrip    = tripId.isNotBlank()
         partedFromVehicle = false
@@ -677,6 +687,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         identifyGraceLapsed = false
         identifyVote      = null
         identifyVoteStamp = 0L
+        lastIdentifySightingMs = 0L
         pendingDirectionAnnouncement = false
         this.candidates   = candidates
         tripId            = ""
@@ -998,6 +1009,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         identifyGraceLapsed = false
         identifyVote = null
         identifyVoteStamp = 0L
+        lastIdentifySightingMs = 0L
         pendingDirectionAnnouncement = false
         selectedRouteId = ""
         tripId = ""
@@ -1452,9 +1464,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val seen = vehicleMatcher.findRidingVehicle(lastLat, lastLon, mps)
 
         if (seen == null) {
-            identifyVote = null
-            // Losing sight of it is not evidence of anything by itself; the
-            // parting test below decides whether we are still travelling.
+            // The count is NOT cleared here.
+            //
+            // A check that cannot name a vehicle has learnt nothing; treating
+            // it as a contradiction is what made identification fail
+            // altogether on one ride. The bus was logged at 0 m three times
+            // over five minutes, and each intervening blank check reset the
+            // count, so a second consecutive sighting never came and the app
+            // announced the wrong line for the whole journey.
             checkParted()
             return
         }
@@ -1463,7 +1480,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // passing the other way is beside us for one instant only, so a
         // single snapshot can name the wrong one; the feed is cached, so the
         // second reading must carry a later report time to count.
+        //
+        // They need not be consecutive, only close enough in time to describe
+        // the same stretch of the journey — blank checks in between mean
+        // nothing either way.
+        val now = System.currentTimeMillis()
+        val expired = identifyVote != null &&
+            now - lastIdentifySightingMs > IDENTIFY_SIGHTING_WINDOW_MS
+        if (expired) {
+            FileLogger.d(TAG, "Earlier sighting expired; starting over")
+            identifyVote = null
+        }
+        lastIdentifySightingMs = now
+
         if (identifyVote != seen.tripId || identifyVoteStamp == seen.timestamp) {
+            if (identifyVote != seen.tripId) {
+                FileLogger.d(TAG, "Sighting 1 of 2: ${seen.routeShortName} " +
+                    "at ${seen.distanceMetres.toInt()} m")
+            }
             identifyVote = seen.tripId
             identifyVoteStamp = seen.timestamp
             return
