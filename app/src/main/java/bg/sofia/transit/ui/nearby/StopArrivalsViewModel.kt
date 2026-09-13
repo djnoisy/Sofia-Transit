@@ -9,6 +9,7 @@ import bg.sofia.transit.data.repository.RealtimeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -39,6 +40,20 @@ class StopArrivalsViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
+                // Wait for any import in progress before reading.
+                //
+                // An import empties the tables and refills them, so a read
+                // that lands in the middle finds nothing where it expects a
+                // line's number or a stop's name — and the board then shows
+                // the internal identifier instead, "A220" in place of bus 184.
+                // The Stops list already waited on this; the arrivals board
+                // did not, which is why the fault appeared only there and only
+                // while data was being refreshed.
+                if (!gtfsRepo.dataReady.value) {
+                    FileLogger.i(TAG, "Import in progress — waiting before reading")
+                    gtfsRepo.dataReady.first { it }
+                }
+
                 val arrivals = gtfsRepo.getArrivalsForStopCode(
                     stopCode = stopCode,
                     primaryStopId = stopId,

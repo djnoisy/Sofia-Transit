@@ -21,6 +21,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -232,6 +233,11 @@ class JourneyViewModel @Inject constructor(
                 // sector filtering, which the Stops tab does not do either.
                 // The only addition is the radius: a line whose stop is half a
                 // kilometre away is not one you are about to board.
+                // Not read while an import is replacing the tables: names and
+                // numbers would come back missing and identifiers would reach
+                // the screen in their place.
+                if (!gtfsRepo.dataReady.value) gtfsRepo.dataReady.first { it }
+
                 val stopInfo = gtfsRepo.getNearestStops(lat, lon, limit = MAX_STOPS)
                     .map { stop ->
                         stop to LocationHelper.distanceMetres(

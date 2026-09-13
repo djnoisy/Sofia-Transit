@@ -9,6 +9,7 @@ import bg.sofia.transit.data.db.entity.Trip
 import bg.sofia.transit.data.repository.GtfsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -56,6 +57,11 @@ class LinesViewModel @Inject constructor(
 
     fun loadRoutes() {
         viewModelScope.launch {
+            // An import empties the tables before refilling them, so a read
+            // that lands mid-way returns nothing and the screen shows
+            // identifiers where names belong.
+            if (!repo.dataReady.value) repo.dataReady.first { it }
+
             _routeSubtitles.value = repo.getRouteSubtitles()
             _trolleyRouteIds.value = repo.getTrolleyRouteIdsSet()
             repo.getAllRoutes().collect { routes ->

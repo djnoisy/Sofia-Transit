@@ -159,12 +159,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /** Below this we are standing, and no vehicle can be identified. */
         private const val MIN_SPEED_FOR_IDENTIFY = 10.0
 
-        /**
-         * How long a sighting counts towards the pair. Long enough to bridge
-         * the blank checks that dense traffic produces, short enough that two
-         * unrelated moments cannot be mistaken for one continuous ride.
-         */
-        private const val IDENTIFY_SIGHTING_WINDOW_MS = 4 * 60 * 1000L
+
         /** How often the "weak signal" notice repeats while waiting. */
         private const val WEAK_SIGNAL_NOTICE_MS = 30_000L
 
@@ -559,16 +554,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var selectedRouteId = ""
     /** True once a vehicle has been identified and adopted. */
     private var identified = false
+    /** Candidate seen while another vehicle was also in range. */
+    private var contestedVote: String? = null
+    private var contestedStamp = 0L
     /** Logged once when the wait for identification is given up. */
     private var identifyGraceLapsed = false
-    /** A direction settled by displacement, waiting to be spoken. */
-    private var pendingDirectionAnnouncement = false
-    /** Trip named by the previous observation, which the next must repeat. */
-    private var identifyVote: String? = null
-    /** Its report time, so the confirmation comes from new data. */
-    private var identifyVoteStamp = 0L
-    /** When that sighting was made, so stale evidence is not carried over. */
-    private var lastIdentifySightingMs = 0L
 
     /** When the vehicle first got under way, for timing the faster checks. */
     private var movingSinceMs = 0L
@@ -627,10 +617,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         selectedRouteId   = routeId
         identified        = false
         identifyGraceLapsed = false
-        identifyVote      = null
-        identifyVoteStamp = 0L
-        lastIdentifySightingMs = 0L
-        pendingDirectionAnnouncement = false
+        contestedVote     = null
+        contestedStamp    = 0L
         stopsMatchTrip    = tripId.isNotBlank()
         partedFromVehicle = false
         movingSinceMs     = 0L
@@ -685,10 +673,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         selectedRouteId   = routeId
         identified        = false
         identifyGraceLapsed = false
-        identifyVote      = null
-        identifyVoteStamp = 0L
-        lastIdentifySightingMs = 0L
-        pendingDirectionAnnouncement = false
+        contestedVote     = null
+        contestedStamp    = 0L
         this.candidates   = candidates
         tripId            = ""
         stopsMatchTrip    = false
@@ -845,14 +831,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         FileLogger.i(TAG, "Direction resolved after ${moved.toInt()} m " +
             "at ${kmh.toInt()} km/h: ${chosen.headsign}")
-        // Not spoken yet if a vehicle may still be identified: that would
-        // name a direction on a line the passenger might not be on, and the
-        // identification, when it lands, states both at once.
-        if (identified || identifyGraceLapsed) {
-            announce("Посока, ${chosen.headsign}.")
-        } else {
-            pendingDirectionAnnouncement = true
-        }
+        // Spoken at once. It used to wait until identification had been given
+        // up, so as not to name a direction on a line that might turn out to
+        // be the wrong one — but choosing the wrong line is rare, while the
+        // silence was paid for on every journey. Should the line prove wrong,
+        // the switch says so plainly a moment later.
+        announce("Посока, ${chosen.headsign}.")
         startVehicleTracking()
         return true
     }
@@ -1007,10 +991,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         stopsMatchTrip = false
         identified = false
         identifyGraceLapsed = false
-        identifyVote = null
-        identifyVoteStamp = 0L
-        lastIdentifySightingMs = 0L
-        pendingDirectionAnnouncement = false
+        contestedVote = null
+        contestedStamp = 0L
         selectedRouteId = ""
         tripId = ""
         routeId = ""
@@ -1094,10 +1076,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 identifyGraceLapsed = true
                 FileLogger.i(TAG, "No vehicle identified within grace period; " +
                     "continuing on the chosen line")
-                if (pendingDirectionAnnouncement) {
-                    pendingDirectionAnnouncement = false
-                    announce("Посока, $headsign.")
-                }
             }
         }
 
@@ -1454,57 +1432,77 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private suspend fun checkVehicle() {
         if (lastLat == 0.0 && lastLon == 0.0) return
 
-        // Only while under way. Standing at a stop, the vehicle beside us is
-        // as likely to be one we are not boarding — or one going the other
-        // way — as the one we will ride.
-        val kmh = recentSpeedKmh()
-        if (kmh == null || kmh < MIN_SPEED_FOR_IDENTIFY) return
+        // Nothing is checked before the journey is under way: at the stop,
+        // vehicles standing beside us prove nothing, and polling for twenty
+        // minutes while waiting would spend data for no purpose.
+        if (movingSinceMs == 0L) return
+
+        // Parting is tested FIRST and regardless of speed.
+        //
+        // It used to sit behind the speed condition below, so once the
+        // passenger got off and walked away — a few kilometres an hour — every
+        // check returned before reaching it. On one ride the app went on
+        // believing the journey continued for thirteen minutes, until the
+        // inactivity timer finally stopped it. Walking is exactly when this
+        // test matters most.
+        checkParted()
+
+        val kmh = recentSpeedKmh() ?: 0.0
         val mps = kmh / 3.6
+        val underWay = kmh >= MIN_SPEED_FOR_IDENTIFY
 
         val seen = vehicleMatcher.findRidingVehicle(lastLat, lastLon, mps)
 
-        if (seen == null) {
-            // The count is NOT cleared here.
-            //
-            // A check that cannot name a vehicle has learnt nothing; treating
-            // it as a contradiction is what made identification fail
-            // altogether on one ride. The bus was logged at 0 m three times
-            // over five minutes, and each intervening blank check reset the
-            // count, so a second consecutive sighting never came and the app
-            // announced the wrong line for the whole journey.
-            checkParted()
-            return
-        }
+        // Nothing identifiable: either no vehicle in range, or two of them.
+        // Neither changes what we already believe — the next check will say
+        // more, once the passing vehicle has gone or the pair has separated.
+        if (seen == null) return
 
-        // Two agreeing observations, from genuinely fresh data. A vehicle
-        // passing the other way is beside us for one instant only, so a
-        // single snapshot can name the wrong one; the feed is cached, so the
-        // second reading must carry a later report time to count.
+        // No second opinion is sought.
         //
-        // They need not be consecutive, only close enough in time to describe
-        // the same stretch of the journey — blank checks in between mean
-        // nothing either way.
-        val now = System.currentTimeMillis()
-        val expired = identifyVote != null &&
-            now - lastIdentifySightingMs > IDENTIFY_SIGHTING_WINDOW_MS
-        if (expired) {
-            FileLogger.d(TAG, "Earlier sighting expired; starting over")
-            identifyVote = null
-        }
-        lastIdentifySightingMs = now
-
-        if (identifyVote != seen.tripId || identifyVoteStamp == seen.timestamp) {
-            if (identifyVote != seen.tripId) {
-                FileLogger.d(TAG, "Sighting 1 of 2: ${seen.routeShortName} " +
-                    "at ${seen.distanceMetres.toInt()} m")
-            }
-            identifyVote = seen.tripId
-            identifyVoteStamp = seen.timestamp
+        // The pair of sightings existed to rule out a vehicle passing the
+        // other way — but such a vehicle is never alone beside us: ours is
+        // there too, and the matcher already refuses to answer whenever two
+        // are in range. Asking for a confirmation as well guarded against
+        // nothing and cost up to ninety seconds on the rides measured, during
+        // which the app announced a line the passenger was not on.
+        //
+        // At a standstill an unfamiliar vehicle is still not accepted: it may
+        // simply have stopped at the same stop, and we may not have boarded
+        // it. One already being followed is confirmed regardless, since a
+        // halt is part of the ride.
+        if (!underWay && seen.tripId != tripId) {
+            FileLogger.d(TAG, "Stationary — not adopting an unfamiliar vehicle")
             return
         }
 
-        if (seen.tripId != tripId) adoptVehicle(seen)
-        else identified = true
+        // Already following it: nothing to decide.
+        if (seen.tripId == tripId) {
+            identified = true
+            contestedVote = null
+            partedFromVehicle = false
+            return
+        }
+
+        // With another vehicle in range, the same one must be nearest twice,
+        // on separate reports, before it is adopted. Two buses nose to tail
+        // are told apart by which of them stays at arm's length: ours reads
+        // the same tiny distance each time, the other drifts.
+        if (seen.contested) {
+            if (contestedVote != seen.tripId || contestedStamp == seen.timestamp) {
+                if (contestedVote != seen.tripId) {
+                    FileLogger.d(TAG, "Contested candidate ${seen.routeShortName} " +
+                        "at ${seen.distanceMetres.toInt()} m — awaiting a second reading")
+                }
+                contestedVote = seen.tripId
+                contestedStamp = seen.timestamp
+                return
+            }
+            FileLogger.i(TAG, "Contested candidate confirmed twice")
+        }
+
+        contestedVote = null
+        adoptVehicle(seen)
 
         partedFromVehicle = false
     }
@@ -1556,7 +1554,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         stopsMatchTrip = true
         routeLabel     = "$word ${v.routeShortName} → $hs"
         identified     = true
-        pendingDirectionAnnouncement = false
 
         // Any pending direction work belongs to the discarded assumption.
         candidates = emptyList()

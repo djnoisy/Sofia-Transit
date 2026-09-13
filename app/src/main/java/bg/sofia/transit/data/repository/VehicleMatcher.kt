@@ -37,30 +37,21 @@ class VehicleMatcher @Inject constructor(
          */
         private const val MAX_POSITION_AGE_SEC = 90L
 
-        /**
-         * The runner-up must be at least this much farther away before we
-         * treat a match as certain. Two vehicles of one line often stand near
-         * each other; without a margin we would flip between them.
-         */
-        private const val AMBIGUITY_MARGIN = 40.0
 
-        /**
-         * Within this — after correcting for stale reports — the vehicle is
-         * taken to be the one we are in whatever else is about. Nothing but
-         * the vehicle carrying us reads a couple of metres away fix after fix.
-         */
-        private const val CERTAIN_RIDING_RADIUS = 15.0
 
-        /** Gap required when the nearest vehicle is already within that radius. */
-        private const val CLOSE_RANGE_MARGIN = 10.0
 
         /**
          * Within this — after correcting for how stale the report is — a
-         * vehicle is close enough to be the one we are sitting in. The claim
-         * being made is that the passenger is aboard it, so the figure is
-         * deliberately tight.
+         * vehicle is taken to be the one we are in, provided it is the only
+         * one there.
+         *
+         * Narrowed from 60 m once a lone candidate became sufficient on its
+         * own: a wide radius admits vehicles from the next carriageway, and
+         * every extra one inside it is another reason to wait. Measured
+         * sightings of the vehicle actually carrying the passenger read 0–1 m,
+         * so 30 leaves ample room for a poor fix without inviting company.
          */
-        private const val RIDING_WITH_RADIUS = 60.0
+        private const val RIDING_WITH_RADIUS = 30.0
 
 
     }
@@ -76,8 +67,12 @@ class VehicleMatcher @Inject constructor(
         /** Direction, from the trip id; null when the prefix is unknown. */
         val headsign: String?,
         val distanceMetres: Double,
+        /** True when another vehicle was also within range. */
+        val contested: Boolean,
         /** Report time, so callers can insist on a second, fresher reading. */
-        val timestamp: Long
+        val timestamp: Long,
+        /** How old that report was when taken, in seconds; -1 if unknown. */
+        val reportAgeSec: Long
     )
 
     /**
@@ -126,26 +121,24 @@ class VehicleMatcher @Inject constructor(
         }
         val runnerUp = ranked.getOrNull(1)?.second
 
-        // How large a gap to the runner-up is required depends on how close
-        // the nearest one is.
+        // A lone candidate is reported as certain; company makes it
+        // contested, and the caller then wants to see the same one twice.
         //
-        // A vehicle essentially on top of us needs only a small gap: in dense
-        // traffic another is often within forty metres, and insisting on that
-        // margin discarded readings of the very bus the passenger sat in —
-        // logged at 0 m — over and over, so the line was never identified.
+        // Alone, there is nothing it could be confused with: a vehicle
+        // passing the other way would itself be a second candidate. But
+        // refusing to answer at all while two are in range proved too blunt.
+        // In heavy traffic two buses run nose to tail for minutes, and the
+        // identification would wait the whole time — ending exactly when the
+        // routes diverge and it is too late to act on.
         //
-        // But the gap is never waived. Two vehicles a couple of metres apart
-        // differ by less than the data can resolve, and picking the closer
-        // would be a guess dressed as a measurement. Refusing costs little:
-        // the sighting count is no longer cleared by a blank check, so once
-        // they separate the answer follows at once.
-        val required = if (dist <= CERTAIN_RIDING_RADIUS) CLOSE_RANGE_MARGIN
-                       else AMBIGUITY_MARGIN
-        if (runnerUp != null && runnerUp - dist < required) {
-            FileLogger.d(TAG, "Nearest ${dist.toInt()} m, runner-up " +
-                "${runnerUp.toInt()} m — gap under ${required.toInt()} m, " +
-                "too close to call")
-            return null
+        // Reported as contested, the nearest is still a real signal: the
+        // vehicle carrying the passenger reads a metre or so away every time,
+        // while one merely alongside drifts by a few metres as the two jostle.
+        // Seeing the same one twice tells them apart.
+        val contested = runnerUp != null
+        if (contested) {
+            FileLogger.d(TAG, "Two in range (${dist.toInt()} m and " +
+                "${runnerUp!!.toInt()} m) — nearest reported as contested")
         }
 
         val name = try {
@@ -165,9 +158,11 @@ class VehicleMatcher @Inject constructor(
         // already cost one round of changes.
         val ageSec = if (best.timestamp > 0) nowSec - best.timestamp else -1
         FileLogger.i(TAG, "Riding vehicle: $name → ${headsign ?: "?"} " +
-            "at ${dist.toInt()} m, report ${ageSec}s old (trip=${best.tripId})")
+            "at ${dist.toInt()} m, report ${ageSec}s old" +
+            (if (contested) ", contested" else "") + " (trip=${best.tripId})")
         return RidingVehicle(
-            best.routeId, name, type, best.tripId, headsign, dist, best.timestamp)
+            best.routeId, name, type, best.tripId, headsign, dist,
+            contested, best.timestamp, ageSec)
     }
 
 
