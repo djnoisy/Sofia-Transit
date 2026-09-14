@@ -159,6 +159,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /** Below this we are standing, and no vehicle can be identified. */
         private const val MIN_SPEED_FOR_IDENTIFY = 10.0
 
+        /** Older than this, our own position cannot be compared with a moving
+         *  vehicle's. Normal operation delivers a fix every second. */
+        private const val MAX_FIX_AGE_FOR_DECISIONS_MS = 4_000L
+        /** At or below this many fixes a minute, positioning is degraded. */
+        private const val MIN_CADENCE_FOR_DECISIONS = 25
+        /** Thirty-second windows averaged; two of them make a minute. */
+        private const val CADENCE_WINDOWS = 2
+        /** How often the degraded-positioning notice may repeat. */
+        private const val DEGRADED_NOTICE_INTERVAL_MS = 60_000L
+
 
         /** How often the "weak signal" notice repeats while waiting. */
         private const val WEAK_SIGNAL_NOTICE_MS = 30_000L
@@ -307,6 +317,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * state. Replay 0: an event missed while the app is backgrounded is
          * not re-fired when it returns.
          */
+        /**
+         * Trip whose adoption was last spoken aloud.
+         *
+         * Deliberately here rather than on the instance: the point is to
+         * survive the service being destroyed and recreated, which is exactly
+         * what power saving did — three identical "проследяването се
+         * превключва" for one bus, because each new instance started afresh.
+         * Cleared when a journey ends.
+         */
+        private var lastAnnouncedTripId: String? = null
+
         private val _events = MutableSharedFlow<JourneyEvent>(extraBufferCapacity = 4)
         val events: SharedFlow<JourneyEvent> = _events
 
@@ -485,6 +506,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var lastWeakSignalNoticeMs = 0L
     /** Accuracy of the most recent fix, metres. */
     private var lastAccuracy: Float? = null
+    /**
+     * Fixes per minute for the last two completed windows — a minute of
+     * history, kept as two numbers rather than a record of every fix.
+     */
+    private val cadenceHistory = ArrayDeque<Int>()
+    /** When the degraded-positioning notice was last spoken. */
+    private var lastDegradedNoticeMs = 0L
 
     /** Chosen alighting stop; null until the user picks one. */
     private var destinationIdx: Int? = null
@@ -640,6 +668,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         maxGapMs = 0L
         lastCadenceLogMs = 0L
         speedSamples.clear()
+        cadenceHistory.clear()
+        lastDegradedNoticeMs = 0L
         snapWaitStartedMs = 0L
         lastWeakSignalNoticeMs = 0L
         lastAccuracy = null
@@ -991,6 +1021,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         stopsMatchTrip = false
         identified = false
         identifyGraceLapsed = false
+        lastAnnouncedTripId = null
         contestedVote = null
         contestedStamp = 0L
         selectedRouteId = ""
@@ -1182,14 +1213,21 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // ── Inside a stop's radius → we are AT that stop ──────────────
             nearestDist <= ARRIVAL_RADIUS -> {
                 if (!atStop || nearest != currentIdx) {
-                    // If we jumped over stops the GPS never saw, announce the
-                    // skipped ones the same way as a normal stop — as agreed,
-                    // a passed stop is announced like a stopped-at stop. If we
-                    // were already AT currentIdx, it has been announced, so
-                    // skipped ones start after it.
-                    val firstSkipped = if (atStop) currentIdx + 1 else currentIdx
-                    for (i in firstSkipped until nearest) {
-                        announce("Спирка, ${orderedStops[i].stopName}.")
+                    // Stops the positioning never saw are passed over in
+                    // silence, not recited.
+                    //
+                    // They were announced once, on the reasoning that a stop
+                    // gone by deserves saying. But they only ever arise when
+                    // fixes have been sparse, which is precisely when the
+                    // announcement is late — sometimes by minutes, and often
+                    // triggered by the screen being turned on rather than by
+                    // the bus arriving anywhere. Reciting three stop names at
+                    // once tells a passenger who cannot look out of the window
+                    // nothing they can act on, and invites them to act on it
+                    // anyway. Only where we are now is spoken.
+                    val skipped = nearest - (if (atStop) currentIdx + 1 else currentIdx)
+                    if (skipped > 0) {
+                        FileLogger.i(TAG, "Passed $skipped stop(s) unseen — not announcing them")
                     }
                     currentIdx = nearest
                     atStop = true
@@ -1241,12 +1279,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             !atStop && nearest > currentIdx
                     && nearestDist <= CATCHUP_MAX_DISTANCE
                     && nearestDist < distTo(loc, currentIdx) - 30.0 -> {
-                // The GPS gap swallowed the stop entirely (never inside the
-                // radius). Announce the passed stop(s) as agreed, then
-                // continue toward the nearest upcoming one.
-                for (i in currentIdx until nearest) {
-                    announce("Спирка, ${orderedStops[i].stopName}.")
-                }
+                // The gap in positioning swallowed the stop entirely. The
+                // tracker moves on to where we actually are; the stops behind
+                // us are not recited, for the reasons above.
+                FileLogger.i(TAG, "Caught up past ${nearest - currentIdx} " +
+                    "stop(s) — not announcing them")
                 currentIdx = nearest
                 approachAnnounced = false
                 announce("Следваща спирка, ${orderedStops[nearest].stopName}.")
@@ -1437,6 +1474,27 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // minutes while waiting would spend data for no purpose.
         if (movingSinceMs == 0L) return
 
+        // Nor is anything decided while our own position is unreliable.
+        //
+        // Every judgement here rests on where WE are. With the phone in a
+        // power-saving mode the fixes dropped from sixty a minute to ten,
+        // with gaps of up to twenty-seven seconds — at 40 km/h that is a
+        // position two hundred metres out of date. The consequences were all
+        // of a piece: the vehicle being ridden fell out of range and a
+        // passing one was adopted instead, and later the same staleness put
+        // the tracked vehicle "484 m away" and ended the journey with
+        // "Изглежда слязохте" while the passenger was still aboard.
+        //
+        // Announcements are left running: they compare our position with
+        // stops rather than with another moving object, and they held up
+        // perfectly well at ten fixes a minute.
+        if (positionUnreliable()) {
+            FileLogger.d(TAG, "Degraded positioning — no vehicle decisions")
+            noticeDegradedPositioning()
+            return
+        }
+        // Recovered: the next bad spell starts its own count.
+
         // Parting is tested FIRST and regardless of speed.
         //
         // It used to sit behind the speed condition below, so once the
@@ -1574,7 +1632,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
         partedFromVehicle = false
 
+        // The same switch is not announced twice.
+        //
+        // Under power saving the system killed and restarted the service
+        // repeatedly; each restart began again from the line the passenger
+        // had chosen, re-identified the same vehicle, and said "проследяването
+        // се превключва" all over again — three times in as many minutes for
+        // one and the same bus. Remembering the last trip announced makes the
+        // repetition silent while leaving a genuine change audible.
+        val alreadyAnnounced = lastAnnouncedTripId == v.tripId
+        lastAnnouncedTripId = v.tripId
+
         when {
+            alreadyAnnounced -> FileLogger.d(TAG, "Same vehicle as last announced — silent")
             differentLine -> announce(
                 "Изглежда пътувате с ${word.lowercase()} ${v.routeShortName}, " +
                 "посока $hs. Проследяването на спирките се превключва.")
@@ -1585,6 +1655,50 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         publishLastKnown()
         restartEtaPolling()
         return true
+    }
+
+    /**
+     * True when our own position is too sparse or too old to compare against
+     * anything that is itself moving.
+     */
+    private fun positionUnreliable(): Boolean {
+        val ageMs = if (lastFixMs == 0L) Long.MAX_VALUE
+                    else System.currentTimeMillis() - lastFixMs
+        if (ageMs > MAX_FIX_AGE_FOR_DECISIONS_MS) return true
+        // A rate this low means the gaps between fixes are long even when the
+        // latest one happens to be recent.
+        val recent = cadenceHistory.lastOrNull() ?: return false
+        return recent <= MIN_CADENCE_FOR_DECISIONS
+    }
+
+    /**
+     * Says that positioning has degraded — but only once it has stayed that
+     * way for a while, and then briefly.
+     *
+     * Signal dips for a few seconds constantly and announcing each one would
+     * be noise; what deserves saying is a spell long enough to explain why
+     * the app has gone quiet. The wording is short on purpose, since it
+     * repeats: a long sentence wears out at the second hearing.
+     */
+    private fun noticeDegradedPositioning() {
+        // Judged on the average over the last minute, not on how long the
+        // present dip has lasted.
+        //
+        // Counting an unbroken spell missed the case that matters as much:
+        // a run of short dips, none of them long enough to mention, which
+        // between them leave the tracker unable to decide for half the
+        // journey. An average catches both — ten brief outages pull it down
+        // exactly as far as one long one.
+        if (cadenceHistory.size < CADENCE_WINDOWS) return
+        val average = cadenceHistory.average()
+        if (average > MIN_CADENCE_FOR_DECISIONS) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastDegradedNoticeMs < DEGRADED_NOTICE_INTERVAL_MS) return
+        lastDegradedNoticeMs = now
+        FileLogger.i(TAG, "Positioning degraded: ${average.toInt()} fixes/min " +
+            "over the last minute")
+        announce("Слаб сигнал за местоположение.")
     }
 
     /**
@@ -1799,6 +1913,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (now - lastCadenceLogMs >= 30_000L) {
             val secs = (now - lastCadenceLogMs) / 1000.0
             val perMin = if (secs > 0) (fixCount / secs) * 60 else 0.0
+            cadenceHistory.addLast(perMin.toInt())
+            while (cadenceHistory.size > CADENCE_WINDOWS) cadenceHistory.removeFirst()
             val spd = recentSpeedKmh()
                 ?.let { String.format(java.util.Locale.US, ", speed %.0f km/h", it) }
                 ?: ""
