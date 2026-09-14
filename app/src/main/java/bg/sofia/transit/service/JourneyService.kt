@@ -1576,14 +1576,57 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private suspend fun adoptVehicle(
         v: bg.sofia.transit.data.repository.VehicleMatcher.RidingVehicle
     ): Boolean {
-        val hs = v.headsign ?: return false
-        val stops = try {
-            gtfsRepo.getRemainingStops(v.tripId, fromSequence = 0)
+        // The vehicle's own trip is preferred, but it is hardly ever in the
+        // static data.
+        //
+        // CGM issue different trip ids in the live feed from the ones in the
+        // timetable: of every vehicle checked against the bundled data, not
+        // one full id matched, though the prefixes did — A91-A967 has 111
+        // trips published, A84-A2228 has 133, yet the exact ids the vehicles
+        // report appear nowhere. So a lookup by full id returns nothing,
+        // which is why adoption failed silently every time and no vehicle was
+        // ever identified through this path.
+        //
+        // The line itself is never in doubt; it comes from route_id. The
+        // route's own stop order therefore stands in for the missing one,
+        // exactly as it does when a journey starts with no vehicle at all.
+        var hs = v.headsign
+        var stops = try {
+            if (v.tripId.isNotBlank())
+                gtfsRepo.getRemainingStops(v.tripId, fromSequence = 0)
+            else emptyList()
         } catch (e: Exception) {
             FileLogger.w(TAG, "adoptVehicle: stops unavailable: ${e.message}")
-            return false
+            emptyList()
         }
-        if (stops.isEmpty()) return false
+
+        if (stops.isEmpty() || hs == null) {
+            val directions = try {
+                gtfsRepo.getDirectionHeadsigns(v.routeId)
+            } catch (e: Exception) { emptyList() }
+
+            // Which way it is going has to come from somewhere. The direction
+            // already being followed is used when it is one of this line's,
+            // and otherwise nothing is assumed — announcing stops in the wrong
+            // order would be worse than not adopting at all.
+            val fallbackHs = hs
+                ?: directions.firstOrNull { it.equals(headsign, ignoreCase = true) }
+                ?: return false
+
+            val fallbackStops = try {
+                gtfsRepo.getStopsForRouteDirection(v.routeId, fallbackHs)
+            } catch (e: Exception) { emptyList() }
+            if (fallbackStops.isEmpty()) {
+                FileLogger.w(TAG, "Cannot adopt ${v.routeShortName}: no stops for " +
+                    "trip ${v.tripId} nor for route towards $fallbackHs")
+                return false
+            }
+
+            FileLogger.i(TAG, "Trip ${v.tripId} not in static data — " +
+                "using route ${v.routeShortName} towards $fallbackHs instead")
+            hs = fallbackHs
+            stops = fallbackStops
+        }
 
         val latLons = stops.map { sw ->
             val st = try { gtfsRepo.getStopById(sw.stopId) } catch (e: Exception) { null }
@@ -1609,7 +1652,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         tripId         = v.tripId
         orderedStops   = stops
         stopLatLon     = latLons
-        stopsMatchTrip = true
+        // Only true when the stops really came from this vehicle's own trip;
+        // a stand-in order has other times attached to it.
+        stopsMatchTrip = v.headsign != null
         routeLabel     = "$word ${v.routeShortName} → $hs"
         identified     = true
 
