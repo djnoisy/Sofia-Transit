@@ -54,6 +54,7 @@ class VehicleMatcher @Inject constructor(
         private const val RIDING_WITH_RADIUS = 30.0
 
 
+
     }
 
 
@@ -104,6 +105,23 @@ class VehicleMatcher @Inject constructor(
             .map { v ->
                 val age = if (v.timestamp > 0) (nowSec - v.timestamp).coerceAtLeast(0) else 0
                 val raw = LocationHelper.distanceMetres(userLat, userLon, v.lat, v.lon)
+                // No ceiling on the allowance.
+                //
+                // One was tried and removed. Any figure chosen for it — in
+                // metres or in seconds — is a guess at what happened during
+                // the interval the data does not cover, and a guess cannot be
+                // made accurate by tuning. The error here does not grow with
+                // the age of the report as such, but with how far the other
+                // vehicle's movement may have differed from ours: over three
+                // seconds nothing can differ much, over thirty a bus in a
+                // clear lane may cover three hundred metres while we crawl
+                // fifty.
+                //
+                // What guards against adopting the wrong vehicle is not a
+                // better estimate of a single moment but watching how a
+                // candidate behaves — see the confirmation rule in
+                // JourneyService, which asks for the same vehicle twice on
+                // separate reports.
                 v to (raw - userSpeedMps * age).coerceAtLeast(0.0)
             }
             .sortedBy { it.second }

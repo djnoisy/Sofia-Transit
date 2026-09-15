@@ -156,6 +156,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          */
         private const val IDENTIFY_GRACE_MS = 45_000L
 
+        /** How much nearer a new candidate must be to displace the current. */
+        private const val SWITCH_MARGIN = 20.0
+        /** With the current vehicle silent, a candidate must be this close. */
+        private const val TAKEOVER_RADIUS = 10.0
+
         /** Below this we are standing, and no vehicle can be identified. */
         private const val MIN_SPEED_FOR_IDENTIFY = 10.0
 
@@ -582,9 +587,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var selectedRouteId = ""
     /** True once a vehicle has been identified and adopted. */
     private var identified = false
-    /** Candidate seen while another vehicle was also in range. */
-    private var contestedVote: String? = null
-    private var contestedStamp = 0L
+    /** Candidate awaiting its second reading, and the report time of the first. */
+    private var candidateVote: String? = null
+    private var candidateStamp = 0L
     /** Logged once when the wait for identification is given up. */
     private var identifyGraceLapsed = false
 
@@ -645,8 +650,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         selectedRouteId   = routeId
         identified        = false
         identifyGraceLapsed = false
-        contestedVote     = null
-        contestedStamp    = 0L
+        candidateVote     = null
+        candidateStamp    = 0L
         stopsMatchTrip    = tripId.isNotBlank()
         partedFromVehicle = false
         movingSinceMs     = 0L
@@ -703,8 +708,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         selectedRouteId   = routeId
         identified        = false
         identifyGraceLapsed = false
-        contestedVote     = null
-        contestedStamp    = 0L
+        candidateVote     = null
+        candidateStamp    = 0L
         this.candidates   = candidates
         tripId            = ""
         stopsMatchTrip    = false
@@ -1022,8 +1027,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         identified = false
         identifyGraceLapsed = false
         lastAnnouncedTripId = null
-        contestedVote = null
-        contestedStamp = 0L
+        candidateVote = null
+        candidateStamp = 0L
         selectedRouteId = ""
         tripId = ""
         routeId = ""
@@ -1537,29 +1542,75 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // Already following it: nothing to decide.
         if (seen.tripId == tripId) {
             identified = true
-            contestedVote = null
+            candidateVote = null
             partedFromVehicle = false
             return
         }
 
-        // With another vehicle in range, the same one must be nearest twice,
-        // on separate reports, before it is adopted. Two buses nose to tail
-        // are told apart by which of them stays at arm's length: ours reads
-        // the same tiny distance each time, the other drifts.
-        if (seen.contested) {
-            if (contestedVote != seen.tripId || contestedStamp == seen.timestamp) {
-                if (contestedVote != seen.tripId) {
-                    FileLogger.d(TAG, "Contested candidate ${seen.routeShortName} " +
-                        "at ${seen.distanceMetres.toInt()} m — awaiting a second reading")
+        // Confirmation is asked for only where the candidate contradicts what
+        // is already believed.
+        //
+        // A vehicle of the line the passenger chose, seen while nothing has
+        // been identified yet, agrees with everything we think: even if it is
+        // not the exact vehicle they boarded, the line and direction are the
+        // ones already being announced, so nothing they hear can change for
+        // the worse. Taking it at once gives them the arrival time and the
+        // alighting detection immediately.
+        //
+        // Anything else — a different line, or a replacement for a vehicle
+        // already being followed — changes what will be announced, and is
+        // believed only after being seen twice on separate reports. A vehicle
+        // passing the other way is beside us for one reading and gone by the
+        // next; one that reports rarely cannot produce a second, fresher
+        // report at all; two buses running abreast are told apart by which of
+        // them keeps its distance rather than drifting.
+        val agreesWithBelief = !identified && seen.routeId == selectedRouteId
+
+        if (!agreesWithBelief) {
+            if (candidateVote != seen.tripId || candidateStamp == seen.timestamp) {
+                if (candidateVote != seen.tripId) {
+                    FileLogger.d(TAG, "Candidate ${seen.routeShortName} at " +
+                        "${seen.distanceMetres.toInt()} m" +
+                        (if (seen.contested) ", contested" else "") +
+                        " — awaiting a second reading")
                 }
-                contestedVote = seen.tripId
-                contestedStamp = seen.timestamp
+                candidateVote = seen.tripId
+                candidateStamp = seen.timestamp
                 return
             }
-            FileLogger.i(TAG, "Contested candidate confirmed twice")
+            FileLogger.i(TAG, "Candidate confirmed on a second reading")
         }
 
-        contestedVote = null
+        // A vehicle already being followed is not abandoned merely because
+        // another one is in range.
+        //
+        // Applies only once something has been identified, so it cannot get in
+        // the way of the first identification — there is nothing to compare
+        // against then. Afterwards it matters: our own vehicle reports
+        // intermittently, and a gap in its reporting used to be enough for
+        // whatever else happened to be nearby to take its place. Switching now
+        // requires the newcomer to be nearer than the one we are following, by
+        // a margin wide enough not to be scatter.
+        if (identified && tripId.isNotBlank()) {
+            val ours = vehicleMatcher.distanceToTrackedVehicle(tripId, lastLat, lastLon)
+            if (ours != null && ours - seen.distanceMetres < SWITCH_MARGIN) {
+                FileLogger.d(TAG, "Keeping current vehicle: ours ${ours.toInt()} m, " +
+                    "candidate ${seen.distanceMetres.toInt()} m")
+                return
+            }
+            if (ours == null) {
+                // Not reporting at all. Absence is not evidence that we have
+                // left it, so the candidate must at least be right on top of
+                // us before it is believed.
+                if (seen.distanceMetres > TAKEOVER_RADIUS) {
+                    FileLogger.d(TAG, "Current vehicle silent; candidate at " +
+                        "${seen.distanceMetres.toInt()} m is not close enough to take over")
+                    return
+                }
+            }
+        }
+
+        candidateVote = null
         adoptVehicle(seen)
 
         partedFromVehicle = false
