@@ -148,13 +148,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * identified. If it cannot be settled in that time, continuing serves
          * no purpose: nothing can be announced and the GPS runs for nothing.
          */
-        /**
-         * How long after departure to wait for a vehicle before falling back
-         * to the line the passenger chose. Long enough for two readings of a
-         * feed that refreshes every ten to thirty seconds, short enough not
-         * to swallow a stop.
-         */
-        private const val IDENTIFY_GRACE_MS = 45_000L
 
         /** How much nearer a new candidate must be to displace the current. */
         private const val SWITCH_MARGIN = 20.0
@@ -393,12 +386,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             val speedKmh: Int? = null,
             /** True while waiting for a fix good enough to attach to a stop. */
             val awaitingAccurateFix: Boolean = false,
-            /**
-             * True while the vehicle has not been identified yet and nothing
-             * is being announced. The screen says so rather than showing a
-             * route that may turn out not to be the one being travelled.
-             */
-            val lineInDoubt: Boolean = false,
             /** Where [destinationEtaEpoch] came from. The UI must label a
              *  timetable-derived estimate differently from a live one — a
              *  scheduled time carries no traffic information and would
@@ -590,8 +577,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     /** Candidate awaiting its second reading, and the report time of the first. */
     private var candidateVote: String? = null
     private var candidateStamp = 0L
-    /** Logged once when the wait for identification is given up. */
-    private var identifyGraceLapsed = false
+    /** Logged once, when announcements begin on the passenger's own choice. */
+    private var proceedingOnChoiceLogged = false
 
     /** When the vehicle first got under way, for timing the faster checks. */
     private var movingSinceMs = 0L
@@ -644,12 +631,21 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         latLons: List<Pair<Double, Double>>,
         boardingStopIdx: Int
     ) {
+        // Guarded here rather than trusted to the caller: with an empty list
+        // the boarding index below is coerced into an empty range, which
+        // throws, and a crash in the tracking service is the worst possible
+        // way to learn that a route had no stops.
+        if (stops.isEmpty()) {
+            FileLogger.w(TAG, "beginJourney called with no stops — ignoring")
+            return
+        }
+
         this.tripId       = tripId
         this.routeId      = routeId
         this.headsign     = headsign
         selectedRouteId   = routeId
         identified        = false
-        identifyGraceLapsed = false
+        proceedingOnChoiceLogged = false
         candidateVote     = null
         candidateStamp    = 0L
         stopsMatchTrip    = tripId.isNotBlank()
@@ -663,6 +659,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         atStop            = false
         approachAnnounced = false
         awaitingFirstFix  = true
+        // Cleared here as well as in endJourney: a new journey must not
+        // inherit anything from the last one, and endJourney is not
+        // guaranteed to have run — the service can be recreated after the
+        // system kills it, or a journey started while another is active.
+        candidates        = emptyList()
+        anchorIdx         = emptyList()
+        destinationEtaEpoch = null
+        etaSource         = EtaSource.NONE
+        lastAnnouncedTripId = null
         destinationIdx    = null
         alightWarningsFired.clear()
         alightAnnounced   = false
@@ -707,10 +712,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         this.routeId      = routeId
         selectedRouteId   = routeId
         identified        = false
-        identifyGraceLapsed = false
+        proceedingOnChoiceLogged = false
         candidateVote     = null
         candidateStamp    = 0L
         this.candidates   = candidates
+        anchorIdx         = emptyList()
+        destinationEtaEpoch = null
+        etaSource         = EtaSource.NONE
+        lastAnnouncedTripId = null
         tripId            = ""
         stopsMatchTrip    = false
         headsign          = ""
@@ -743,7 +752,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // Identification runs from the outset now, not only once a direction
         // has been settled: it is the thing that settles the direction.
         startVehicleTracking()
-        announce("Изчаква се определяне на посоката.")
+        announce("Следене на пътуването започна. Посоката се определя.")
     }
 
     /**
@@ -1025,7 +1034,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         anchorIdx = emptyList()
         stopsMatchTrip = false
         identified = false
-        identifyGraceLapsed = false
+        proceedingOnChoiceLogged = false
         lastAnnouncedTripId = null
         candidateVote = null
         candidateStamp = 0L
@@ -1067,56 +1076,44 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastLat = loc.latitude
         lastLon = loc.longitude
 
-        // Nothing is announced until we know what is being followed.
+        // Announcements never wait for the vehicle to be identified.
         //
-        // Until a vehicle is identified, the only stop list available is the
-        // one implied by the passenger's choice — and if that choice was
-        // wrong, every announcement from it names a stop they will never
-        // reach. Waiting a few seconds costs little; a confident wrong
-        // announcement costs trust. This one rule replaces the separate
-        // machinery that used to detect a wrong line and then suspend
-        // announcements after the fact.
+        // Both things are worked out at once and whichever finishes first is
+        // used: the direction from the route's stop order, the vehicle from
+        // the live feed. Holding the announcements until the vehicle was
+        // known made every journey start in silence for the sake of a wrong
+        // line — a rare mistake, and one the switch corrects aloud within a
+        // minute of it happening.
         //
-        // The wait is bounded, and timed from DEPARTURE rather than from the
-        // journey being started, since a vehicle cannot be identified while
-        // standing at a stop. Once it lapses we proceed on the passenger's
-        // choice, which is the best available answer when the feed offers
-        // none — the case of a line that publishes no positions at all.
-        if (!identified) {
-            val movingFor = if (movingSinceMs == 0L) 0L
-                            else System.currentTimeMillis() - movingSinceMs
-            if (movingFor < IDENTIFY_GRACE_MS) {
-                // Same idle rule as below, with the longer limit that applies
-                // before departure — see WAITING_TIMEOUT_MS. Placed here
-                // because this branch is where a journey that never begins
-                // spends its whole life: lastProgressMs still holds the start
-                // time, so the comparison is simply "how long since we began".
-                if (movingSinceMs == 0L &&
-                    System.currentTimeMillis() - lastProgressMs > WAITING_TIMEOUT_MS) {
-                    FileLogger.i(TAG, "Journey never started — ending")
-                    announce("Пътуването не започна. Следенето се прекратява.")
-                    _events.tryEmit(JourneyEvent.RouteEnded)
-                    endJourney()
-                    return
-                }
-
-                // The direction still gets worked out meanwhile — silently.
-                // Holding it back as well would add its thirty seconds on top
-                // of this wait instead of running alongside it, so the two
-                // proceed together and whichever finishes first is used.
-                if (candidates.isNotEmpty()) tryResolveDirection(loc)
-                publish(distance = null)
-                return
-            }
-            if (!identifyGraceLapsed) {
-                identifyGraceLapsed = true
-                FileLogger.i(TAG, "No vehicle identified within grace period; " +
-                    "continuing on the chosen line")
-            }
+        // Choosing the automatic direction says only that the passenger does
+        // not know the termini, not that they are unsure which line they
+        // want; there was never a reason for that choice to cost them the
+        // wait. Which of the two settled first is the app's business, not
+        // theirs.
+        if (!identified && !proceedingOnChoiceLogged && movingSinceMs != 0L) {
+            proceedingOnChoiceLogged = true
+            FileLogger.i(TAG, "Announcing on the chosen line; " +
+                "vehicle identification continues in the background")
         }
 
-        // Direction not settled yet: nothing else can run, because the stop
-        // order it all depends on is not known.
+        // Checked before the direction work below, which returns early while
+        // the direction is unknown — with the two the other way round, a
+        // journey started in automatic mode and never boarded would never
+        // reach this and would run until the battery gave out.
+        if (movingSinceMs == 0L &&
+            System.currentTimeMillis() - lastProgressMs > WAITING_TIMEOUT_MS) {
+            FileLogger.i(TAG, "Journey never started — ending")
+            announce("Пътуването не започна. Следенето се прекратява.")
+            _events.tryEmit(JourneyEvent.RouteEnded)
+            endJourney()
+            return
+        }
+
+
+        // Direction still unknown: nothing else can run, because the order of
+        // the stops — and so which one is "next" — depends on it. Resolved
+        // either from a vehicle, in checkVehicle, or from our own displacement
+        // here; whichever arrives first.
         if (candidates.isNotEmpty()) {
             if (!tryResolveDirection(loc)) {
                 publish(distance = null)
@@ -2103,7 +2100,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             fixAccuracyMetres     = lastAccuracy?.toInt(),
             speedKmh              = recentSpeedKmh()?.toInt(),
             awaitingAccurateFix   = awaitingFirstFix && orderedStops.isNotEmpty(),
-            lineInDoubt           = !identified && !identifyGraceLapsed,
             destinationIdx        = destinationIdx,
             destinationEtaEpoch   = destinationEtaEpoch,
             etaSource             = etaSource
