@@ -515,15 +515,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     /** Timestamp of the last forward progress, for the inactivity timeout. */
     private var lastProgressMs = System.currentTimeMillis()
 
-    /**
-     * True once the journey has actually advanced past its first stop.
-     *
-     * Until then the passenger is still waiting to board, and standing beside
-     * one stop looks exactly like the "no progress" the inactivity timer
-     * watches for. Without this the timer would end a journey started ten
-     * minutes before the bus arrives — precisely when the user needs it.
-     */
-    private var hasStartedMoving = false
 
     /** trip_id being ridden — needed to query its real-time predictions. */
     private var tripId: String = ""
@@ -651,7 +642,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         stopsMatchTrip    = tripId.isNotBlank()
         partedFromVehicle = false
         movingSinceMs     = 0L
-        hasStartedMoving  = false
         routeLabel        = label
         orderedStops      = stops
         stopLatLon        = latLons
@@ -737,7 +727,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightAnnounced   = false
         partedFromVehicle = false
         movingSinceMs     = 0L
-        hasStartedMoving  = false
         lastProgressMs    = System.currentTimeMillis()
         determinationStartMs = System.currentTimeMillis()
         lastAmbiguityLogMs = 0L
@@ -850,6 +839,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val decisive = progress[best] >= DIRECTION_MIN_PROGRESS &&
             others.all { progress[best] - progress[it] >= DIRECTION_MIN_PROGRESS }
 
+        // The anchor goes stale once its stop is behind us.
+        //
+        // Progress is measured towards the stop that followed the anchor, so
+        // after passing that stop the distance grows again — in both
+        // directions at once, leaving nothing to choose between them. With
+        // the anchor never moved, the comparison could stay deadlocked for
+        // the rest of the journey and the direction would never be settled.
+        // This only re-anchors when both readings have gone negative, which
+        // means the anchor is behind us, not merely that the answer is not
+        // yet clear.
+        if (progress.all { it < 0 }) {
+            anchorLat = loc.latitude
+            anchorLon = loc.longitude
+            anchorIdx = nowIdx
+            FileLogger.i(TAG, "Direction: anchor left behind — re-anchoring")
+            return false
+        }
+
         if (!decisive) {
             val now = System.currentTimeMillis()
             if (now - lastAmbiguityLogMs >= AMBIGUITY_LOG_INTERVAL_MS) {
@@ -929,17 +936,25 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * announces nothing useful and would merely drain the battery.
      */
     private fun accuracyGoodEnoughToSnap(): Boolean {
-        val acc = lastAccuracy ?: return true      // no figure: proceed
         val now = System.currentTimeMillis()
         if (snapWaitStartedMs == 0L) snapWaitStartedMs = now
         val waited = now - snapWaitStartedMs
 
+        // Fixes arriving too sparsely disqualify the position as surely as a
+        // wide error radius does, and by the same measure already used to
+        // suspend decisions about the vehicle. Underground, the receiver
+        // reported six fixes a minute and each one looked accurate enough on
+        // its own; tracking attached to a stop on the strength of them and
+        // then had nothing to work with.
+        val sparse = positionUnreliable()
+
+        val acc = lastAccuracy
         val required = when {
             waited < SNAP_STEP1_MS -> SNAP_ACCURACY_STRICT
             waited < SNAP_STEP2_MS -> SNAP_ACCURACY_MEDIUM
             else                   -> SNAP_ACCURACY_LOOSE
         }
-        if (acc <= required) return true
+        if (!sparse && (acc == null || acc <= required)) return true
 
         if (waited >= SNAP_GIVE_UP_MS) {
             announce("Няма достатъчно точен сигнал. Следенето се прекратява.")
@@ -1173,6 +1188,38 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 }
             }
 
+            // Attached only when we are actually heading for the stop.
+            //
+            // Distance alone says nothing: stops two kilometres apart are
+            // ordinary — Хотел Плиска to Орлов мост is over two — so being
+            // far from the next one is no evidence of anything. What
+            // distinguished the case that went wrong was not the distance but
+            // the direction: underground, the stop chosen was not being
+            // approached at all, and tracking settled on it for the rest of
+            // the journey.
+            //
+            // Standing at the stop is the exception: there the distance is
+            // small and unchanging, and waiting for it to shrink would mean
+            // never starting.
+            if (bestDist > ARRIVAL_RADIUS) {
+                if (prevLat == 0.0 && prevLon == 0.0) {
+                    // Nothing to compare against yet; one more fix will tell.
+                    awaitingFirstFix = true
+                    publish(distance = null)
+                    return
+                }
+                val before = LocationHelper.distanceMetres(
+                    prevLat, prevLon,
+                    stopLatLon[best].first, stopLatLon[best].second)
+                if (before - bestDist < APPROACHING_MARGIN) {
+                    awaitingFirstFix = true
+                    FileLogger.d(TAG, "Not approaching ${orderedStops[best].stopName} " +
+                        "(${before.toInt()} m → ${bestDist.toInt()} m) — not attaching yet")
+                    publish(distance = null)
+                    return
+                }
+            }
+
             currentIdx = best
 
             // Suppress the approach warning for the stop we just snapped to
@@ -1355,10 +1402,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // ── Inactivity timeout ───────────────────────────────────────────
         if (currentIdx != idxBefore) {
             lastProgressMs = System.currentTimeMillis()
-            hasStartedMoving = true
-        } else if (hasStartedMoving &&
+        } else if (movingSinceMs != 0L &&
                    System.currentTimeMillis() - lastProgressMs > INACTIVITY_TIMEOUT_MS) {
-            // Only after the journey has actually begun: see hasStartedMoving.
+            // Counted from the first movement rather than from the first stop
+            // reached.
+            //
+            // Tied to reaching a stop, the timer never started at all for a
+            // journey that made no progress from the outset — and the other
+            // limit, for a journey that never begins, applies only while
+            // standing still. Between them sat a journey that moves without
+            // ever advancing along its route, which then ran until stopped by
+            // hand.
             FileLogger.i(TAG, "No progress for 10 min — ending journey automatically")
             announce("Няма движение по маршрута. Следенето е спряно.")
             _events.tryEmit(JourneyEvent.RouteEnded)
@@ -1510,6 +1564,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val kmh = recentSpeedKmh() ?: 0.0
         val mps = kmh / 3.6
         val underWay = kmh >= MIN_SPEED_FOR_IDENTIFY
+
+        // Nothing to identify and nothing to confirm: walking away from the
+        // metro for ten minutes fetched the whole feed every half minute to
+        // no purpose.
+        if (!identified && !underWay) return
 
         val seen = vehicleMatcher.findRidingVehicle(lastLat, lastLon, mps)
 
