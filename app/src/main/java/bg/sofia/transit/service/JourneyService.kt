@@ -134,6 +134,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          */
         const val PASSED_STOP_MARGIN = 30.0
 
+        /**
+         * How much closer to the stop one fix must bring us before we accept
+         * that we are heading for it. Wide enough not to be read out of
+         * ordinary scatter between two consecutive fixes.
+         */
+        const val APPROACHING_MARGIN = 5.0
+
         /** Accuracy required to attach to a stop, eased over time. */
         private const val SNAP_ACCURACY_STRICT = 30.0f
         private const val SNAP_ACCURACY_MEDIUM = 70.0f
