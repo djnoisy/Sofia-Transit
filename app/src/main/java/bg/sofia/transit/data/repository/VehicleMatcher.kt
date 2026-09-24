@@ -42,8 +42,9 @@ class VehicleMatcher @Inject constructor(
 
         /**
          * Within this — after correcting for how stale the report is — a
-         * vehicle is taken to be the one we are in, provided it is the only
-         * one there.
+         * vehicle may be the one we are in. Whether a reading settles which
+         * one is decided against DECISIVE_MARGIN, and a candidate still has
+         * to be confirmed across readings in JourneyService.
          *
          * Narrowed from 60 m once a lone candidate became sufficient on its
          * own: a wide radius admits vehicles from the next carriageway, and
@@ -51,13 +52,35 @@ class VehicleMatcher @Inject constructor(
          * sightings of the vehicle actually carrying the passenger read 0–1 m,
          * so 30 leaves ample room for a poor fix without inviting company.
          */
-        private const val RIDING_WITH_RADIUS = 30.0
+        const val RIDING_WITH_RADIUS = 30.0
 
-
-
+        /**
+         * How much nearer than every other vehicle in range the nearest must
+         * be for a reading to count as decisive.
+         *
+         * Two vehicles running together read 0 m and 4 m, or 0 m and 0 m —
+         * differences well inside the scatter of a phone's position. Picking
+         * the nearer of such a pair is a coin toss, and two coin tosses that
+         * happened to agree once confirmed the wrong line in principle and
+         * the right one only by luck. A reading like that is recorded, but it
+         * votes for nobody.
+         */
+        const val DECISIVE_MARGIN = 15.0
     }
 
 
+
+    /** One vehicle as seen in one reading of the feed. */
+    data class Sighting(
+        val tripId: String,
+        val routeId: String,
+        /** Distance from us, corrected for the age of the report. */
+        val distanceMetres: Double,
+        /** Report time, epoch seconds; 0 if the feed gave none. */
+        val timestamp: Long,
+        /** Age of the report when read, in seconds; -1 if unknown. */
+        val ageSec: Long
+    )
 
     /** The vehicle the passenger appears to be travelling in. */
     data class RidingVehicle(
@@ -68,12 +91,28 @@ class VehicleMatcher @Inject constructor(
         /** Direction, from the trip id; null when the prefix is unknown. */
         val headsign: String?,
         val distanceMetres: Double,
-        /** True when another vehicle was also within range. */
+        /** True when another vehicle was also within range — whether that
+         *  leaves the reading undecided is judged against DECISIVE_MARGIN. */
         val contested: Boolean,
         /** Report time, so callers can insist on a second, fresher reading. */
         val timestamp: Long,
         /** How old that report was when taken, in seconds; -1 if unknown. */
-        val reportAgeSec: Long
+        val reportAgeSec: Long,
+        /**
+         * Every vehicle within riding range, nearest first — the nearest
+         * included. Kept whole rather than as a single runner-up distance:
+         * which vehicles were beside us is what lets the next reading tell
+         * that the pair has separated, and which of them stayed.
+         */
+        val inRange: List<Sighting>,
+        /**
+         * The vehicles asked about in [findRidingVehicle]'s watch list, as
+         * they appear in this same reading, wherever they are. Absent from
+         * the map means absent from the feed.
+         */
+        val watched: Map<String, Sighting>,
+        /** Whether any vehicle of the line asked about is in the feed at all. */
+        val lineVisible: Boolean
     )
 
     /**
@@ -85,14 +124,25 @@ class VehicleMatcher @Inject constructor(
      * reads a handful of metres away time after time, while everything else
      * comes and goes.
      *
-     * Null when nothing stands out — no vehicle close enough, or two equally
-     * close, or a trip whose direction cannot be resolved. Silence is the
-     * right answer there; the caller keeps whatever it already had.
+     * Null when no vehicle is within range at all, or when the nearest one's
+     * line cannot be looked up. When several are in range the nearest is
+     * still returned, with all of them listed in [RidingVehicle.inRange]:
+     * whether such a reading is decisive is the caller's judgement, made
+     * against [DECISIVE_MARGIN].
+     *
+     * [watchTripIds] are vehicles seen beside us at the previous reading;
+     * their positions in this reading come back in [RidingVehicle.watched],
+     * so the caller can tell a pair that has separated from one whose other
+     * half merely failed to report. [lineOfInterest] is the line the
+     * passenger chose; whether it publishes positions at all decides how
+     * much its absence from beside us can mean.
      */
     suspend fun findRidingVehicle(
         userLat: Double,
         userLon: Double,
-        userSpeedMps: Double
+        userSpeedMps: Double,
+        watchTripIds: Collection<String> = emptyList(),
+        lineOfInterest: String? = null
     ): RidingVehicle? {
         val nowSec = System.currentTimeMillis() / 1000
 
@@ -139,24 +189,13 @@ class VehicleMatcher @Inject constructor(
         }
         val runnerUp = ranked.getOrNull(1)?.second
 
-        // A lone candidate is reported as certain; company makes it
-        // contested, and the caller then wants to see the same one twice.
-        //
-        // Alone, there is nothing it could be confused with: a vehicle
-        // passing the other way would itself be a second candidate. But
-        // refusing to answer at all while two are in range proved too blunt.
-        // In heavy traffic two buses run nose to tail for minutes, and the
-        // identification would wait the whole time — ending exactly when the
-        // routes diverge and it is too late to act on.
-        //
-        // Reported as contested, the nearest is still a real signal: the
-        // vehicle carrying the passenger reads a metre or so away every time,
-        // while one merely alongside drifts by a few metres as the two jostle.
-        // Seeing the same one twice tells them apart.
+        // Company no longer suppresses the answer, nor settles it: every
+        // vehicle in range is reported, and the caller decides whether the
+        // nearest stands far enough apart to count. See DECISIVE_MARGIN.
         val contested = runnerUp != null
         if (contested) {
-            FileLogger.d(TAG, "Two in range (${dist.toInt()} m and " +
-                "${runnerUp!!.toInt()} m) — nearest reported as contested")
+            FileLogger.d(TAG, "In range: " + ranked.joinToString(", ") { (v, d) ->
+                "${v.routeId}/${v.tripId}@${d.toInt()} m" })
         }
 
         val name = try {
@@ -178,29 +217,78 @@ class VehicleMatcher @Inject constructor(
         FileLogger.i(TAG, "Riding vehicle: $name → ${headsign ?: "?"} " +
             "at ${dist.toInt()} m, report ${ageSec}s old" +
             (if (contested) ", contested" else "") + " (trip=${best.tripId})")
+        fun sighting(v: VehicleInfo, d: Double) = Sighting(
+            v.tripId, v.routeId, d, v.timestamp,
+            if (v.timestamp > 0) (nowSec - v.timestamp).coerceAtLeast(0) else -1)
+
+        val inRange = ranked.map { (v, d) -> sighting(v, d) }
+        val watchSet = watchTripIds.toSet()
+        val watched = if (watchSet.isEmpty()) emptyMap() else
+            all.filter { (v, _) -> v.tripId in watchSet }
+               .associate { (v, d) -> v.tripId to sighting(v, d) }
+        val lineVisible = lineOfInterest != null &&
+            all.any { (v, _) -> v.routeId == lineOfInterest }
+
         return RidingVehicle(
             best.routeId, name, type, best.tripId, headsign, dist,
-            contested, best.timestamp, ageSec)
+            contested, best.timestamp, ageSec, inRange, watched, lineVisible)
     }
 
 
 
     /**
-     * How far the tracked vehicle is from the passenger right now, or null
-     * when the feed has nothing usable for it. Used both to confirm we are
-     * following the right vehicle and to notice that the passenger has got
-     * off — once they have, the gap grows and keeps growing.
+     * The same reading, told from the point of view of another vehicle in it.
+     *
+     * Needed when a tie among vehicles in range is broken in favour of the
+     * line the passenger chose and that vehicle is not the nearest, so the
+     * reading as returned names a different one.
      */
-    suspend fun distanceToTrackedVehicle(
+    suspend fun describe(s: Sighting, reading: RidingVehicle): RidingVehicle? {
+        val route = try { gtfsRepo.getRouteById(s.routeId) } catch (e: Exception) { null }
+            ?: return null
+        val headsign = try {
+            gtfsRepo.getHeadsignByTripIdPrefix(s.tripId)
+        } catch (e: Exception) { null }
+        FileLogger.i(TAG, "Riding vehicle (tie broken): ${route.routeShortName} → " +
+            "${headsign ?: "?"} at ${s.distanceMetres.toInt()} m, report ${s.ageSec}s old " +
+            "(trip=${s.tripId})")
+        return reading.copy(
+            routeId = s.routeId,
+            routeShortName = route.routeShortName,
+            routeType = route.routeType,
+            tripId = s.tripId,
+            headsign = headsign,
+            distanceMetres = s.distanceMetres,
+            timestamp = s.timestamp,
+            reportAgeSec = s.ageSec)
+    }
+
+    /**
+     * Where the tracked vehicle is relative to the passenger right now, or
+     * null when the feed has nothing usable for it. Used both to confirm we
+     * are following the right vehicle and to notice that we have parted from
+     * it — once we have, the gap grows and keeps growing.
+     *
+     * Corrected for the age of the report exactly as in [findRidingVehicle].
+     * It used not to be: a report thirty seconds old put the bus we were
+     * sitting in over three hundred metres away at city speed, which is
+     * further than the parting radius — the tracked vehicle and a candidate
+     * were being measured by two different rulers.
+     */
+    suspend fun sightTrackedVehicle(
         tripId: String,
         userLat: Double,
-        userLon: Double
-    ): Double? {
+        userLon: Double,
+        userSpeedMps: Double
+    ): Sighting? {
         val v = realtimeRepo.getVehicleForTrip(tripId) ?: return null
         if (v.lat == 0.0 && v.lon == 0.0) return null
         val nowSec = System.currentTimeMillis() / 1000
-        if (v.timestamp > 0 && nowSec - v.timestamp > MAX_POSITION_AGE_SEC) return null
-        return LocationHelper.distanceMetres(userLat, userLon, v.lat, v.lon)
+        val age = if (v.timestamp > 0) (nowSec - v.timestamp).coerceAtLeast(0) else -1
+        if (age > MAX_POSITION_AGE_SEC) return null
+        val raw = LocationHelper.distanceMetres(userLat, userLon, v.lat, v.lon)
+        val corrected = (raw - userSpeedMps * age.coerceAtLeast(0)).coerceAtLeast(0.0)
+        return Sighting(v.tripId, v.routeId, corrected, v.timestamp, age)
     }
 
 }
