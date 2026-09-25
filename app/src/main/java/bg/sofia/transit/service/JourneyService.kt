@@ -317,6 +317,80 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          */
         private const val LOST_TIMEOUT_MS = 10 * 60 * 1000L
 
+        /**
+         * After "Слизате тук", how long the phone may go without moving at
+         * vehicle speed before the journey is taken as over.
+         *
+         * The automatic end is protection for the battery, not a precise
+         * detector of getting off, so it errs towards ending late rather
+         * than ever ending during a ride. A passenger who stays aboard is
+         * carried off at vehicle speed within a minute or so, which is an
+         * ordinary departure and brings "Спирката за слизане е подмината";
+         * one who got off stands or walks, and five minutes later tracking
+         * stops.
+         */
+        private const val DESTINATION_DWELL_MS = 5 * 60 * 1000L
+
+        /**
+         * How long, after the vehicle has gone on without us while we were not
+         * moving, the phone is watched for vehicle speed before getting off is
+         * concluded.
+         *
+         * Standing still while the vehicle we followed leaves has two
+         * explanations: we got off, or we are in a different vehicle that is
+         * waiting at a red light or a stop while the one we took for ours
+         * turned away. The second shows itself as soon as our vehicle moves
+         * on, and a red light rarely lasts longer than this.
+         */
+        private const val ALIGHT_SETTLE_MS = 90_000L
+
+        /**
+         * Off its route, how long the identified vehicle may go unseen beside
+         * us before it is no longer believed to be ours.
+         *
+         * A detour — road works, a diversion — is taken in silence as long as
+         * the vehicle shows it is with us. One that is not seen at all may be
+         * a vehicle wrongly taken for ours that went its own way and then
+         * stopped reporting, which left the parting check nothing to judge
+         * by: tracking then stayed silent until stopped by hand.
+         */
+        private const val DETOUR_PROOF_MS = 3 * 60 * 1000L
+
+        /**
+         * A reading of the vehicle feed at most this old that found the
+         * vehicle we are following within riding range says we are still in
+         * it. Longer than the slow checking interval, so one reading always
+         * covers the time until the next.
+         */
+        private const val VEHICLE_BESIDE_MEMORY_MS = 90_000L
+
+        /**
+         * With positioning degraded, parting may still be judged if we are
+         * moving slowly and the latest fix is no older than this: at walking
+         * pace a position this old is a few metres out, against a parting
+         * radius of 250.
+         */
+        private const val PARTING_MAX_FIX_AGE_MS = 15_000L
+
+        /**
+         * Two readings of the feed closer together than this mostly see the
+         * same reports, and a repeated report confirms nothing.
+         */
+        private const val MIN_READING_SPACING_MS = 20_000L
+
+        /** Without any fix for this long, weak signal is announced. */
+        private const val NO_FIX_NOTICE_MS = 30_000L
+        /**
+         * Without a usable fix for this long, tracking is ended. Usable means
+         * within SNAP_ACCURACY_LOOSE, the loosest accuracy the tracker ever
+         * relies on: announcements run on vaguer fixes than the stricter
+         * thresholds, and ending tracking while they still work would be
+         * wrong. Beyond 150 m a fix cannot tell one stop from the next.
+         */
+        private const val NO_USABLE_FIX_TIMEOUT_MS = 10 * 60 * 1000L
+        /** How often the journey timers are looked at. */
+        private const val TIMER_TICK_MS = 5_000L
+
         /** Spacing of the "still off the route" diagnostic. */
         private const val OFF_ROUTE_LOG_INTERVAL_MS = 30_000L
 
@@ -602,8 +676,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var destinationIdx: Int? = null
     /** Which of the "2 stops / 1 stop / next stop" warnings already fired. */
     private val alightWarningsFired = mutableSetOf<Int>()
-    /** Guards the "Слизате тук" announcement so it is spoken once. */
-    private var alightAnnounced = false
+    /**
+     * When "Слизате тук" was said for the present destination; 0 while it
+     * has not been. Both keeps it to once and times the limit after it.
+     */
+    private var destinationArrivedMs = 0L
     /** Timestamp of the last forward progress, for the inactivity timeout. */
     private var lastProgressMs = System.currentTimeMillis()
 
@@ -649,9 +726,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var lastLat = 0.0
     private var lastLon = 0.0
     private var vehicleJob: Job? = null
-
-    /** Set once we have concluded the vehicle went on without us. */
-    private var partedFromVehicle = false
+    // (timerJob is declared with the other alighting state above.)
 
     /** The line the passenger picked, kept only to notice when it was wrong. */
     private var selectedRouteId = ""
@@ -665,8 +740,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     private var lastInRange: Map<String, VehicleMatcher.Sighting> = emptyMap()
     private var lastReadingMs = 0L
-    /** The undecided group at the previous reading; empty if it was decisive. */
-    private var lastTiedSet: Set<String> = emptySet()
     /** True while a run of deferred checks has already been logged. */
     private var deferLogged = false
 
@@ -701,6 +774,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var offRoute = false
     /** When we became off route with no vehicle identified; 0 otherwise. */
     private var lostSinceMs = 0L
+    /** When we became off the identified vehicle's route; 0 otherwise. */
+    private var detourSinceMs = 0L
     /** Closest we have been to each of the next stops, by stop index. */
     private val windowMin = mutableMapOf<Int, Double>()
     /** Closest we have been, while moving, to the nearest stop ahead before
@@ -709,6 +784,38 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var lastOffRouteLogMs = 0L
     /** Consecutive accurate fixes above the departure threshold. */
     private var departureStreak = 0
+
+    /**
+     * Highest speed, from accurate fixes, since we moved out of the arrival
+     * circle of the stop we are at. A vehicle leaving a stop reaches vehicle
+     * speed within those first tens of metres; a passenger walking away
+     * never does.
+     */
+    private var leavingPeakKmh = 0.0
+    /** True after leaving a stop at walking pace, until that is explained. */
+    private var leftOnFoot = false
+    /** The stop that was left on foot. */
+    private var footStopIdx = 0
+
+    /** Last time the vehicle being followed was seen within riding range. */
+    private var trackedWithUsMs = 0L
+
+    /**
+     * When the vehicle was found to have gone on without us while we stood
+     * or walked; 0 when no such conclusion is pending. See ALIGHT_SETTLE_MS.
+     */
+    private var alightPendingSinceMs = 0L
+    /** Whether that happened at the chosen stop, after "Слизате тук". */
+    private var alightPendingAtChosenStop = false
+    /** How far the vehicle was then, for the log and the withdrawal. */
+    private var alightPendingDistance = 0.0
+    private var lastDwellHoldLogMs = 0L
+
+    /** Last fix within SNAP_ACCURACY_LOOSE. */
+    private var lastUsableFixMs = 0L
+    /** When the timers started; stands in for fixes not yet received. */
+    private var timersStartMs = 0L
+    private var timerJob: Job? = null
     /** Logged once, when announcements begin on the passenger's own choice. */
     private var proceedingOnChoiceLogged = false
 
@@ -780,7 +887,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         proceedingOnChoiceLogged = false
         resetIdentificationState()
         stopsMatchTrip    = tripId.isNotBlank()
-        partedFromVehicle = false
         movingSinceMs     = 0L
         chosen = ChosenLine(label, tripId, routeId, headsign, stops, latLons, emptyList())
         routeLabel        = label
@@ -801,7 +907,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastAnnouncedTripId = null
         destinationIdx    = null
         alightWarningsFired.clear()
-        alightAnnounced   = false
+        destinationArrivedMs   = 0L
         lastProgressMs    = System.currentTimeMillis()
 
         lastFixMs = 0L
@@ -819,6 +925,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         acquireWakeLock()
         startLocUpdates()
         startVehicleTracking()
+        startJourneyTimers()
         announce("Следене на пътуването започна.")
     }
 
@@ -865,8 +972,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         destinationEtaEpoch = null
         etaSource         = EtaSource.NONE
         alightWarningsFired.clear()
-        alightAnnounced   = false
-        partedFromVehicle = false
+        destinationArrivedMs   = 0L
         movingSinceMs     = 0L
         lastProgressMs    = System.currentTimeMillis()
         determinationStartMs = System.currentTimeMillis()
@@ -882,6 +988,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // Identification runs from the outset now, not only once a direction
         // has been settled: it is the thing that settles the direction.
         startVehicleTracking()
+        startJourneyTimers()
         announce("Следене на пътуването започна. Посоката се определя.")
     }
 
@@ -903,7 +1010,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // MAX_FIX_ACCURACY is ignored outright.
         if (loc.hasAccuracy() && loc.accuracy > MAX_FIX_ACCURACY) {
             FileLogger.d(TAG, "Direction: skipping fix, accuracy ${loc.accuracy.toInt()} m")
-            checkDirectionTimeout()
             return false
         }
 
@@ -935,14 +1041,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // jumping fix produces no sustained speed.
         val kmh = recentSpeedKmh()
         if (kmh == null || kmh < MIN_SPEED_FOR_DIRECTION) {
-            checkDirectionTimeout()
             return false
         }
 
         val moved = LocationHelper.distanceMetres(
             anchorLat, anchorLon, loc.latitude, loc.longitude)
         if (moved < DIRECTION_MIN_MOVEMENT) {
-            checkDirectionTimeout()
             return false
         }
 
@@ -1037,21 +1141,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // silence was paid for on every journey. Should the line prove wrong,
         // the switch says so plainly a moment later.
         announce("Посока, ${chosen.headsign}.")
-        startVehicleTracking(AFTER_DIRECTION_CHECK_DELAY_MS)
+        // Not sooner than MIN_READING_SPACING_MS after the last reading: one
+        // taken five seconds after another saw the very same report.
+        val sinceReading = System.currentTimeMillis() - lastReadingMs
+        startVehicleTracking(
+            if (lastReadingMs != 0L && sinceReading < MIN_READING_SPACING_MS)
+                maxOf(AFTER_DIRECTION_CHECK_DELAY_MS, MIN_READING_SPACING_MS - sinceReading)
+            else AFTER_DIRECTION_CHECK_DELAY_MS)
         return true
     }
 
-    /**
-     * Ends the journey if the direction has stayed unknown for too long.
-     * Shared by every branch that gives up on this fix, so the timeout cannot
-     * be skipped by whichever guard happens to reject the fix.
-     */
-    private fun checkDirectionTimeout() {
-        if (System.currentTimeMillis() - determinationStartMs <= INACTIVITY_TIMEOUT_MS) return
-        announce("Посоката не беше определена. Следенето се прекратява.")
-        _events.tryEmit(JourneyEvent.RouteEnded)
-        endJourney()
-    }
+    // The limit on how long the direction may stay unknown is kept with the
+    // other journey limits, in checkJourneyTimers.
 
 
 
@@ -1147,7 +1248,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     fun setDestination(idx: Int?) {
         destinationIdx = idx?.coerceIn(0, orderedStops.lastIndex)
         alightWarningsFired.clear()
-        alightAnnounced = false
+        destinationArrivedMs = 0L
         destinationEtaEpoch = null
         etaSource = EtaSource.NONE
         restartEtaPolling()
@@ -1182,6 +1283,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         vehicleJob = null
         etaJob?.cancel()
         etaJob = null
+        timerJob?.cancel()
+        timerJob = null
+        timersStartMs = 0L
 
         orderedStops = emptyList()
         stopLatLon   = emptyList()
@@ -1191,9 +1295,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         destinationEtaEpoch = null
         etaSource = EtaSource.NONE
         alightWarningsFired.clear()
-        alightAnnounced = false
+        destinationArrivedMs = 0L
         awaitingFirstFix = true
-        partedFromVehicle = false
         candidates = emptyList()
         anchorIdx = emptyList()
         stopsMatchTrip = false
@@ -1244,6 +1347,34 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             partingPeakKmh = maxOf(partingPeakKmh, shortSpeedKmh() ?: 0.0)
         }
 
+        // Only fixes this good count as evidence of how we are moving: a
+        // phone indoors, placed by the mobile network to within a hundred
+        // metres, jumps about in a way that reads as vehicle speed.
+        val accurateFix = loc.hasAccuracy() && loc.accuracy <= DEPARTURE_MAX_ACCURACY
+
+        // Getting off pending: moving at vehicle speed now means we are in
+        // another vehicle, not on the pavement. See ALIGHT_SETTLE_MS.
+        if (alightPendingSinceMs != 0L && accurateFix) {
+            val kmh = shortSpeedKmh() ?: 0.0
+            if (kmh >= MIN_SPEED_FOR_IDENTIFY) {
+                alightPendingSinceMs = 0L
+                FileLogger.i(TAG, "Vehicle speed (${kmh.toInt()} km/h) while getting off " +
+                    "was pending — we were not in the vehicle we followed")
+                revokeIdentification("Vehicle left ${alightPendingDistance.toInt()} m " +
+                    "while we stood; now moving at ${kmh.toInt()} km/h")
+            }
+        }
+        if (!loc.hasAccuracy() || loc.accuracy <= SNAP_ACCURACY_LOOSE) {
+            lastUsableFixMs = System.currentTimeMillis()
+        }
+
+        // How fast we move away from the stop we are at, once outside its
+        // arrival circle — see leavingPeakKmh.
+        if (atStop && accurateFix && currentIdx in stopLatLon.indices &&
+            distTo(loc, currentIdx) > ARRIVAL_RADIUS) {
+            leavingPeakKmh = maxOf(leavingPeakKmh, shortSpeedKmh() ?: 0.0)
+        }
+
         lastLat = loc.latitude
         lastLon = loc.longitude
 
@@ -1267,18 +1398,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 "vehicle identification continues in the background")
         }
 
-        // Checked before the direction work below, which returns early while
-        // the direction is unknown — with the two the other way round, a
-        // journey started in automatic mode and never boarded would never
-        // reach this and would run until the battery gave out.
-        if (movingSinceMs == 0L &&
-            System.currentTimeMillis() - lastProgressMs > WAITING_TIMEOUT_MS) {
-            FileLogger.i(TAG, "Journey never started — ending")
-            announce("Пътуването не започна. Следенето се прекратява.")
-            _events.tryEmit(JourneyEvent.RouteEnded)
-            endJourney()
-            return
-        }
+        // (The limit on a journey that never starts is in checkJourneyTimers.)
 
 
         // Direction still unknown: nothing else can run, because the order of
@@ -1293,21 +1413,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
 
         if (orderedStops.isEmpty()) return
-
-        // Off the chosen route with nothing identified: the one way this
-        // state ends on its own. Checked here, ahead of the stop logic, which
-        // is suspended while off route — so the inactivity timer further
-        // down cannot run meanwhile and pre-empt this with "Няма движение",
-        // a message that would be untrue: there is movement, just not along
-        // this route.
-        if (offRoute && !identified && lostSinceMs != 0L &&
-            System.currentTimeMillis() - lostSinceMs > LOST_TIMEOUT_MS) {
-            FileLogger.i(TAG, "Off route for 10 min with no vehicle identified — ending")
-            announce("Линията не беше установена. Изберете линията отново.")
-            _events.tryEmit(JourneyEvent.RouteEnded)
-            endJourney()
-            return
-        }
 
         val idxBefore = currentIdx
 
@@ -1418,6 +1523,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             if (offRoute) {
                 offRoute = false
                 lostSinceMs = 0L
+                detourSinceMs = 0L
                 lastProgressMs = System.currentTimeMillis()
                 FileLogger.i(TAG, "Back on route at ${orderedStops[best].stopName} " +
                     "(${bestDist.toInt()} m)")
@@ -1449,6 +1555,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             FileLogger.i(TAG, "First fix: snapped to stop #$best " +
                 "(${orderedStops[best].stopName}, ${bestDist.toInt()} m)")
         }
+
+        // Having left a stop on foot, the stop logic stays silent unless
+        // vehicle speed shows we were aboard after all.
+        if (leftOnFoot && handleLeftOnFoot(loc, accurateFix)) return
 
         // Look-ahead window: nearest stop among current..current+LOOKAHEAD.
         val end = (currentIdx + LOOKAHEAD).coerceAtMost(orderedStops.lastIndex)
@@ -1487,6 +1597,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     }
                     currentIdx = nearest
                     atStop = true
+                    leavingPeakKmh = 0.0
                     approachAnnounced = false
                     FileLogger.i(TAG, "ARRIVE at ${nearestDist.toInt()} m, " +
                         "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → " +
@@ -1511,6 +1622,22 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             }
 
             // ── We were at a stop and have now clearly left it ────────────
+            // Leaving the stop at walking pace: not the vehicle departing, but
+            // very probably the passenger walking away from it. Nothing is
+            // announced — "Следваща спирка" and "Спирката за слизане е
+            // подмината" were both said to a passenger already on the
+            // pavement — and what it was is settled on the fixes that follow.
+            // See handleLeftOnFoot.
+            atStop && distTo(loc, currentIdx) > DEPART_RADIUS &&
+                    leavingPeakKmh < MIN_SPEED_FOR_IDENTIFY -> {
+                atStop = false
+                approachAnnounced = false
+                leftOnFoot = true
+                footStopIdx = currentIdx
+                FileLogger.i(TAG, "Left ${orderedStops[currentIdx].stopName} at walking pace " +
+                    "(peak ${leavingPeakKmh.toInt()} km/h) — taken as alighted; announcements paused")
+            }
+
             atStop && distTo(loc, currentIdx) > DEPART_RADIUS -> {
                 atStop = false
                 approachAnnounced = false
@@ -1574,8 +1701,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             //     again made it the third mention within seconds. Keeping the
             //     familiar arrival phrasing intact and adding a bare
             //     instruction after it is both shorter and clearer.
-            if (destDist <= ALIGHT_ANNOUNCE_RADIUS && !alightAnnounced) {
-                alightAnnounced = true
+            if (destDist <= ALIGHT_ANNOUNCE_RADIUS && destinationArrivedMs == 0L) {
+                destinationArrivedMs = System.currentTimeMillis()
                 announce("Слизате тук.")
             }
 
@@ -1594,9 +1721,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             //    so the journey behaves as if none had been chosen.
             if (currentIdx > dest) {
                 FileLogger.i(TAG, "Destination passed without alighting; clearing it")
+                // Its arrival time is of no further use; the poll used to run
+                // on regardless until the journey ended.
+                etaJob?.cancel()
+                etaJob = null
                 destinationIdx = null
                 alightWarningsFired.clear()
-                alightAnnounced = false
+                destinationArrivedMs = 0L
                 destinationEtaEpoch = null
                 etaSource = EtaSource.NONE
                 announce("Спирката за слизане е подмината.")
@@ -1606,25 +1737,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             }
         }
 
-        // ── Inactivity timeout ───────────────────────────────────────────
+        // ── Progress, for the inactivity limit (see checkJourneyTimers) ──
         if (currentIdx != idxBefore) {
             lastProgressMs = System.currentTimeMillis()
-        } else if (movingSinceMs != 0L &&
-                   System.currentTimeMillis() - lastProgressMs > INACTIVITY_TIMEOUT_MS) {
-            // Counted from the first movement rather than from the first stop
-            // reached.
-            //
-            // Tied to reaching a stop, the timer never started at all for a
-            // journey that made no progress from the outset — and the other
-            // limit, for a journey that never begins, applies only while
-            // standing still. Between them sat a journey that moves without
-            // ever advancing along its route, which then ran until stopped by
-            // hand.
-            FileLogger.i(TAG, "No progress for 10 min — ending journey automatically")
-            announce("Няма движение по маршрута. Следенето е спряно.")
-            _events.tryEmit(JourneyEvent.RouteEnded)
-            endJourney()
-            return
         }
 
         publish(distance = distTo(loc, currentIdx).toInt())
@@ -1763,17 +1878,25 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // Announcements are left running: they compare our position with
         // stops rather than with another moving object, and they held up
         // perfectly well at ten fixes a minute.
-        if (positionUnreliable()) {
-            FileLogger.d(TAG, "Degraded positioning — no vehicle decisions")
-            noticeDegradedPositioning()
-            return null
-        }
+        //
+        // One exception, below: parting is still judged at walking pace.
 
         // The long average for correcting report ages, the short one for
         // deciding whether we are moving at this moment.
         val mps = (recentSpeedKmh() ?: 0.0) / 3.6
         val kmhNow = shortSpeedKmh() ?: 0.0
         val underWay = kmhNow >= MIN_SPEED_FOR_IDENTIFY
+
+        val unreliable = positionUnreliable()
+        // The staleness that made degraded positioning dangerous was at
+        // vehicle speed. On foot, a fix fifteen seconds old is a few metres
+        // out, and the parting radius is 250: getting off is exactly when the
+        // signal tends to weaken, as the passenger walks into a building, so
+        // this is the one judgement not suspended.
+        val fixAgeMs = if (lastFixMs == 0L) Long.MAX_VALUE
+                       else System.currentTimeMillis() - lastFixMs
+        val partingJudgeable = !unreliable ||
+            (!underWay && fixAgeMs <= PARTING_MAX_FIX_AGE_MS)
 
         // Parting is tested FIRST and regardless of speed.
         //
@@ -1783,13 +1906,20 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // believing the journey continued for thirteen minutes, until the
         // inactivity timer finally stopped it. Walking is exactly when this
         // test matters most.
-        when (checkParted(mps)) {
-            PartingOutcome.ENDED   -> return null
-            PartingOutcome.REVOKED -> return DEFERRED_CHECK_RETRY_MS
-            PartingOutcome.PENDING -> { /* carry on, but come back soon */ }
-            PartingOutcome.NONE    -> { }
+        if (partingJudgeable) {
+            when (checkParted(mps, underWay)) {
+                PartingOutcome.REVOKED -> return DEFERRED_CHECK_RETRY_MS
+                PartingOutcome.PENDING -> { /* carry on, but come back soon */ }
+                PartingOutcome.NONE    -> { }
+            }
         }
         val partingSooner = if (partingFirstStamp != 0L) PARTING_RECHECK_MS else null
+
+        if (unreliable) {
+            FileLogger.d(TAG, "Degraded positioning — no vehicle decisions" +
+                if (partingJudgeable) " (parting still judged)" else "")
+            return partingSooner
+        }
 
         // Standing, with nothing identified: nothing can be decided, since a
         // vehicle standing beside us at a stop may not be the one we board.
@@ -1808,18 +1938,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         val nowMs = System.currentTimeMillis()
         val previous = if (nowMs - lastReadingMs <= READING_MEMORY_MS) lastInRange else emptyMap()
-        val previousTied = lastTiedSet
 
         val seen = vehicleMatcher.findRidingVehicle(
-            lastLat, lastLon, mps,
-            watchTripIds = previous.keys,
-            lineOfInterest = selectedRouteId.ifBlank { null })
+            lastLat, lastLon, mps, watchTripIds = previous.keys)
 
         if (seen == null) {
             // Nobody beside us. Whatever was in range before is no longer, so
             // it cannot vouch for anything at the next reading.
             lastInRange = emptyMap()
-            lastTiedSet = emptySet()
             lastReadingMs = nowMs
             return partingSooner
         }
@@ -1832,7 +1958,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // vehicle within DECISIVE_MARGIN of it.
         val tied = inRange.filter { it.distanceMetres - seen.distanceMetres < VehicleMatcher.DECISIVE_MARGIN }
         val tiedIds = tied.map { it.tripId }.toSet()
-        lastTiedSet = if (tied.size > 1) tiedIds else emptySet()
 
         // Already following one of them: nothing to decide. Once identified,
         // being in range at all is enough — ours need not be the nearest of
@@ -1842,7 +1967,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             (if (identified) lastInRange.containsKey(tripId) else tripId in tiedIds)) {
             identified = true
             candidateVote = null
-            partedFromVehicle = false
             return partingSooner
         }
 
@@ -1875,15 +1999,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (pick == null) {
             FileLogger.d(TAG, "Undecided: " + tied.joinToString(", ") {
                 "${it.routeId}/${it.tripId}@${it.distanceMetres.toInt()} m" } + " — no vote")
-
-            // Two vehicles beside us, neither of the chosen line, twice in a
-            // row: the passenger is very probably not on it. Counted only for
-            // a line that publishes positions at all — for one that does not,
-            // its absence from beside us proves nothing, since the vehicle we
-            // are in may simply be silent.
-            if (!identified && seen.lineVisible && tiedIds == previousTied) {
-                giveWrongLineNotice("two vehicles of other lines beside us, twice")
-            }
             return partingSooner
         }
 
@@ -1915,7 +2030,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // really has parted. If the other has merely not reported, the one
         // left beside us may be the stranger and ours the silent one, so the
         // ordinary second reading is waited for instead.
-        val agreesWithBelief = !identified && candidate.routeId == selectedRouteId
+        //
+        // "Agrees" means the direction too. A vehicle of the chosen line going
+        // the other way passes within range on a narrow street; taken at once,
+        // it had "Посоката е коригирана" announced to a passenger travelling
+        // exactly as announced. While the direction is still unknown nothing
+        // can agree with it, so the ordinary confirmation applies then too.
+        val agreesWithBelief = !identified && candidate.routeId == selectedRouteId &&
+            headsign.isNotBlank() && candidate.headsign.equals(headsign, ignoreCase = true)
 
         if (!agreesWithBelief) {
             val before = previous[candidate.tripId]
@@ -1975,7 +2097,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         candidateVote = null
         adoptVehicle(candidate)
 
-        partedFromVehicle = false
         partingFirstStamp = 0L
         return null
     }
@@ -2091,19 +2212,23 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // Whatever held for the previous stop order does not hold for this.
         offRoute          = false
         lostSinceMs       = 0L
+        detourSinceMs     = 0L
         windowMin.clear()
         unattachedMin     = -1.0
+        leftOnFoot        = false
+        leavingPeakKmh    = 0.0
         wrongLineNoticeGiven = false
         partingFirstStamp = 0L
         partingPeakKmh    = 0.0
+        trackedWithUsMs   = 0L
+        alightPendingSinceMs = 0L
         if (differentLine || differentDirection) {
             destinationIdx      = null
             destinationEtaEpoch = null
             etaSource           = EtaSource.NONE
             alightWarningsFired.clear()
-            alightAnnounced     = false
+            destinationArrivedMs     = 0L
         }
-        partedFromVehicle = false
 
         // The same switch is not announced twice.
         //
@@ -2181,26 +2306,43 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         announce("Слаб сигнал за местоположение.")
     }
 
-    private enum class PartingOutcome { NONE, PENDING, ENDED, REVOKED }
+    private enum class PartingOutcome { NONE, PENDING, REVOKED }
 
     /**
-     * Has the vehicle gone on without us? Applies wherever it happens — at
-     * the chosen alighting stop, at any other, or between them.
+     * Has the vehicle gone on without us? The one place where the vehicle's
+     * own position decides that the passenger is no longer in it.
      *
-     * Two readings beyond [PARTED_RADIUS], from two different reports each at
-     * most [PARTING_MAX_REPORT_AGE_SEC] old, are required. One used to be
-     * enough, and the distance was taken uncorrected for the report's age —
-     * so a single stale position of the very bus we were sitting in could end
-     * the journey. A report too old to judge by neither confirms a parting
-     * nor cancels one; a reading showing the vehicle close again cancels it.
+     * Two standards, by what we already know:
      *
-     * What the parting means depends on what we did meanwhile:
-     *  - moving at walking pace or standing: we got off, as before;
-     *  - still travelling at vehicle speed: we did not get off — we were
-     *    never in that vehicle. The identification is withdrawn, not the
-     *    journey. See [revokeIdentification].
+     *  - At the chosen stop, after "Слизате тук", standing or walking: the
+     *    vehicle freshly reported outside riding range is enough, on one
+     *    reading, to begin concluding that we got off. The passenger has just been told to get off, and a fresh
+     *    report, corrected for its age, of the very bus we are in cannot put
+     *    it outside riding range while we stand or crawl along with it. On
+     *    the ride that prompted this, the bus had left the walking
+     *    passenger's side by 18:10:18, yet tracking ran on until stopped by
+     *    hand at 18:19.
+     *
+     *  - Anywhere else: two readings beyond [PARTED_RADIUS], from two
+     *    different reports each at most [PARTING_MAX_REPORT_AGE_SEC] old. One
+     *    used to be enough, uncorrected for the report's age, and a single
+     *    stale position of the very bus we were sitting in could end the
+     *    journey. A report too old neither confirms a parting nor cancels
+     *    one; a reading showing the vehicle close again cancels it. What the
+     *    parting means then depends on what we did meanwhile: still at
+     *    vehicle speed, we were never in that vehicle, and only the
+     *    identification is withdrawn — see [revokeIdentification]; standing
+     *    or walking, we probably got off.
+     *
+     * "Probably", in both cases: standing still is also what a passenger
+     * does in another vehicle held at a red light just as the one we took
+     * for theirs turns away. So getting off is not concluded at once but
+     * after ALIGHT_SETTLE_MS — see [beginAlightPending].
+     *
+     * Every sighting within riding range is also remembered, for the limit
+     * at the chosen stop in checkJourneyTimers.
      */
-    private suspend fun checkParted(mps: Double): PartingOutcome {
+    private suspend fun checkParted(mps: Double, underWay: Boolean): PartingOutcome {
         if (!identified || tripId.isBlank()) {
             partingFirstStamp = 0L
             return PartingOutcome.NONE
@@ -2208,6 +2350,29 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val pending = if (partingFirstStamp != 0L) PartingOutcome.PENDING else PartingOutcome.NONE
         val s = vehicleMatcher.sightTrackedVehicle(tripId, lastLat, lastLon, mps)
             ?: return pending
+        val fresh = s.timestamp > 0 && s.ageSec in 0..PARTING_MAX_REPORT_AGE_SEC
+
+        if (s.distanceMetres <= VehicleMatcher.RIDING_WITH_RADIUS) {
+            trackedWithUsMs = System.currentTimeMillis()
+            if (alightPendingSinceMs != 0L) {
+                alightPendingSinceMs = 0L
+                FileLogger.i(TAG, "Tracked vehicle with us again " +
+                    "(${s.distanceMetres.toInt()} m) — getting off no longer pending")
+            }
+        }
+        // Already concluded, awaiting only ALIGHT_SETTLE_MS: nothing to add.
+        if (alightPendingSinceMs != 0L) return PartingOutcome.NONE
+
+        val atChosenStop = destinationIdx != null && destinationArrivedMs != 0L
+        val ownFixAccurate = lastAccuracy?.let { it <= DEPARTURE_MAX_ACCURACY } == true
+        if (atChosenStop && !underWay && fresh && ownFixAccurate &&
+            s.distanceMetres > VehicleMatcher.RIDING_WITH_RADIUS) {
+            FileLogger.i(TAG, "At the chosen stop; our vehicle is now " +
+                "${s.distanceMetres.toInt()} m away (report ${s.ageSec}s old) " +
+                "and we are not riding")
+            beginAlightPending(s.distanceMetres, atChosenStop = true)
+            return PartingOutcome.NONE
+        }
 
         if (s.distanceMetres <= PARTED_RADIUS) {
             if (partingFirstStamp != 0L) {
@@ -2216,12 +2381,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             }
             partingFirstStamp = 0L
             partingPeakKmh = 0.0
-            partedFromVehicle = false
             return PartingOutcome.NONE
         }
-        if (partedFromVehicle) return PartingOutcome.NONE
 
-        val fresh = s.timestamp > 0 && s.ageSec in 0..PARTING_MAX_REPORT_AGE_SEC
         if (!fresh) {
             FileLogger.d(TAG, "Tracked vehicle ${s.distanceMetres.toInt()} m away, but the " +
                 "report is ${s.ageSec}s old — not judged on it")
@@ -2243,22 +2405,29 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         partingPeakKmh = 0.0
 
         if (peak >= MIN_SPEED_FOR_IDENTIFY) {
-            revokeIdentification(s.distanceMetres, peak)
+            revokeIdentification("Tracked vehicle left while we kept moving " +
+                "(${s.distanceMetres.toInt()} m, our peak ${peak.toInt()} km/h)")
             return PartingOutcome.REVOKED
         }
 
-        partedFromVehicle = true
         FileLogger.i(TAG, "Vehicle left without us (${s.distanceMetres.toInt()} m, " +
             "our peak ${peak.toInt()} km/h)")
-        val reachedChosenStop = destinationIdx != null && alightAnnounced
-        if (reachedChosenStop) {
-            _events.tryEmit(JourneyEvent.DestinationReached)
-        } else {
-            announce("Изглежда слязохте. Следенето се прекратява.")
-            _events.tryEmit(JourneyEvent.RouteEnded)
-        }
-        endJourney()
-        return PartingOutcome.ENDED
+        beginAlightPending(s.distanceMetres, atChosenStop)
+        return PartingOutcome.NONE
+    }
+
+    /**
+     * The vehicle has gone on without us while we were not moving. Getting
+     * off is concluded only after ALIGHT_SETTLE_MS without vehicle speed —
+     * in checkJourneyTimers — and withdrawn meanwhile if we move at vehicle
+     * speed (onFix) or the vehicle is found with us again (checkParted).
+     */
+    private fun beginAlightPending(distance: Double, atChosenStop: Boolean) {
+        alightPendingSinceMs = System.currentTimeMillis()
+        alightPendingAtChosenStop = atChosenStop
+        alightPendingDistance = distance
+        FileLogger.i(TAG, "Getting off concluded unless we move at vehicle speed " +
+            "within ${ALIGHT_SETTLE_MS / 1000} s")
     }
 
     /**
@@ -2272,7 +2441,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * contradicted a moment later if we turn out to be off that line's route
      * as well. The off-route notice, if due, says what matters.
      */
-    private fun revokeIdentification(distance: Double, peakKmh: Double) {
+    private fun revokeIdentification(reason: String) {
         val c = chosen ?: return
         val revokedTrip = tripId
         val sameLine = routeId == c.routeId
@@ -2282,15 +2451,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             val word = l.substringBefore(' ')
             word.lowercase() + l.removePrefix(word)
         }
-        FileLogger.i(TAG, "Tracked vehicle left while we kept moving " +
-            "(${distance.toInt()} m, our peak ${peakKmh.toInt()} km/h) — " +
-            "identification of $routeLabel withdrawn (trip=$revokedTrip)")
+        FileLogger.i(TAG, "$reason — identification of $routeLabel withdrawn " +
+            "(trip=$revokedTrip)")
 
         identified = false
-        partedFromVehicle = false
         candidateVote = null
+        trackedWithUsMs = 0L
+        alightPendingSinceMs = 0L
+        detourSinceMs = 0L
         lastInRange = emptyMap()
-        lastTiedSet = emptySet()
         lastAnnouncedTripId = null
         lastProgressMs = System.currentTimeMillis()
 
@@ -2322,13 +2491,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             snapWaitStartedMs = 0L
             offRoute = false
             lostSinceMs = 0L
+            detourSinceMs = 0L
             windowMin.clear()
             unattachedMin = -1.0
+            leftOnFoot = false
+            leavingPeakKmh = 0.0
             destinationIdx = null
             destinationEtaEpoch = null
             etaSource = EtaSource.NONE
             alightWarningsFired.clear()
-            alightAnnounced = false
+            destinationArrivedMs = 0L
             wrongLineNoticeGiven = false
             // Worded as the counterpart of the switch announcement ("Изглежда
             // пътувате с автобус 76…"), so that it plainly undoes what the
@@ -2348,11 +2520,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     /**
-     * "Изглежда не пътувате с линия X" — said once, whichever evidence comes
-     * first: moving away from the chosen route, or two vehicles of other
-     * lines beside us twice running. The passenger needs to know that the
-     * line they picked is in doubt and that the right one is being sought;
-     * which of the two signs showed it is of no use to them.
+     * "Изглежда не пътувате с линия X" — said once, on moving away from the
+     * chosen route while no vehicle is identified.
+     *
+     * That is the only sign it is given on. There was a second — two vehicles
+     * of other lines beside us twice running, for a line that publishes
+     * positions — but a line publishing positions does not mean the vehicle
+     * we are in does: with ours silent in a jam between two others, it told
+     * a passenger on the right line that they were on the wrong one. Moving
+     * away from the route rests on our own positions, which are always there.
      */
     private fun giveWrongLineNotice(reason: String) {
         if (wrongLineNoticeGiven || identified) return
@@ -2442,6 +2618,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         unattachedMin = -1.0
         lastOffRouteLogMs = System.currentTimeMillis()
         if (identified) {
+            detourSinceMs = System.currentTimeMillis()
             FileLogger.i(TAG, "Off the vehicle's route ($detail) — taken as a detour; " +
                 "stop announcements paused")
         } else {
@@ -2451,22 +2628,220 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    /**
+     * What follows leaving a stop at walking pace. Returns true when this fix
+     * has been dealt with here; false to let the ordinary stop logic process
+     * it.
+     *
+     * Only one outcome is looked for: movement at vehicle speed, on an
+     * accurate fix, which means the vehicle was crawling out of the stop in
+     * traffic with us aboard — the departure is then carried out as usual.
+     * Anything else is taken as the passenger having got off, and nothing is
+     * announced: no "Следваща спирка", no "Спирката за слизане е подмината".
+     * Ending the journey is left to the timers — see checkJourneyTimers —
+     * and to the parting check, since the automatic end exists to spare the
+     * battery, not to time the alighting to the second.
+     */
+    private fun handleLeftOnFoot(loc: Location, accurateFix: Boolean): Boolean {
+        val kmh = shortSpeedKmh() ?: 0.0
+        if (!accurateFix || kmh < MIN_SPEED_FOR_IDENTIFY ||
+            footStopIdx !in orderedStops.indices) {
+            publish(distance = null)
+            return true
+        }
+        leftOnFoot = false
+        FileLogger.i(TAG, "Vehicle speed (${kmh.toInt()} km/h) after leaving " +
+            "${orderedStops[footStopIdx].stopName} slowly — a crawl in traffic, not alighting")
+        if (currentIdx < orderedStops.lastIndex) {
+            currentIdx += 1
+            approachAnnounced = false
+            announce("Следваща спирка, ${orderedStops[currentIdx].stopName}.")
+            suppressRedundantApproach(loc)
+        }
+        return false
+    }
+
+    /**
+     * The limits that end a journey on their own, all looked at here, on a
+     * timer of their own rather than on each fix.
+     *
+     * That is the point of gathering them. Checked on each fix, none of them
+     * ran when fixes stopped coming: tracking left on in a building without
+     * signal ran for as long as the building was stood in, and not even
+     * "Слаб сигнал" was said, since that too was computed from fixes. And
+     * with each limit checked at a different place in the fix handling, some
+     * could not run in states that returned early — which is how two of them
+     * came to race each other before.
+     *
+     * Each is independent of the others and of how often fixes arrive; the
+     * first to fall due ends the journey. The one limit not here is giving
+     * up on attaching to the route for want of accuracy (accuracyGoodEnoughToSnap),
+     * which is a judgement about the fixes themselves and so is made on them.
+     */
+    private fun startJourneyTimers() {
+        timerJob?.cancel()
+        timersStartMs = System.currentTimeMillis()
+        lastUsableFixMs = 0L
+        timerJob = serviceScope.launch {
+            while (isActive) {
+                delay(TIMER_TICK_MS)
+                withContext(Dispatchers.Main) { checkJourneyTimers() }
+            }
+        }
+    }
+
+    private fun checkJourneyTimers() {
+        if (timersStartMs == 0L) return
+        val now = System.currentTimeMillis()
+
+        // Signal. Fixes too sparse to decide by, or none at all for half a
+        // minute, are said; no usable fix for ten minutes ends tracking —
+        // nothing can be announced without one.
+        noticeDegradedPositioning()
+        val sinceFix = now - (if (lastFixMs != 0L) lastFixMs else timersStartMs)
+        if (sinceFix >= NO_FIX_NOTICE_MS &&
+            now - lastDegradedNoticeMs >= DEGRADED_NOTICE_INTERVAL_MS) {
+            lastDegradedNoticeMs = now
+            FileLogger.i(TAG, "No position for ${sinceFix / 1000}s")
+            announce("Слаб сигнал за местоположение.")
+        }
+        val sinceUsable = now - (if (lastUsableFixMs != 0L) lastUsableFixMs else timersStartMs)
+        if (sinceUsable >= NO_USABLE_FIX_TIMEOUT_MS) {
+            end("No usable position for ${sinceUsable / 60_000} min",
+                "Няма сигнал за местоположение. Следенето се прекратява.")
+            return
+        }
+
+        // Never boarded: still at the start, half an hour on.
+        if (movingSinceMs == 0L && now - lastProgressMs > WAITING_TIMEOUT_MS) {
+            end("Journey never started", "Пътуването не започна. Следенето се прекратява.")
+            return
+        }
+
+        // Direction still unknown after ten minutes.
+        if (candidates.isNotEmpty() && determinationStartMs != 0L &&
+            now - determinationStartMs > INACTIVITY_TIMEOUT_MS) {
+            end("Direction not determined in 10 min",
+                "Посоката не беше определена. Следенето се прекратява.")
+            return
+        }
+
+        // Getting off pending, and no vehicle speed since: we got off.
+        if (alightPendingSinceMs != 0L && now - alightPendingSinceMs >= ALIGHT_SETTLE_MS) {
+            val atChosen = alightPendingAtChosenStop
+            FileLogger.i(TAG, "No vehicle speed for ${ALIGHT_SETTLE_MS / 1000} s after the " +
+                "vehicle left (${alightPendingDistance.toInt()} m) — got off")
+            if (atChosen) {
+                // Silent: "Слизате тук" has been said.
+                _events.tryEmit(JourneyEvent.DestinationReached)
+                endJourney()
+            } else {
+                end("Got off", "Изглежда слязохте. Следенето се прекратява.")
+            }
+            return
+        }
+
+        // At the chosen stop. "Слизате тук" has been said; if the phone has
+        // not since been carried off at vehicle speed — which would have
+        // been a departure, clearing the destination — the passenger got off.
+        // Ends silently: they already know they have arrived.
+        //
+        // Unless the vehicle we are following is still where we are. Speed
+        // alone cannot tell a passenger who stayed aboard a bus crawling in a
+        // jam from one standing on the pavement; the vehicle's own position
+        // can, when it reports. When it reports that it has gone, the end
+        // comes sooner still — see checkParted; this limit is for when it
+        // does not report at all, and speed is all there is.
+        if (destinationArrivedMs != 0L && destinationIdx != null &&
+            now - destinationArrivedMs >= DESTINATION_DWELL_MS) {
+            if (vehicleWithUs(now)) {
+                if (now - lastDwellHoldLogMs >= 60_000L) {
+                    lastDwellHoldLogMs = now
+                    FileLogger.d(TAG, "At the chosen stop 5+ min, but the vehicle is " +
+                        "still with us — not ending")
+                }
+            } else {
+                FileLogger.i(TAG, "5 min at the chosen stop without departing — journey over")
+                _events.tryEmit(JourneyEvent.DestinationReached)
+                endJourney()
+                return
+            }
+        }
+
+        // Off the identified vehicle's route, and the vehicle not seen with us
+        // for DETOUR_PROOF_MS: not a detour of ours. Withdrawn as at a parting;
+        // tracking returns to the passenger's choice.
+        if (offRoute && identified && detourSinceMs != 0L &&
+            now - maxOf(detourSinceMs, trackedWithUsMs) > DETOUR_PROOF_MS) {
+            revokeIdentification("Off its route and not seen with us for " +
+                "${DETOUR_PROOF_MS / 60_000} min")
+            return
+        }
+
+        // Off the chosen route, nothing identified.
+        if (offRoute && !identified && lostSinceMs != 0L &&
+            now - lostSinceMs > LOST_TIMEOUT_MS) {
+            end("Off route for 10 min with no vehicle identified",
+                "Линията не беше установена. Изберете линията отново.")
+            return
+        }
+
+        // No progress along the route. Counted from the first movement
+        // rather than from the first stop reached: tied to reaching a stop,
+        // the timer never started for a journey that made no progress from
+        // the outset. Not applied off the route, which has its own limit
+        // above with a truer message, nor while tracking is still finding its
+        // place on the route.
+        //
+        // Nor while the vehicle we follow is still with us: that is a ride
+        // held up in traffic, not a journey abandoned — the same reason the
+        // limit at the chosen stop above waits.
+        if (movingSinceMs != 0L && orderedStops.isNotEmpty() &&
+            !offRoute && !awaitingFirstFix && !vehicleWithUs(now) &&
+            now - lastProgressMs > INACTIVITY_TIMEOUT_MS) {
+            // Having left a stop on foot, that is what the silence was.
+            if (leftOnFoot) {
+                end("No progress for 10 min since leaving a stop on foot",
+                    "Изглежда слязохте. Следенето се прекратява.")
+            } else {
+                end("No progress for 10 min", "Няма движение по маршрута. Следенето е спряно.")
+            }
+        }
+    }
+
+    /** The vehicle being followed was within riding range at a recent reading. */
+    private fun vehicleWithUs(now: Long): Boolean =
+        identified && now - trackedWithUsMs <= VEHICLE_BESIDE_MEMORY_MS
+
+    private fun end(why: String, message: String) {
+        FileLogger.i(TAG, "$why — ending journey automatically")
+        announce(message)
+        _events.tryEmit(JourneyEvent.RouteEnded)
+        endJourney()
+    }
+
     /** Clears everything identification keeps between readings. */
     private fun resetIdentificationState() {
         candidateVote = null
         lastInRange = emptyMap()
         lastReadingMs = 0L
-        lastTiedSet = emptySet()
         deferLogged = false
         partingFirstStamp = 0L
         partingPeakKmh = 0.0
         wrongLineNoticeGiven = false
         offRoute = false
         lostSinceMs = 0L
+        detourSinceMs = 0L
         windowMin.clear()
         unattachedMin = -1.0
         lastOffRouteLogMs = 0L
         departureStreak = 0
+        leavingPeakKmh = 0.0
+        leftOnFoot = false
+        footStopIdx = 0
+        trackedWithUsMs = 0L
+        lastDwellHoldLogMs = 0L
+        alightPendingSinceMs = 0L
     }
 
     /**

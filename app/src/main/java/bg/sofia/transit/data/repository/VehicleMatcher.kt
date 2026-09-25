@@ -110,9 +110,7 @@ class VehicleMatcher @Inject constructor(
          * they appear in this same reading, wherever they are. Absent from
          * the map means absent from the feed.
          */
-        val watched: Map<String, Sighting>,
-        /** Whether any vehicle of the line asked about is in the feed at all. */
-        val lineVisible: Boolean
+        val watched: Map<String, Sighting>
     )
 
     /**
@@ -133,16 +131,13 @@ class VehicleMatcher @Inject constructor(
      * [watchTripIds] are vehicles seen beside us at the previous reading;
      * their positions in this reading come back in [RidingVehicle.watched],
      * so the caller can tell a pair that has separated from one whose other
-     * half merely failed to report. [lineOfInterest] is the line the
-     * passenger chose; whether it publishes positions at all decides how
-     * much its absence from beside us can mean.
+     * half merely failed to report.
      */
     suspend fun findRidingVehicle(
         userLat: Double,
         userLon: Double,
         userSpeedMps: Double,
-        watchTripIds: Collection<String> = emptyList(),
-        lineOfInterest: String? = null
+        watchTripIds: Collection<String> = emptyList()
     ): RidingVehicle? {
         val nowSec = System.currentTimeMillis() / 1000
 
@@ -226,12 +221,10 @@ class VehicleMatcher @Inject constructor(
         val watched = if (watchSet.isEmpty()) emptyMap() else
             all.filter { (v, _) -> v.tripId in watchSet }
                .associate { (v, d) -> v.tripId to sighting(v, d) }
-        val lineVisible = lineOfInterest != null &&
-            all.any { (v, _) -> v.routeId == lineOfInterest }
 
         return RidingVehicle(
             best.routeId, name, type, best.tripId, headsign, dist,
-            contested, best.timestamp, ageSec, inRange, watched, lineVisible)
+            contested, best.timestamp, ageSec, inRange, watched)
     }
 
 
