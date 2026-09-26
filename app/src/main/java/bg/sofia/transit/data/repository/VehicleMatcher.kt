@@ -79,7 +79,16 @@ class VehicleMatcher @Inject constructor(
         /** Report time, epoch seconds; 0 if the feed gave none. */
         val timestamp: Long,
         /** Age of the report when read, in seconds; -1 if unknown. */
-        val ageSec: Long
+        val ageSec: Long,
+        /** Reported position, as given by the feed (not corrected). */
+        val lat: Double = 0.0,
+        val lon: Double = 0.0,
+        /**
+         * Compass bearing of travel as the feed gives it, degrees; null when
+         * the feed carries none. Whether it can be trusted is the caller's
+         * judgement — see JourneyService.vehicleHeading.
+         */
+        val bearing: Float? = null
     )
 
     /** The vehicle the passenger appears to be travelling in. */
@@ -214,7 +223,8 @@ class VehicleMatcher @Inject constructor(
             (if (contested) ", contested" else "") + " (trip=${best.tripId})")
         fun sighting(v: VehicleInfo, d: Double) = Sighting(
             v.tripId, v.routeId, d, v.timestamp,
-            if (v.timestamp > 0) (nowSec - v.timestamp).coerceAtLeast(0) else -1)
+            if (v.timestamp > 0) (nowSec - v.timestamp).coerceAtLeast(0) else -1,
+            v.lat, v.lon, v.bearing)
 
         val inRange = ranked.map { (v, d) -> sighting(v, d) }
         val watchSet = watchTripIds.toSet()
@@ -281,7 +291,8 @@ class VehicleMatcher @Inject constructor(
         if (age > MAX_POSITION_AGE_SEC) return null
         val raw = LocationHelper.distanceMetres(userLat, userLon, v.lat, v.lon)
         val corrected = (raw - userSpeedMps * age.coerceAtLeast(0)).coerceAtLeast(0.0)
-        return Sighting(v.tripId, v.routeId, corrected, v.timestamp, age)
+        return Sighting(v.tripId, v.routeId, corrected, v.timestamp, age,
+            v.lat, v.lon, v.bearing)
     }
 
 }

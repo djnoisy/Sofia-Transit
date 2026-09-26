@@ -378,6 +378,52 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          */
         private const val MIN_READING_SPACING_MS = 20_000L
 
+        /**
+         * The stop we board at is the one nearest the first settled fix taken
+         * before departure — provided it is this close. Farther than this,
+         * the passenger was not waiting at a stop of this line.
+         */
+        private const val BOARDING_REF_MAX_DIST = 60.0
+        /** Stops around us whose arrivals are collected while waiting. */
+        private const val BOARDING_STOPS_RADIUS = 150.0
+        /** How often those arrivals are refreshed while waiting. */
+        private const val BOARDING_REFRESH_MS = 3 * 60 * 1000L
+        /**
+         * A trip counts as expected at the boarding stop when its predicted
+         * arrival there lies this far before or after our departure. Wide on
+         * purpose: predictions are rough, and all this may do is spare a
+         * second reading — never decide on its own.
+         */
+        private const val EXPECTED_BEFORE_SEC = 10 * 60L
+        private const val EXPECTED_AFTER_SEC = 3 * 60L
+
+        // ── Compass ──────────────────────────────────────────────────────
+        /** Consecutive headings that must agree before ours counts as known. */
+        private const val HEADING_SAMPLES = 3
+        /** How far those may differ from one another, degrees. */
+        private const val HEADING_CONSISTENCY_DEG = 30.0
+        /** Displacement needed to work a heading out from positions. */
+        private const val HEADING_MIN_DISPLACEMENT = 15.0
+        /** Positions kept for that, and how old the heading may be. */
+        private const val HEADING_WINDOW_MS = 10_000L
+        private const val HEADING_MAX_AGE_MS = 3_000L
+        /** A stretch of route this close counts as the one we are on. */
+        private const val SEGMENT_NEAR_RADIUS = 150.0
+        /**
+         * Two stretches of one route within this much of each other's
+         * distance and running opposite ways leave its direction there
+         * ambiguous — a route turning back along the same street.
+         */
+        private const val SEGMENT_AMBIGUITY_SLACK = 30.0
+        /**
+         * Direction of the line by compass: one direction within this of our
+         * heading, and every other beyond COMPASS_OPPOSE_DEG or not near.
+         */
+        private const val COMPASS_MATCH_DEG = 60.0
+        private const val COMPASS_OPPOSE_DEG = 120.0
+        /** A vehicle heading this far from us is going the other way. */
+        private const val OPPOSITE_VEHICLE_DEG = 90.0
+
         /** Without any fix for this long, weak signal is announced. */
         private const val NO_FIX_NOTICE_MS = 30_000L
         /**
@@ -742,6 +788,74 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var lastReadingMs = 0L
     /** True while a run of deferred checks has already been logged. */
     private var deferLogged = false
+    /** When the last reading taken while standing was; see checkVehicle. */
+    private var lastStandingReadingMs = 0L
+
+    // ── Boarding: where we got on, and what was due there ────────────────
+    /** The first settled, accurate fix before departure; see onFix. */
+    private var boardingRefLat = 0.0
+    private var boardingRefLon = 0.0
+    private var boardingRefSet = false
+    /**
+     * The stop ids of the stop we boarded at: null while it cannot be told
+     * yet (direction unknown), empty once it is known that it cannot be told.
+     */
+    private var boardingStopIds: Set<String>? = null
+    /**
+     * Predicted arrivals at the stops around us, by (trip, stop). Written by
+     * the boarding watch, read by the vehicle check on another thread — hence
+     * a concurrent map.
+     */
+    private val expectedArrivals =
+        java.util.concurrent.ConcurrentHashMap<Pair<String, String>, Long>()
+    private var lastBoardingFetchMs = 0L
+    private var boardingJob: Job? = null
+    /** Set by the first identification; the boarding evidence is spent then. */
+    private var everIdentified = false
+    /**
+     * A decisive sighting made after departure but before the boarding stop
+     * could be told, kept to be checked against it once it can.
+     */
+    private var pendingBoarding: VehicleMatcher.RidingVehicle? = null
+    private var pendingBoardingAtMs = 0L
+
+    // ── Compass: which way we are heading ────────────────────────────────
+    /** Recent accurate positions, for a heading when the receiver gives none. */
+    private val headingTrail = ArrayDeque<Triple<Double, Double, Long>>()
+    /** The last consecutive headings, degrees, while moving on accurate fixes. */
+    private val headingSamples = ArrayDeque<Double>()
+    /**
+     * Our heading when known — see updateHeading — and when it was worked
+     * out. Written on the main thread, read by the vehicle check.
+     */
+    @Volatile private var currentHeading: Double? = null
+    @Volatile private var currentHeadingAtMs = 0L
+    private var lastCompassLogMs = 0L
+    /** Trip → direction (headsign; "" when unknown), and route direction → stops. */
+    private val tripHeadsigns = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val routeShapes =
+        java.util.concurrent.ConcurrentHashMap<String, List<Pair<Double, Double>>>()
+
+    /**
+     * The direction last announced ("Посока, X", or as part of a switch), so
+     * that settling the same one again says nothing and a different one says
+     * it was corrected.
+     */
+    private var lastAnnouncedDirection: String? = null
+    /**
+     * True while the direction being followed came from an identified vehicle
+     * of the chosen line rather than from our own movement: withdrawing that
+     * vehicle then withdraws the direction with it. See revokeIdentification.
+     */
+    private var directionFromVehicle = false
+    /**
+     * With the direction not yet known: where we were when the line was
+     * first found nowhere near us, while moving; unset otherwise. See
+     * watchLineAbsent.
+     */
+    private var absentFromLat = 0.0
+    private var absentFromLon = 0.0
+    private var absentFromSet = false
 
     /** Report time of the first reading that put our vehicle beyond reach. */
     private var partingFirstStamp = 0L
@@ -799,6 +913,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     /** Last time the vehicle being followed was seen within riding range. */
     private var trackedWithUsMs = 0L
+
+    /**
+     * The last stop announcement made — its kind and stop — and whether the
+     * next one is to be checked against it. Armed when the stop order is
+     * replaced (a vehicle adopted, or a return to the chosen line), because
+     * finding our place in the new order then announces again the stop that
+     * was just announced from the old one: "Спирка, 144-ТО СОУ" twice within
+     * two seconds on both test rides. Disarmed by the first stop announcement
+     * after it, whatever that is, so a different stop is always spoken.
+     */
+    private var lastStopAnnouncement: String? = null
+    private var repeatGuardArmed = false
 
     /**
      * When the vehicle was found to have gone on without us while we stood
@@ -926,6 +1052,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         startLocUpdates()
         startVehicleTracking()
         startJourneyTimers()
+        startBoardingWatch()
         announce("Следене на пътуването започна.")
     }
 
@@ -989,6 +1116,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // has been settled: it is the thing that settles the direction.
         startVehicleTracking()
         startJourneyTimers()
+        startBoardingWatch()
         announce("Следене на пътуването започна. Посоката се определя.")
     }
 
@@ -1019,6 +1147,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val sinceStart = System.currentTimeMillis() - determinationStartMs
         if (sinceStart < DIRECTION_SETTLE_MS) return false
 
+        // First, by compass: which direction's stretch of route here runs the
+        // way we are heading. Needs a few seconds of steady movement rather
+        // than the eighty metres and more the method below does — a minute
+        // and more in slow traffic. When it cannot tell (on a turn, at a
+        // crawl, or where the two directions use different streets), the
+        // method below decides as before.
+        compassDirection(loc)?.let { (idx, detail) ->
+            return resolveDirectionTo(idx, "Direction by compass: $detail")
+        }
+
         if (anchorIdx.isEmpty()) {
             anchorLat = loc.latitude
             anchorLon = loc.longitude
@@ -1033,6 +1171,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // remains below is the fallback for when no vehicle can be identified
         // at all — a line that publishes no positions — where our own
         // displacement is the only evidence there is.
+
+        // Nowhere near the line: our displacement says nothing about its
+        // direction, and "settling" one here would only name a direction of
+        // a line we are not on. See watchLineAbsent.
+        if (offRoute) return false
 
         // Guard 3 — speed. Walking to the far end of the stop, or to a shop
         // and back, can accumulate the required displacement while the vehicle
@@ -1115,18 +1258,63 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return false
         }
 
-        val advanced = listOf(best)
+        return resolveDirectionTo(best,
+            "Direction resolved after ${moved.toInt()} m at ${kmh.toInt()} km/h")
+    }
 
-        val chosen = candidates[advanced.first()]
+    /**
+     * Which direction of the line we are travelling, by compass, if it can be
+     * told: the index into [candidates] and a description for the log.
+     *
+     * Only after departure, with our heading known (see updateHeading). Each
+     * direction's stretch of route nearest us is compared with our heading;
+     * the direction is told when one is within COMPASS_MATCH_DEG of it and
+     * every other is beyond COMPASS_OPPOSE_DEG or has no stretch near us.
+     */
+    private fun compassDirection(loc: Location): Pair<Int, String>? {
+        if (movingSinceMs == 0L) return null
+        val ours = ourHeading() ?: return null
+        val segs = candidates.map { segmentHeadingNear(it.latLons, loc.latitude, loc.longitude) }
+        val diffs = segs.map { it?.let { b -> angleDiff(b, ours) } }
+        val matching = diffs.indices.filter { diffs[it] != null && diffs[it]!! < COMPASS_MATCH_DEG }
+        val others = diffs.indices - matching.toSet()
+        val detail = "ours ${ours.toInt()}°, " + candidates.indices.joinToString(", ") { i ->
+            "${candidates[i].headsign.take(14)}: " +
+                (segs[i]?.let { "${it.toInt()}° (Δ${diffs[i]!!.toInt()}°)" } ?: "no stretch near")
+        }
+        val decided = matching.size == 1 &&
+            others.all { diffs[it] == null || diffs[it]!! > COMPASS_OPPOSE_DEG }
+        if (!decided) {
+            val now = System.currentTimeMillis()
+            if (now - lastCompassLogMs >= AMBIGUITY_LOG_INTERVAL_MS) {
+                lastCompassLogMs = now
+                FileLogger.d(TAG, "Compass cannot tell the direction: $detail")
+            }
+            return null
+        }
+        return matching.first() to detail
+    }
+
+    /**
+     * Settles the direction of the line on [candidates] [idx] — by compass or
+     * by distance travelled — and says so, unless it is the direction already
+     * announced (as when it is determined again after a vehicle it came from
+     * was withdrawn).
+     */
+    private fun resolveDirectionTo(idx: Int, how: String): Boolean {
+        val chosen = candidates[idx]
         headsign     = chosen.headsign
         orderedStops = chosen.stops
         stopLatLon   = chosen.latLons
         candidates   = emptyList()
         awaitingFirstFix = true      // snap to the right stop in this order
         routeLabel = "$routeLabel → ${chosen.headsign}"
+        directionFromVehicle = false
+        offRoute = false
+        lostSinceMs = 0L
+        absentFromSet = false
 
-        FileLogger.i(TAG, "Direction resolved after ${moved.toInt()} m " +
-            "at ${kmh.toInt()} km/h: ${chosen.headsign}")
+        FileLogger.i(TAG, "$how: ${chosen.headsign}")
         // The passenger's choice, now complete with its direction, is what
         // tracking returns to should an identified vehicle prove not ours.
         if (!identified) {
@@ -1140,7 +1328,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // be the wrong one — but choosing the wrong line is rare, while the
         // silence was paid for on every journey. Should the line prove wrong,
         // the switch says so plainly a moment later.
-        announce("Посока, ${chosen.headsign}.")
+        val before = lastAnnouncedDirection
+        when {
+            announceResumedIfDoubted() -> {}
+            before == null -> announce("Посока, ${chosen.headsign}.")
+            before.equals(chosen.headsign, ignoreCase = true) ->
+                FileLogger.d(TAG, "Direction as announced before — silent")
+            else -> announce("Посоката е коригирана. Посока ${chosen.headsign}.")
+        }
+        lastAnnouncedDirection = chosen.headsign
         // Not sooner than MIN_READING_SPACING_MS after the last reading: one
         // taken five seconds after another saw the very same report.
         val sinceReading = System.currentTimeMillis() - lastReadingMs
@@ -1286,6 +1482,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         timerJob?.cancel()
         timerJob = null
         timersStartMs = 0L
+        boardingJob?.cancel()
+        boardingJob = null
 
         orderedStops = emptyList()
         stopLatLon   = emptyList()
@@ -1351,6 +1549,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // phone indoors, placed by the mobile network to within a hundred
         // metres, jumps about in a way that reads as vehicle speed.
         val accurateFix = loc.hasAccuracy() && loc.accuracy <= DEPARTURE_MAX_ACCURACY
+        updateHeading(loc, accurateFix)
+
+        // Where we stand before departure, once the receiver has settled: the
+        // reference for telling which stop we board at. See boardingStopIds.
+        if (!boardingRefSet && movingSinceMs == 0L && accurateFix && timersStartMs != 0L &&
+            System.currentTimeMillis() - timersStartMs >= DIRECTION_SETTLE_MS) {
+            boardingRefSet = true
+            boardingRefLat = loc.latitude
+            boardingRefLon = loc.longitude
+        }
 
         // Getting off pending: moving at vehicle speed now means we are in
         // another vehicle, not on the pavement. See ALIGHT_SETTLE_MS.
@@ -1407,6 +1615,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // here; whichever arrives first.
         if (candidates.isNotEmpty()) {
             if (!tryResolveDirection(loc)) {
+                watchLineAbsent(loc, accurateFix)
                 publish(distance = null)
                 return
             }
@@ -1527,6 +1736,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 lastProgressMs = System.currentTimeMillis()
                 FileLogger.i(TAG, "Back on route at ${orderedStops[best].stopName} " +
                     "(${bestDist.toInt()} m)")
+                announceResumedIfDoubted()
             }
 
             // Suppress the approach warning for the stop we just snapped to
@@ -1549,7 +1759,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // is reached. It matters most after switching lines mid-journey,
             // where the route has just changed under them.
             if (bestDist > ARRIVAL_RADIUS) {
-                announce("Следваща спирка, ${orderedStops[best].stopName}.")
+                announceStop("next", best, "Следваща спирка, ${orderedStops[best].stopName}.")
             }
 
             FileLogger.i(TAG, "First fix: snapped to stop #$best " +
@@ -1602,7 +1812,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     FileLogger.i(TAG, "ARRIVE at ${nearestDist.toInt()} m, " +
                         "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → " +
                         orderedStops[nearest].stopName)
-                    announce("Спирка, ${orderedStops[nearest].stopName}.")
+                    announceStop("arrive", nearest, "Спирка, ${orderedStops[nearest].stopName}.")
 
                     // Final stop reached → the journey is over. Ending here
                     // rather than on departure matters: a vehicle standing at
@@ -1643,7 +1853,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 approachAnnounced = false
                 if (currentIdx < orderedStops.lastIndex) {
                     currentIdx += 1
-                    announce("Следваща спирка, ${orderedStops[currentIdx].stopName}.")
+                    announceStop("next", currentIdx, "Следваща спирка, ${orderedStops[currentIdx].stopName}.")
                     suppressRedundantApproach(loc)
                 }
                 // No terminus case here any more — arriving at the final stop
@@ -1669,7 +1879,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     "stop(s) — not announcing them")
                 currentIdx = nearest
                 approachAnnounced = false
-                announce("Следваща спирка, ${orderedStops[nearest].stopName}.")
+                announceStop("next", nearest, "Следваща спирка, ${orderedStops[nearest].stopName}.")
                 suppressRedundantApproach(loc)
             }
 
@@ -1683,7 +1893,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 FileLogger.i(TAG, "APPROACH at ${distTo(loc, currentIdx).toInt()} m, " +
                     "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → " +
                     orderedStops[currentIdx].stopName)
-                announce("Наближава спирка, ${orderedStops[currentIdx].stopName}.")
+                announceStop("approach", currentIdx, "Наближава спирка, ${orderedStops[currentIdx].stopName}.")
             }
         }
 
@@ -1713,7 +1923,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // chose to stay aboard — and the safety net for a missed stop
             // could never run, because the end came first. Getting off is
             // instead recognised generally: the vehicle pulls away and we do
-            // not. See checkVehicle.
+            // not. See checkParted.
 
             // 2) Safety net: the destination was passed without the 30 m
             //    radius ever registering — almost always because the user
@@ -1921,42 +2131,133 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return partingSooner
         }
 
-        // Standing, with nothing identified: nothing can be decided, since a
-        // vehicle standing beside us at a stop may not be the one we board.
-        // Retried within seconds rather than at the next regular check — the
-        // bus usually pulls away long before that, and the first reading
-        // after it does is the one that matters. Nothing is fetched meanwhile.
-        if (!identified && !underWay) {
-            if (!deferLogged) {
-                deferLogged = true
-                FileLogger.d(TAG, "Vehicle check deferred: ${kmhNow.toInt()} km/h — " +
-                    "retrying every ${DEFERRED_CHECK_RETRY_MS / 1000} s until moving")
+        // A decisive sighting made after departure, before the boarding stop
+        // could be told: checked now that it perhaps can. See
+        // expectedAtBoarding. Needs no reading of its own.
+        pendingBoarding?.let { pc ->
+            val age = System.currentTimeMillis() - pendingBoardingAtMs
+            if (identified || everIdentified || age > READING_MEMORY_MS) {
+                pendingBoarding = null
+            } else {
+                val ids = boardingStops()
+                if (ids != null) {
+                    pendingBoarding = null
+                    val due = expectedAtBoarding(pc.tripId, ids)
+                    if (due != null) {
+                        FileLogger.i(TAG, "Candidate ${pc.routeShortName} confirmed: " +
+                            "expected at the boarding stop at ${clock(due)}, " +
+                            "departed ${clock(movingSinceMs / 1000)}")
+                        candidateVote = null
+                        if (adoptVehicle(pc)) return null
+                    }
+                } else if (boardingStopIds != null) {
+                    // Known now that the stop cannot be told.
+                    pendingBoarding = null
+                }
             }
-            return DEFERRED_CHECK_RETRY_MS
         }
-        deferLogged = false
 
+        // Standing, with nothing identified.
+        //
+        // A vehicle first seen beside us while we stand proves nothing: it
+        // may simply have stopped at the same stop, and we may not have
+        // boarded it — or it may be passing the other way. So no new
+        // candidate is taken while standing.
+        //
+        // A vehicle already seen beside us while we were MOVING is another
+        // matter. If it is still with us now, or the one it was running
+        // abreast of has visibly gone, that confirms it just as well at a
+        // standstill — it is the same evidence. On one ride the bus was seen
+        // alone beside the passenger, then stood for over two minutes in a
+        // jam, and was confirmed only after it moved again. So while
+        // standing, a reading is taken only to confirm what was seen while
+        // moving: at the regular interval, only while that sighting is recent
+        // (READING_MEMORY_MS), and without replacing it as the memory.
+        //
+        // Otherwise the check is retried within seconds rather than at the
+        // next regular check — the bus usually pulls away long before that,
+        // and the first reading after it does is the one that matters.
+        // Nothing is fetched meanwhile.
         val nowMs = System.currentTimeMillis()
         val previous = if (nowMs - lastReadingMs <= READING_MEMORY_MS) lastInRange else emptyMap()
+        val confirmOnly = !identified && !underWay
+        if (confirmOnly) {
+            val regular = if (movingSinceMs == 0L || nowMs - movingSinceMs < EARLY_PHASE_MS)
+                EARLY_CHECK_INTERVAL_MS else VEHICLE_CHECK_INTERVAL_MS
+            val spaced = nowMs - maxOf(lastReadingMs, lastStandingReadingMs) >= regular
+            if (previous.isEmpty() || !spaced) {
+                if (!deferLogged) {
+                    deferLogged = true
+                    FileLogger.d(TAG, "Vehicle check deferred: ${kmhNow.toInt()} km/h — " +
+                        "retrying every ${DEFERRED_CHECK_RETRY_MS / 1000} s until moving")
+                }
+                return DEFERRED_CHECK_RETRY_MS
+            }
+            lastStandingReadingMs = nowMs
+            FileLogger.d(TAG, "Standing: checking the vehicles seen while moving")
+        } else {
+            deferLogged = false
+        }
+        // While standing, every outcome short of confirmation comes back
+        // within seconds, as a deferral does, to catch the moment we move.
+        val sooner = if (confirmOnly) DEFERRED_CHECK_RETRY_MS else partingSooner
 
         val seen = vehicleMatcher.findRidingVehicle(
             lastLat, lastLon, mps, watchTripIds = previous.keys)
 
         if (seen == null) {
             // Nobody beside us. Whatever was in range before is no longer, so
-            // it cannot vouch for anything at the next reading.
-            lastInRange = emptyMap()
-            lastReadingMs = nowMs
-            return partingSooner
+            // it cannot vouch for anything at the next reading. (A standing
+            // reading leaves the memory from moving as it was.)
+            if (!confirmOnly) {
+                lastInRange = emptyMap()
+                lastReadingMs = nowMs
+            }
+            return sooner
         }
 
-        val inRange = seen.inRange
-        lastInRange = inRange.associateBy { it.tripId }
-        lastReadingMs = nowMs
+        // Vehicles going the other way are left out of the reading.
+        //
+        // One travelling opposite to us cannot be the one we are in, yet it
+        // passes within range on any street with two-way traffic — at 0 m
+        // beside the bus the passenger was in, on one test ride — and made
+        // the reading undecided, or worse. Judged by compass: ours from the
+        // receiver, the vehicle's as in vehicleHeading. Only while moving
+        // (standing, our heading is unknown), and only where both are known;
+        // otherwise the vehicle stays in as before. The vehicle already being
+        // followed is never left out here — whether it is still with us is
+        // the parting check's question, not this one's.
+        val heading = if (confirmOnly) null else ourHeading()
+        val inRange = if (heading == null) seen.inRange else seen.inRange.filter { s ->
+            if (identified && s.tripId == tripId) return@filter true
+            val (vh, source) = vehicleHeading(s) ?: return@filter true
+            val diff = angleDiff(vh, heading)
+            if (diff > OPPOSITE_VEHICLE_DEG) {
+                FileLogger.d(TAG, "Opposite vehicle excluded: ${s.routeId}/${s.tripId} " +
+                    "at ${s.distanceMetres.toInt()} m heading ${vh.toInt()}° ($source), " +
+                    "ours ${heading.toInt()}° (Δ${diff.toInt()}°)")
+                false
+            } else true
+        }
+        if (inRange.isEmpty()) {
+            // Only vehicles going the other way were beside us: as good as
+            // nobody.
+            if (!confirmOnly) {
+                lastInRange = emptyMap()
+                lastReadingMs = nowMs
+            }
+            return sooner
+        }
+        if (!confirmOnly) {
+            lastInRange = inRange.associateBy { it.tripId }
+            lastReadingMs = nowMs
+        }
 
         // The group the nearest cannot be told apart from: itself, and every
-        // vehicle within DECISIVE_MARGIN of it.
-        val tied = inRange.filter { it.distanceMetres - seen.distanceMetres < VehicleMatcher.DECISIVE_MARGIN }
+        // vehicle within DECISIVE_MARGIN of it. (The nearest of those left —
+        // the nearest of all may have been one going the other way.)
+        val nearestDist = inRange.first().distanceMetres
+        val tied = inRange.filter { it.distanceMetres - nearestDist < VehicleMatcher.DECISIVE_MARGIN }
         val tiedIds = tied.map { it.tripId }.toSet()
 
         // Already following one of them: nothing to decide. Once identified,
@@ -1964,47 +2265,55 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // two running abreast. Before that, the trip picked from the arrivals
         // list is confirmed only when it is among the nearest.
         if (tripId.isNotBlank() &&
-            (if (identified) lastInRange.containsKey(tripId) else tripId in tiedIds)) {
+            (if (identified) lastInRange.containsKey(tripId)
+             else tripId in tiedIds && (!confirmOnly || previous.containsKey(tripId)))) {
             identified = true
             candidateVote = null
-            return partingSooner
+            return sooner
         }
 
         // At a standstill an unfamiliar vehicle is not accepted: it may simply
-        // have stopped at the same stop, and we may not have boarded it. (Only
-        // reached once identified; before that, standing defers the check.)
-        if (!underWay) {
+        // have stopped at the same stop, and we may not have boarded it. Once
+        // identified, that means no replacement while standing; before that,
+        // a standing reading only confirms — see the pick below.
+        if (!underWay && !confirmOnly) {
             FileLogger.d(TAG, "Stationary — not adopting an unfamiliar vehicle")
-            return partingSooner
+            return sooner
         }
 
         // Which of them, if any, this reading speaks for.
         //
         // A reading is decisive when the nearest stands clear of every other
         // vehicle in range by DECISIVE_MARGIN. When it does not, the line the
-        // passenger chose breaks the tie if one of the group belongs to it:
-        // taking it changes nothing they hear, and should it be wrong, the
-        // parting check withdraws it the moment the vehicles separate.
-        // Otherwise the reading votes for nobody.
+        // passenger chose breaks the tie if one of the group belongs to it
+        // and runs in the direction being followed: taking it changes nothing
+        // they hear, and should it be wrong, the parting check withdraws it
+        // the moment the vehicles separate. Otherwise the reading votes for
+        // nobody — including when the chosen line's vehicle in the group is
+        // going the other way (checked below, once its direction is known).
         val chosenLineTied = if (identified) emptyList()
                              else tied.filter { it.routeId == selectedRouteId }
+        val tieBroken = tied.size > 1 && chosenLineTied.isNotEmpty()
         val pick: VehicleMatcher.Sighting? = when {
-            tied.size == 1           -> tied.first()
-            chosenLineTied.isNotEmpty() -> chosenLineTied.first().also {
-                FileLogger.d(TAG, "Tie broken in favour of the chosen line")
-            }
-            else -> null
+            tied.size == 1 -> tied.first()
+            tieBroken      -> chosenLineTied.first()
+            else           -> null
         }
 
         if (pick == null) {
             FileLogger.d(TAG, "Undecided: " + tied.joinToString(", ") {
                 "${it.routeId}/${it.tripId}@${it.distanceMetres.toInt()} m" } + " — no vote")
-            return partingSooner
+            return sooner
+        }
+        if (confirmOnly && !previous.containsKey(pick.tripId)) {
+            FileLogger.d(TAG, "Standing: ${pick.routeId}/${pick.tripId} was not beside us " +
+                "while moving — not a candidate")
+            return sooner
         }
 
         val candidate = if (pick.tripId == seen.tripId) seen else try {
-            vehicleMatcher.describe(pick, seen) ?: return partingSooner
-        } catch (e: Exception) { return partingSooner }
+            vehicleMatcher.describe(pick, seen) ?: return sooner
+        } catch (e: Exception) { return sooner }
 
         // Confirmation is asked for only where the candidate contradicts what
         // is already believed.
@@ -2039,6 +2348,21 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val agreesWithBelief = !identified && candidate.routeId == selectedRouteId &&
             headsign.isNotBlank() && candidate.headsign.equals(headsign, ignoreCase = true)
 
+        // A tie is broken for the chosen line only in agreement with what is
+        // believed. The chosen line's vehicle in it going the other way — a
+        // bus passing in the opposite direction, at 0 m beside the one we were
+        // in on one test ride — wins nothing: the reading votes for nobody,
+        // as any other tie.
+        if (tieBroken) {
+            if (!agreesWithBelief) {
+                FileLogger.d(TAG, "Undecided: " + tied.joinToString(", ") {
+                    "${it.routeId}/${it.tripId}@${it.distanceMetres.toInt()} m" } +
+                    " — the chosen line's vehicle is not in our direction; no vote")
+                return sooner
+            }
+            FileLogger.d(TAG, "Tie broken in favour of the chosen line")
+        }
+
         if (!agreesWithBelief) {
             val before = previous[candidate.tripId]
             val rivals = previous.keys - candidate.tripId
@@ -2050,7 +2374,25 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             }
             val confirmed = before != null &&
                 before.timestamp != candidate.timestamp && rivalsGone
-            if (!confirmed) {
+
+            // Where we boarded tells which vehicle to expect. A decisive
+            // reading of a vehicle that was due at our boarding stop around
+            // the moment we left is enough on its own: of the vehicles that
+            // could be beside us, it is the one we were waiting for. Used
+            // only for the first identification — the boarding is spent after
+            // that — and only on a decisive reading, never to break a tie.
+            val decisive = tied.size == 1
+            val boardingIds = if (!confirmed && decisive && !everIdentified) boardingStops() else null
+            val due = boardingIds?.let { expectedAtBoarding(candidate.tripId, it) }
+
+            if (!confirmed && due == null) {
+                // Decisive, after departure, but the boarding stop cannot be
+                // told yet: kept, to be checked once it can.
+                if (decisive && !confirmOnly && !everIdentified && boardingStopIds == null &&
+                    movingSinceMs != 0L) {
+                    pendingBoarding = candidate
+                    pendingBoardingAtMs = System.currentTimeMillis()
+                }
                 if (candidateVote != candidate.tripId) {
                     FileLogger.d(TAG, "Candidate ${candidate.routeShortName} at " +
                         "${candidate.distanceMetres.toInt()} m" +
@@ -2058,10 +2400,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                         " — awaiting a second reading")
                 }
                 candidateVote = candidate.tripId
-                return partingSooner
+                return sooner
             }
-            FileLogger.i(TAG, if (rivals.isEmpty()) "Candidate confirmed on a second reading"
-                else "Candidate confirmed: the vehicles beside it have moved away")
+            FileLogger.i(TAG, when {
+                confirmed && rivals.isEmpty() -> "Candidate confirmed on a second reading"
+                confirmed -> "Candidate confirmed: the vehicles beside it have moved away"
+                else -> "Candidate ${candidate.routeShortName} confirmed: expected at the " +
+                    "boarding stop at ${clock(due!!)}, departed ${clock(movingSinceMs / 1000)}"
+            })
         }
 
         // A vehicle already being followed is not abandoned merely because
@@ -2080,7 +2426,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             if (ours != null && ours - candidate.distanceMetres < SWITCH_MARGIN) {
                 FileLogger.d(TAG, "Keeping current vehicle: ours ${ours.toInt()} m, " +
                     "candidate ${candidate.distanceMetres.toInt()} m")
-                return partingSooner
+                return sooner
             }
             if (ours == null) {
                 // Not reporting at all. Absence is not evidence that we have
@@ -2089,7 +2435,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 if (candidate.distanceMetres > TAKEOVER_RADIUS) {
                     FileLogger.d(TAG, "Current vehicle silent; candidate at " +
                         "${candidate.distanceMetres.toInt()} m is not close enough to take over")
-                    return partingSooner
+                    return sooner
                 }
             }
         }
@@ -2187,6 +2533,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             "(trip=${v.tripId}, ${v.distanceMetres.toInt()} m, " +
             "line changed=$differentLine)")
 
+        // Taken before the stop order is replaced, for keeping the alighting
+        // stop below.
+        val followedLineChanges = v.routeId != routeId
+        val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId }
+
         routeId        = v.routeId
         headsign       = hs
         tripId         = v.tripId
@@ -2197,6 +2548,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         stopsMatchTrip = v.headsign != null
         routeLabel     = "$word ${v.routeShortName} → $hs"
         identified     = true
+        everIdentified = true
+        pendingBoarding = null
+
+        // The direction now followed comes from this vehicle when it was not
+        // known before, or when the vehicle's differs from the one followed.
+        // Should the vehicle prove not ours, the direction goes with it.
+        directionFromVehicle = candidates.isNotEmpty() || differentDirection
 
         // Any pending direction work belongs to the discarded assumption.
         candidates = emptyList()
@@ -2205,6 +2563,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // Position along this order is unknown, and an alighting stop chosen
         // from the previous one may not exist here.
         awaitingFirstFix  = true
+        repeatGuardArmed  = true
         atStop            = false
         approachAnnounced = false
         currentIdx        = 0
@@ -2222,13 +2581,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         partingPeakKmh    = 0.0
         trackedWithUsMs   = 0L
         alightPendingSinceMs = 0L
-        if (differentLine || differentDirection) {
-            destinationIdx      = null
-            destinationEtaEpoch = null
-            etaSource           = EtaSource.NONE
-            alightWarningsFired.clear()
-            destinationArrivedMs     = 0L
-        }
+        remapDestination(destinationStopId,
+            clear = !followedLineChanges && differentDirection)
 
         // The same switch is not announced twice.
         //
@@ -2256,6 +2610,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             firstTime && directionUnspoken -> announce("Посока, $hs.")
             else -> FileLogger.d(TAG, "Line and direction as announced — silent")
         }
+        lastAnnouncedDirection = hs
 
         publishLastKnown()
         restartEtaPolling()
@@ -2463,7 +2818,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastAnnouncedTripId = null
         lastProgressMs = System.currentTimeMillis()
 
-        if (sameLine) {
+        // On the same line the stop order normally stays — it is the one we
+        // were moving along. Not when it came from the vehicle itself: then
+        // it is as doubtful as the vehicle, and goes back to what the
+        // passenger chose — to be determined afresh, if it had not been.
+        val resetDirection = sameLine && directionFromVehicle
+        directionFromVehicle = false
+
+        if (sameLine && !resetDirection) {
             // Same line and, in practice, the direction we were moving in:
             // the stop order stays, only the claim to a particular vehicle
             // goes. So does the trip, and with it the live arrival time.
@@ -2472,6 +2834,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             destinationEtaEpoch = null
             etaSource = EtaSource.NONE
         } else {
+            val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId }
             tripId = c.tripId
             routeId = c.routeId
             headsign = c.headsign
@@ -2488,6 +2851,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             atStop = false
             approachAnnounced = false
             awaitingFirstFix = true
+            repeatGuardArmed = true
             snapWaitStartedMs = 0L
             offRoute = false
             lostSinceMs = 0L
@@ -2496,17 +2860,56 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             unattachedMin = -1.0
             leftOnFoot = false
             leavingPeakKmh = 0.0
-            destinationIdx = null
-            destinationEtaEpoch = null
-            etaSource = EtaSource.NONE
-            alightWarningsFired.clear()
-            destinationArrivedMs = 0L
+            // With the direction still to be determined there is no order to
+            // find the stop in, and it is cleared.
+            remapDestination(destinationStopId, clear = c.stops.isEmpty())
             wrongLineNoticeGiven = false
-            // Worded as the counterpart of the switch announcement ("Изглежда
-            // пътувате с автобус 76…"), so that it plainly undoes what the
-            // passenger heard then, in the same words.
-            announce("Изглежда не пътувате с $revokedName. " +
-                "Следенето се връща към линия ${c.shortName}.")
+            boardingStopIds = null
+            if (!sameLine) {
+                // Back to the chosen line only if we are anywhere near it.
+                // Otherwise returning to it would be announced only to be
+                // contradicted a few hundred metres on by "Изглежда не
+                // пътувате с линия X"; so that is said at once instead, and
+                // tracking waits, off the route, for the line to be told —
+                // resuming the chosen one if its route is reached after all.
+                val routes = if (c.candidates.isNotEmpty()) c.candidates.map { it.latLons }
+                             else listOf(c.latLons)
+                val nearChosen = (lastLat == 0.0 && lastLon == 0.0) ||
+                    lineNear(routes, lastLat, lastLon)
+                // Worded as the counterpart of the switch announcement
+                // ("Изглежда пътувате с автобус 76…"), so that it plainly
+                // undoes what the passenger heard then, in the same words.
+                if (nearChosen) {
+                    // With the direction, when it is known: the last one the
+                    // passenger heard was the other vehicle's.
+                    val dir = if (c.candidates.isEmpty() && c.headsign.isNotBlank())
+                        ", посока ${c.headsign}" else ""
+                    announce("Изглежда не пътувате с $revokedName. " +
+                        "Следенето се връща към линия ${c.shortName}$dir.")
+                    lastAnnouncedDirection = c.headsign.ifBlank { null }
+                } else {
+                    FileLogger.i(TAG, "Chosen line ${c.shortName} not near either — " +
+                        "waiting for the line to be established")
+                    announce("Изглежда не пътувате с $revokedName. " +
+                        "Изчаква се установяване на линията.")
+                    offRoute = true
+                    lostSinceMs = System.currentTimeMillis()
+                    wrongLineNoticeGiven = true
+                    // Should the chosen line's route be reached after all,
+                    // that is announced with its line and direction — see
+                    // announceResumedIfDoubted.
+                    lastAnnouncedDirection = null
+                }
+            } else if (c.candidates.isNotEmpty()) {
+                // Determined afresh; said only if it turns out different.
+                FileLogger.i(TAG, "Direction reset: it came from the withdrawn vehicle")
+            } else {
+                FileLogger.i(TAG, "Direction reset to the chosen one: ${c.headsign}")
+                if (!c.headsign.equals(lastAnnouncedDirection, ignoreCase = true)) {
+                    announce("Посоката е коригирана. Посока ${c.headsign}.")
+                }
+                lastAnnouncedDirection = c.headsign
+            }
         }
 
         // Already off the route: we are on neither that vehicle nor, it now
@@ -2601,6 +3004,56 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     /**
+     * The off-route watch for while the direction is not yet known.
+     *
+     * The other two watches measure against the stops ahead, which needs the
+     * direction; before it is known — at the start, or after a vehicle the
+     * direction came from was withdrawn — travel away from the line went
+     * unnoticed, and tracking ended ten minutes later with "Посоката не беше
+     * определена" when the truth was that the line was not ours.
+     *
+     * Here the question is simpler: is any stretch of the line, in either
+     * direction, near us at all? Moving at vehicle speed on accurate fixes
+     * for OFF_ROUTE_GROWTH with none near, we are off its route: said once,
+     * with the limit for an unestablished line running. Coming near it again
+     * — or the compass settling a direction, which needs a stretch near —
+     * ends that.
+     */
+    private fun watchLineAbsent(loc: Location, accurate: Boolean) {
+        if (candidates.isEmpty() || identified || !accurate || movingSinceMs == 0L) return
+        val near = lineNear(candidates.map { it.latLons }, loc.latitude, loc.longitude)
+        if (near) {
+            absentFromSet = false
+            if (offRoute) {
+                offRoute = false
+                lostSinceMs = 0L
+                // The direction is to be worked out afresh from here.
+                determinationStartMs = System.currentTimeMillis()
+                anchorIdx = emptyList()
+                FileLogger.i(TAG, "Back near the line; direction to be determined")
+            }
+            return
+        }
+        if (offRoute) return
+        if ((shortSpeedKmh() ?: 0.0) < MIN_SPEED_FOR_IDENTIFY) return
+        if (!absentFromSet) {
+            absentFromSet = true
+            absentFromLat = loc.latitude
+            absentFromLon = loc.longitude
+            return
+        }
+        val gone = LocationHelper.distanceMetres(
+            absentFromLat, absentFromLon, loc.latitude, loc.longitude)
+        if (gone < OFF_ROUTE_GROWTH) return
+        offRoute = true
+        lostSinceMs = System.currentTimeMillis()
+        absentFromSet = false
+        FileLogger.i(TAG, "Off the chosen line: no stretch of it within " +
+            "${SEGMENT_NEAR_RADIUS.toInt()} m over ${gone.toInt()} m, direction still unknown")
+        giveWrongLineNotice("nowhere near the line with the direction unknown")
+    }
+
+    /**
      * Stops announcing, and waits to be back within reach of the route.
      *
      * With a vehicle identified this is a detour — road works, a diversion
@@ -2655,7 +3108,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (currentIdx < orderedStops.lastIndex) {
             currentIdx += 1
             approachAnnounced = false
-            announce("Следваща спирка, ${orderedStops[currentIdx].stopName}.")
+            announceStop("next", currentIdx, "Следваща спирка, ${orderedStops[currentIdx].stopName}.")
             suppressRedundantApproach(loc)
         }
         return false
@@ -2719,7 +3172,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
 
         // Direction still unknown after ten minutes.
-        if (candidates.isNotEmpty() && determinationStartMs != 0L &&
+        // Not while off the line's route: then the line is in question, not
+        // its direction, and the limit below says so truly.
+        if (candidates.isNotEmpty() && determinationStartMs != 0L && !offRoute &&
             now - determinationStartMs > INACTIVITY_TIMEOUT_MS) {
             end("Direction not determined in 10 min",
                 "Посоката не беше определена. Следенето се прекратява.")
@@ -2809,6 +3264,98 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    /**
+     * While waiting for the vehicle: collects the predicted arrivals at the
+     * stops around us, and refreshes them every few minutes, since the
+     * predictions move. Stops at departure — what was due by then is what
+     * matters. See expectedAtBoarding.
+     */
+    private fun startBoardingWatch() {
+        boardingJob?.cancel()
+        boardingJob = serviceScope.launch {
+            while (isActive && movingSinceMs == 0L) {
+                val now = System.currentTimeMillis()
+                if (lastLat != 0.0 && now - lastBoardingFetchMs >= BOARDING_REFRESH_MS) {
+                    lastBoardingFetchMs = now
+                    try {
+                        fetchBoardingArrivals(lastLat, lastLon)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        FileLogger.w(TAG, "Boarding arrivals unavailable: ${e.message}")
+                    }
+                }
+                delay(DEFERRED_CHECK_RETRY_MS)
+            }
+        }
+    }
+
+    private suspend fun fetchBoardingArrivals(lat: Double, lon: Double) {
+        val stops = gtfsRepo.getNearestStops(lat, lon, limit = 6).filter {
+            LocationHelper.distanceMetres(lat, lon, it.stopLat, it.stopLon) <= BOARDING_STOPS_RADIUS
+        }
+        if (stops.isEmpty()) return
+        // Every id of each place, so that a bus row and a trolley row at the
+        // same stop are both covered.
+        val ids = stops.flatMap { gtfsRepo.stopIdsOfSamePlace(it.stopId) }.toSet()
+        val upcoming = realtimeRepo.getUpcomingTripsForStops(
+            ids, withinMinutes = 60, recentSeconds = EXPECTED_BEFORE_SEC)
+        // Merged, not replaced: a vehicle that has already pulled in drops
+        // out of the next fetch, and it is exactly the one that matters.
+        withContext(Dispatchers.Main) {
+            for (u in upcoming) expectedArrivals[u.tripId to u.stopId] = u.arrivalEpoch
+        }
+        FileLogger.d(TAG, "Boarding: ${upcoming.size} arrivals due at ${stops.size} stops nearby")
+    }
+
+    /**
+     * The ids of the stop we boarded at, or null when they cannot be told
+     * (yet). The stop is the one of the line being followed nearest to where
+     * we stood before departure, if that is close enough — which needs the
+     * direction, since the stops on either side of a street are different
+     * stops. Worked out once, the first time it can be.
+     */
+    private suspend fun boardingStops(): Set<String>? {
+        boardingStopIds?.let { return it.ifEmpty { null } }
+        if (!boardingRefSet || orderedStops.isEmpty() || candidates.isNotEmpty()) return null
+        var best = -1
+        var bestD = Double.MAX_VALUE
+        stopLatLon.forEachIndexed { i, (sLat, sLon) ->
+            val d = LocationHelper.distanceMetres(boardingRefLat, boardingRefLon, sLat, sLon)
+            if (d < bestD) { bestD = d; best = i }
+        }
+        if (best < 0 || bestD > BOARDING_REF_MAX_DIST) {
+            boardingStopIds = emptySet()
+            FileLogger.d(TAG, "Boarding stop not told: nearest stop of the line " +
+                "${if (best < 0) "-" else bestD.toInt().toString()} m from where we waited")
+            return null
+        }
+        val ids = try {
+            gtfsRepo.stopIdsOfSamePlace(orderedStops[best].stopId).toSet()
+        } catch (e: Exception) { setOf(orderedStops[best].stopId) }
+        boardingStopIds = ids
+        FileLogger.i(TAG, "Boarding stop: ${orderedStops[best].stopName} " +
+            "(${bestD.toInt()} m, ${ids.joinToString()})")
+        return ids
+    }
+
+    /**
+     * When [tripId] was predicted at the boarding stop, if that was around
+     * our departure; null otherwise. See EXPECTED_BEFORE_SEC.
+     */
+    private fun expectedAtBoarding(tripId: String, stopIds: Set<String>): Long? {
+        if (movingSinceMs == 0L) return null
+        val dep = movingSinceMs / 1000
+        return expectedArrivals.entries.firstOrNull { (key, epoch) ->
+            key.first == tripId && key.second in stopIds &&
+                epoch in (dep - EXPECTED_BEFORE_SEC)..(dep + EXPECTED_AFTER_SEC)
+        }?.value
+    }
+
+    private fun clock(epochSec: Long): String =
+        java.time.Instant.ofEpochSecond(epochSec)
+            .atZone(java.time.ZoneId.systemDefault()).toLocalTime().withNano(0).toString()
+
     /** The vehicle being followed was within riding range at a recent reading. */
     private fun vehicleWithUs(now: Long): Boolean =
         identified && now - trackedWithUsMs <= VEHICLE_BESIDE_MEMORY_MS
@@ -2818,6 +3365,94 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         announce(message)
         _events.tryEmit(JourneyEvent.RouteEnded)
         endJourney()
+    }
+
+    /**
+     * Carries the alighting stop over to a stop order that has just replaced
+     * the previous one — on adopting a vehicle, or on returning to the chosen
+     * line.
+     *
+     * It is kept when the new order has the same stop. It used to be cleared
+     * on every change of line, silently: a passenger who had chosen where to
+     * get off before the switch heard neither "Слизате на следващата спирка"
+     * nor "Слизате тук" afterwards, with no hint that the choice was gone —
+     * although where two lines share a stretch the stop is usually on both.
+     *
+     * Matched by stop id, never by name: the stops on either side of a street
+     * share their name. Where it occurs in the new order behind our position,
+     * the usual check reports it as passed, which on this vehicle it is.
+     * [clear] — a reversal of direction on the same line — discards it as
+     * before: the stop that was chosen is on the other side of the street.
+     */
+    private fun remapDestination(stopId: String?, clear: Boolean) {
+        if (destinationIdx == null && stopId == null) return
+        val idx = if (clear || stopId == null) -1
+                  else orderedStops.indexOfFirst { it.stopId == stopId }
+        destinationEtaEpoch = null
+        etaSource = EtaSource.NONE
+        if (idx >= 0) {
+            destinationIdx = idx
+            FileLogger.i(TAG, "Alighting stop kept: ${orderedStops[idx].stopName} (#$idx)")
+        } else {
+            if (destinationIdx != null) {
+                FileLogger.i(TAG, "Alighting stop " +
+                    (if (clear) "cleared: direction reversed" else "not on the new route — cleared"))
+            }
+            destinationIdx = null
+            alightWarningsFired.clear()
+            destinationArrivedMs = 0L
+        }
+    }
+
+    /**
+     * Announces a stop — arrival ("arrive"), the next one ("next") or its
+     * approach ("approach") — unless it repeats the previous announcement
+     * right after the stop order was replaced. See repeatGuardArmed.
+     */
+    private fun announceStop(kind: String, idx: Int, text: String) {
+        val key = "$kind|${orderedStops[idx].stopId}"
+        if (repeatGuardArmed) {
+            repeatGuardArmed = false
+            if (key == lastStopAnnouncement) {
+                FileLogger.d(TAG, "Not repeating \"$text\" right after the stop order changed")
+                return
+            }
+        }
+        lastStopAnnouncement = key
+        announce(text)
+    }
+
+    /**
+     * Which way a vehicle in a reading is heading, degrees, and where that
+     * came from; null when it cannot be told.
+     *
+     * First the bearing the feed gives, when it gives one — measured by the
+     * vehicle itself. Exactly 0 is not taken as north: feeds commonly put 0
+     * where they have no value. Otherwise from the vehicle's trip: the
+     * direction it is running (from the timetable, by its trip id), that
+     * direction's stops in order, and the stretch between two of them nearest
+     * the vehicle — see segmentHeadingNear. Stop lists are read once and
+     * kept for the journey.
+     */
+    private suspend fun vehicleHeading(s: VehicleMatcher.Sighting): Pair<Double, String>? {
+        s.bearing?.let { b ->
+            if (b != 0f && !b.isNaN()) return b.toDouble() to "feed"
+        }
+        if (s.lat == 0.0 && s.lon == 0.0) return null
+        val hs = tripHeadsigns.getOrPut(s.tripId) {
+            try { gtfsRepo.getHeadsignByTripIdPrefix(s.tripId) } catch (e: Exception) { null } ?: ""
+        }
+        if (hs.isBlank()) return null
+        val latLons = routeShapes.getOrPut("${s.routeId}|$hs") {
+            try {
+                gtfsRepo.getStopsForRouteDirection(s.routeId, hs).map { sw ->
+                    val st = gtfsRepo.getStopById(sw.stopId)
+                    Pair(st?.stopLat ?: 0.0, st?.stopLon ?: 0.0)
+                }
+            } catch (e: Exception) { emptyList() }
+        }
+        val h = segmentHeadingNear(latLons, s.lat, s.lon) ?: return null
+        return h to "route"
     }
 
     /** Clears everything identification keeps between readings. */
@@ -2842,6 +3477,25 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         trackedWithUsMs = 0L
         lastDwellHoldLogMs = 0L
         alightPendingSinceMs = 0L
+        lastStopAnnouncement = null
+        repeatGuardArmed = false
+        lastStandingReadingMs = 0L
+        boardingRefSet = false
+        boardingStopIds = null
+        expectedArrivals.clear()
+        lastBoardingFetchMs = 0L
+        everIdentified = false
+        pendingBoarding = null
+        pendingBoardingAtMs = 0L
+        headingSamples.clear()
+        headingTrail.clear()
+        currentHeading = null
+        lastCompassLogMs = 0L
+        lastAnnouncedDirection = null
+        directionFromVehicle = false
+        tripHeadsigns.clear()
+        routeShapes.clear()
+        absentFromSet = false
     }
 
     /**
@@ -3014,6 +3668,155 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         speedSamples.addLast(mps)
         while (speedSamples.size > SPEED_SAMPLE_COUNT) speedSamples.removeFirst()
     }
+
+    /**
+     * Keeps our compass heading up to date.
+     *
+     * Taken from the receiver when it gives one while moving, otherwise from
+     * how we have moved over the last few seconds. Counted only on accurate
+     * fixes at vehicle speed, and only once HEADING_SAMPLES in a row agree:
+     * on a turn, in a crawl or on a poor fix the heading swings about, and
+     * then it is left unknown rather than guessed.
+     */
+    private fun updateHeading(loc: Location, accurate: Boolean) {
+        val now = System.currentTimeMillis()
+        if (!accurate) {
+            headingSamples.clear(); headingTrail.clear(); currentHeading = null
+            return
+        }
+        headingTrail.addLast(Triple(loc.latitude, loc.longitude, now))
+        while (headingTrail.isNotEmpty() && now - headingTrail.first().third > HEADING_WINDOW_MS) {
+            headingTrail.removeFirst()
+        }
+
+        val receiverKmh = if (loc.hasSpeed()) loc.speed * 3.6 else 0.0
+        val moving = receiverKmh >= MIN_SPEED_FOR_IDENTIFY ||
+            (shortSpeedKmh() ?: 0.0) >= MIN_SPEED_FOR_IDENTIFY
+        if (!moving) {
+            headingSamples.clear(); currentHeading = null
+            return
+        }
+
+        val deg: Double? = if (loc.hasBearing() && receiverKmh >= MIN_SPEED_FOR_IDENTIFY) {
+            loc.bearing.toDouble()
+        } else {
+            // The latest earlier position far enough away to give a direction.
+            headingTrail.lastOrNull { (lat, lon, _) ->
+                LocationHelper.distanceMetres(lat, lon, loc.latitude, loc.longitude) >=
+                    HEADING_MIN_DISPLACEMENT
+            }?.let { (lat, lon, _) -> bearingDeg(lat, lon, loc.latitude, loc.longitude) }
+        }
+        if (deg == null) {
+            headingSamples.clear(); currentHeading = null
+            return
+        }
+
+        headingSamples.addLast(deg)
+        while (headingSamples.size > HEADING_SAMPLES) headingSamples.removeFirst()
+        val consistent = headingSamples.size == HEADING_SAMPLES &&
+            headingSamples.all { a -> headingSamples.all { b -> angleDiff(a, b) <= HEADING_CONSISTENCY_DEG } }
+        if (consistent) {
+            currentHeading = circularMean(headingSamples)
+            currentHeadingAtMs = now
+        } else {
+            currentHeading = null
+        }
+    }
+
+    /** Our heading, degrees, if known and current; null otherwise. */
+    private fun ourHeading(): Double? {
+        val h = currentHeading ?: return null
+        return if (System.currentTimeMillis() - currentHeadingAtMs <= HEADING_MAX_AGE_MS) h else null
+    }
+
+    /** Compass bearing from one point to another, degrees 0–360. */
+    private fun bearingDeg(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val p1 = Math.toRadians(lat1); val p2 = Math.toRadians(lat2)
+        val dl = Math.toRadians(lon2 - lon1)
+        val y = Math.sin(dl) * Math.cos(p2)
+        val x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl)
+        return (Math.toDegrees(Math.atan2(y, x)) + 360.0) % 360.0
+    }
+
+    /** Difference between two bearings, degrees 0–180: 350° and 10° are 20° apart. */
+    private fun angleDiff(a: Double, b: Double): Double {
+        val d = Math.abs(a - b) % 360.0
+        return if (d > 180.0) 360.0 - d else d
+    }
+
+    private fun circularMean(degs: Collection<Double>): Double {
+        val sx = degs.sumOf { Math.sin(Math.toRadians(it)) }
+        val cx = degs.sumOf { Math.cos(Math.toRadians(it)) }
+        return (Math.toDegrees(Math.atan2(sx, cx)) + 360.0) % 360.0
+    }
+
+    /**
+     * The compass bearing of the stretch of a route nearest the given point
+     * — the straight line between two consecutive stops — if one lies within
+     * SEGMENT_NEAR_RADIUS; null when none does, or when the route runs both
+     * ways past the point (turning back along the same street), since its
+     * direction there cannot be told.
+     */
+    private fun segmentHeadingNear(
+        latLons: List<Pair<Double, Double>>, lat: Double, lon: Double
+    ): Double? {
+        val near = stretchesNear(latLons, lat, lon)
+        val nearest = near.minByOrNull { it.first } ?: return null
+        val ambiguous = near.any { (d, b) ->
+            d <= nearest.first + SEGMENT_AMBIGUITY_SLACK &&
+                angleDiff(b, nearest.second) > COMPASS_OPPOSE_DEG
+        }
+        return if (ambiguous) null else nearest.second
+    }
+
+    /**
+     * Every stretch of the route — straight line between consecutive stops —
+     * within SEGMENT_NEAR_RADIUS of the point, as (distance, bearing).
+     */
+    private fun stretchesNear(
+        latLons: List<Pair<Double, Double>>, lat: Double, lon: Double
+    ): List<Pair<Double, Double>> {
+        if (latLons.size < 2) return emptyList()
+        val cosLat = Math.cos(Math.toRadians(lat))
+        fun x(lo: Double) = (lo - lon) * 111_320.0 * cosLat
+        fun y(la: Double) = (la - lat) * 110_540.0
+        val near = mutableListOf<Pair<Double, Double>>()   // distance, bearing
+        for (i in 0 until latLons.lastIndex) {
+            val (aLat, aLon) = latLons[i]
+            val (bLat, bLon) = latLons[i + 1]
+            if ((aLat == 0.0 && aLon == 0.0) || (bLat == 0.0 && bLon == 0.0)) continue
+            val ax = x(aLon); val ay = y(aLat); val bx = x(bLon); val by = y(bLat)
+            val dx = bx - ax; val dy = by - ay
+            val len2 = dx * dx + dy * dy
+            if (len2 < 25.0) continue                      // under 5 m: no direction
+            val t = (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0)
+            val px = ax + t * dx; val py = ay + t * dy
+            val d = Math.sqrt(px * px + py * py)
+            if (d <= SEGMENT_NEAR_RADIUS) near.add(d to bearingDeg(aLat, aLon, bLat, bLon))
+        }
+        return near
+    }
+
+    /**
+     * After "Изглежда не пътувате с линия X" or "Изчаква се установяване на
+     * линията", being found on the chosen line's route after all is news in
+     * its own right: says which line and direction are followed again, and
+     * re-arms the notice should we leave the route once more. Returns true
+     * when it spoke.
+     */
+    private fun announceResumedIfDoubted(): Boolean {
+        if (identified || !wrongLineNoticeGiven || headsign.isBlank()) return false
+        val name = chosen?.shortName ?: return false
+        wrongLineNoticeGiven = false
+        lastAnnouncedDirection = headsign
+        FileLogger.i(TAG, "Resuming the chosen line $name after the wrong-line notice")
+        announce("Следенето продължава по линия $name, посока $headsign.")
+        return true
+    }
+
+    /** Whether any stretch of any of these routes lies near the point. */
+    private fun lineNear(routes: List<List<Pair<Double, Double>>>, lat: Double, lon: Double): Boolean =
+        routes.any { stretchesNear(it, lat, lon).isNotEmpty() }
 
     /** Average of the last few samples in km/h — whether we are moving now. */
     private fun shortSpeedKmh(): Double? =

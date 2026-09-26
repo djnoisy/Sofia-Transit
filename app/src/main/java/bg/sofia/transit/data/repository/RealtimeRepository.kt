@@ -293,12 +293,20 @@ class RealtimeRepository @Inject constructor() {
      */
     suspend fun getUpcomingTripsForStops(
         stopIds: Set<String>,
-        withinMinutes: Int = 30
+        withinMinutes: Int = 30,
+        /**
+         * Also keep arrivals up to this many seconds in the past. 0 — the
+         * default, for lists of what is still to come — drops them. Tracking
+         * uses it to catch the vehicle already standing at the stop, whose
+         * predicted arrival there has just gone by.
+         */
+        recentSeconds: Long = 0
     ): List<UpcomingTripRaw> = withContext(Dispatchers.IO) {
         try {
             val feed = fetchTripUpdates() ?: return@withContext emptyList()
             val now    = Instant.now().epochSecond
             val cutoff = now + withinMinutes * 60
+            val earliest = now - recentSeconds
             val result = mutableListOf<UpcomingTripRaw>()
 
             for (entity in feed.entityList) {
@@ -314,7 +322,7 @@ class RealtimeRepository @Inject constructor() {
                         stu.hasDeparture() && stu.departure.hasTime() -> stu.departure.time
                         else -> continue
                     }
-                    if (arr < now || arr > cutoff) continue
+                    if (arr < earliest || arr > cutoff) continue
 
                     result.add(
                         UpcomingTripRaw(
@@ -682,6 +690,9 @@ class RealtimeRepository @Inject constructor() {
             var withRouteId = 0
             var withTimestamp = 0
             var withBearing = 0
+            // Bearing present and not exactly 0 — feeds often put 0 where
+            // they have no value, so presence alone proves little.
+            var withNonZeroBearing = 0
 
             // Freshness buckets, in seconds
             var fresh30 = 0; var fresh60 = 0; var fresh120 = 0
@@ -690,7 +701,8 @@ class RealtimeRepository @Inject constructor() {
             data class Veh(
                 val routeId: String, val tripId: String,
                 val lat: Double, val lon: Double,
-                val ageSec: Long?, val stopId: String
+                val ageSec: Long?, val stopId: String,
+                val bearing: Float?
             )
             val located = mutableListOf<Veh>()
 
@@ -702,7 +714,10 @@ class RealtimeRepository @Inject constructor() {
 
                 if (t.tripId.isNotEmpty()) withTripId++
                 if (t.routeId.isNotEmpty()) withRouteId++
-                if (v.hasPosition() && v.position.hasBearing()) withBearing++
+                if (v.hasPosition() && v.position.hasBearing()) {
+                    withBearing++
+                    if (v.position.bearing != 0f) withNonZeroBearing++
+                }
 
                 val hasPos = v.hasPosition() &&
                     (v.position.latitude != 0f || v.position.longitude != 0f)
@@ -729,7 +744,8 @@ class RealtimeRepository @Inject constructor() {
                     lat     = v.position.latitude.toDouble(),
                     lon     = v.position.longitude.toDouble(),
                     ageSec  = age,
-                    stopId  = if (v.hasStopId()) v.stopId else "—"
+                    stopId  = if (v.hasStopId()) v.stopId else "—",
+                    bearing = if (v.position.hasBearing()) v.position.bearing else null
                 )
             }
 
@@ -739,6 +755,7 @@ class RealtimeRepository @Inject constructor() {
             sb.appendLine("с trip_id: $withTripId")
             sb.appendLine("с route_id: $withRouteId")
             sb.appendLine("с bearing: $withBearing")
+            sb.appendLine("  от тях различен от 0: $withNonZeroBearing")
             sb.appendLine()
             sb.appendLine("=== СВЕЖЕСТ на позициите ===")
             sb.appendLine("с timestamp: $withTimestamp от $withPosition")
@@ -766,9 +783,10 @@ class RealtimeRepository @Inject constructor() {
                 } else {
                     nearest.forEach { (v, d) ->
                         val ageTxt = v.ageSec?.let { "${it}с" } ?: "без време"
+                        val bearingTxt = v.bearing?.let { "${it.toInt()}°" } ?: "няма"
                         sb.appendLine(
                             "${d.toInt()} м | route=${v.routeId} | възраст=$ageTxt | " +
-                            "stopId=${v.stopId}"
+                            "stopId=${v.stopId} | bearing=$bearingTxt"
                         )
                         sb.appendLine("      trip=${v.tripId}")
                     }

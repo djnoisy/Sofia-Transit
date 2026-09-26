@@ -315,6 +315,19 @@ class GtfsRepository @Inject constructor(
     suspend fun getStopById(id: String) = stopDao.getById(id)
 
     /**
+     * Every stop_id of the physical stop [stopId] belongs to: the stop itself
+     * and any row sharing its stop_code (a bus row and a trolley row at the
+     * same place, e.g. A1903 and TB1903). The stop alone when it has no code
+     * or no such siblings.
+     */
+    suspend fun stopIdsOfSamePlace(stopId: String): List<String> {
+        val code = getStopById(stopId)?.stopCode
+        if (code.isNullOrBlank()) return listOf(stopId)
+        val all = stopDao.getStopIdsByCode(code)
+        return if (stopId in all) all else all + stopId
+    }
+
+    /**
      * Searches the static DB for stops matching [query] (by code or name).
      * Returns up to 10 results. Empty query returns an empty list.
      */
