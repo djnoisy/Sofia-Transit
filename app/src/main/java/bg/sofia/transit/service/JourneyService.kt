@@ -173,8 +173,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         private const val MIN_CADENCE_FOR_DECISIONS = 25
         /** Thirty-second windows averaged; two of them make a minute. */
         private const val CADENCE_WINDOWS = 2
-        /** How often the degraded-positioning notice may repeat. */
-        private const val DEGRADED_NOTICE_INTERVAL_MS = 60_000L
+        /** How often the degraded-positioning notice may repeat — and the
+         *  no-position and location-off notices with it. */
+        private const val DEGRADED_NOTICE_INTERVAL_MS = 30_000L
 
 
         /** How often the "weak signal" notice repeats while waiting. */
@@ -208,8 +209,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * away, and tracking started early is tracking used as intended. But
          * it cannot be unlimited either: forgotten at the stop, tracking would
          * hold the processor awake and poll GPS every second indefinitely.
+         * Fifteen minutes, in either direction mode.
          */
-        private const val WAITING_TIMEOUT_MS = 30 * 60 * 1000L
+        private const val WAITING_TIMEOUT_MS = 15 * 60 * 1000L
 
         /** How often we confirm which vehicle we are in. */
         private const val VEHICLE_CHECK_INTERVAL_MS = 60_000L
@@ -717,6 +719,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private val cadenceHistory = ArrayDeque<Int>()
     /** When the degraded-positioning notice was last spoken. */
     private var lastDegradedNoticeMs = 0L
+    /** When "location is switched off" was last spoken; 0 while it is on. */
+    private var lastLocationOffNoticeMs = 0L
 
     /** Chosen alighting stop; null until the user picks one. */
     private var destinationIdx: Int? = null
@@ -1043,6 +1047,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         speedSamples.clear()
         cadenceHistory.clear()
         lastDegradedNoticeMs = 0L
+        lastLocationOffNoticeMs = 0L
         snapWaitStartedMs = 0L
         lastWeakSignalNoticeMs = 0L
         lastAccuracy = null
@@ -2661,6 +2666,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         announce("Слаб сигнал за местоположение.")
     }
 
+    /**
+     * Whether location is switched on in the phone's settings. Taken as on
+     * when it cannot be told, so that a failed check never silences the
+     * ordinary weak-signal notice.
+     */
+    private fun locationEnabled(): Boolean = try {
+        val lm = getSystemService(android.content.Context.LOCATION_SERVICE)
+            as? android.location.LocationManager
+        lm == null || androidx.core.location.LocationManagerCompat.isLocationEnabled(lm)
+    } catch (e: Exception) {
+        true
+    }
+
     private enum class PartingOutcome { NONE, PENDING, REVOKED }
 
     /**
@@ -3147,16 +3165,37 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (timersStartMs == 0L) return
         val now = System.currentTimeMillis()
 
-        // Signal. Fixes too sparse to decide by, or none at all for half a
-        // minute, are said; no usable fix for ten minutes ends tracking —
-        // nothing can be announced without one.
-        noticeDegradedPositioning()
+        // Signal. Location switched off in the phone's settings is said as
+        // such, at once and then every half minute; otherwise no fix at all
+        // for half a minute, or fixes too sparse to decide by, are said as
+        // weak signal. No usable fix for ten minutes ends tracking — nothing
+        // can be announced without one — whichever the cause.
+        //
+        // No fix at all is looked at before sparseness: the fix rate is
+        // counted only as fixes arrive, so once they stop it stays at its
+        // last value, and was logged as "7 fixes/min" with none coming.
         val sinceFix = now - (if (lastFixMs != 0L) lastFixMs else timersStartMs)
-        if (sinceFix >= NO_FIX_NOTICE_MS &&
-            now - lastDegradedNoticeMs >= DEGRADED_NOTICE_INTERVAL_MS) {
-            lastDegradedNoticeMs = now
-            FileLogger.i(TAG, "No position for ${sinceFix / 1000}s")
-            announce("Слаб сигнал за местоположение.")
+        if (!locationEnabled()) {
+            if (lastLocationOffNoticeMs == 0L ||
+                now - lastLocationOffNoticeMs >= DEGRADED_NOTICE_INTERVAL_MS) {
+                lastLocationOffNoticeMs = now
+                FileLogger.i(TAG, "Location is switched off in the phone's settings")
+                announce("Местоположението на телефона е изключено.")
+            }
+        } else {
+            if (lastLocationOffNoticeMs != 0L) {
+                lastLocationOffNoticeMs = 0L
+                FileLogger.i(TAG, "Location switched back on")
+            }
+            if (sinceFix >= NO_FIX_NOTICE_MS) {
+                if (now - lastDegradedNoticeMs >= DEGRADED_NOTICE_INTERVAL_MS) {
+                    lastDegradedNoticeMs = now
+                    FileLogger.i(TAG, "No position for ${sinceFix / 1000}s")
+                    announce("Слаб сигнал за местоположение.")
+                }
+            } else {
+                noticeDegradedPositioning()
+            }
         }
         val sinceUsable = now - (if (lastUsableFixMs != 0L) lastUsableFixMs else timersStartMs)
         if (sinceUsable >= NO_USABLE_FIX_TIMEOUT_MS) {
@@ -3165,17 +3204,22 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        // Never boarded: still at the start, half an hour on.
+        // Never boarded: still at the start, fifteen minutes on.
         if (movingSinceMs == 0L && now - lastProgressMs > WAITING_TIMEOUT_MS) {
             end("Journey never started", "Пътуването не започна. Следенето се прекратява.")
             return
         }
 
-        // Direction still unknown after ten minutes.
+        // Direction still unknown ten minutes after departure.
+        // Counted from departure, not from tracking being started: waiting
+        // at the stop is the limit above, and the two must not overlap. If
+        // determination began afresh after departure (a line switch, or back
+        // near the line), it counts from then instead.
         // Not while off the line's route: then the line is in question, not
         // its direction, and the limit below says so truly.
-        if (candidates.isNotEmpty() && determinationStartMs != 0L && !offRoute &&
-            now - determinationStartMs > INACTIVITY_TIMEOUT_MS) {
+        val directionClockMs = maxOf(determinationStartMs, movingSinceMs)
+        if (candidates.isNotEmpty() && determinationStartMs != 0L && movingSinceMs != 0L &&
+            !offRoute && now - directionClockMs > INACTIVITY_TIMEOUT_MS) {
             end("Direction not determined in 10 min",
                 "Посоката не беше определена. Следенето се прекратява.")
             return
