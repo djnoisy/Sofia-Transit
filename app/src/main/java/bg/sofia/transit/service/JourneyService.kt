@@ -276,6 +276,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * this, it no longer says who was beside us a moment ago.
          */
         private const val READING_MEMORY_MS = 120_000L
+        /**
+         * How recent the last reading must be for a vehicle of our line and
+         * direction seen in it to take over from ours when ours parts from
+         * us — about one reading interval. See swapToSibling.
+         */
+        private const val SIBLING_READING_MAX_AGE_MS = 45_000L
 
         /**
          * Consecutive accurate fixes above the speed threshold needed to call
@@ -790,6 +796,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     private var lastInRange: Map<String, VehicleMatcher.Sighting> = emptyMap()
     private var lastReadingMs = 0L
+    /** The vehicle swapToSibling last moved away from: never moved back to. */
+    private var swappedFromTripId: String? = null
     /** True while a run of deferred checks has already been logged. */
     private var deferLogged = false
     /** When the last reading taken while standing was; see checkVehicle. */
@@ -800,6 +808,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var boardingRefLat = 0.0
     private var boardingRefLon = 0.0
     private var boardingRefSet = false
+    /**
+     * The stop whose arrival is to pass unspoken: the one we waited at, when
+     * the stops are first placed only as we pull away from it. See the
+     * first-fix handling in onFix.
+     */
+    private var silentArrivalIdx: Int? = null
     /**
      * The stop ids of the stop we boarded at: null while it cannot be told
      * yet (direction unknown), empty once it is known that it cannot be told.
@@ -1767,6 +1781,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 announceStop("next", best, "Следваща спирка, ${orderedStops[best].stopName}.")
             }
 
+            // Pulling away from the stop we waited at. With the direction
+            // found only on departure, the stops are placed only now, a few
+            // metres out of that stop — and its arrival would be announced
+            // as we leave it: "Спирка, МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ" on one test
+            // ride, the bus already moving. It passes unspoken; the next
+            // stop is announced on leaving it, as always.
+            silentArrivalIdx = if (movingSinceMs != 0L && boardingRefSet &&
+                bestDist <= ARRIVAL_RADIUS &&
+                stopLatLon.getOrNull(best)?.let { (sLat, sLon) ->
+                    LocationHelper.distanceMetres(boardingRefLat, boardingRefLon, sLat, sLon) <=
+                        BOARDING_REF_MAX_DIST
+                } == true) best else null
+
             FileLogger.i(TAG, "First fix: snapped to stop #$best " +
                 "(${orderedStops[best].stopName}, ${bestDist.toInt()} m)")
         }
@@ -1817,7 +1844,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     FileLogger.i(TAG, "ARRIVE at ${nearestDist.toInt()} m, " +
                         "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → " +
                         orderedStops[nearest].stopName)
-                    announceStop("arrive", nearest, "Спирка, ${orderedStops[nearest].stopName}.")
+                    if (silentArrivalIdx == nearest) {
+                        FileLogger.i(TAG, "Leaving the stop we waited at — arrival not announced")
+                    } else {
+                        announceStop("arrive", nearest, "Спирка, ${orderedStops[nearest].stopName}.")
+                    }
+                    silentArrivalIdx = null
 
                     // Final stop reached → the journey is over. Ending here
                     // rather than on departure matters: a vehicle standing at
@@ -2221,49 +2253,51 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return sooner
         }
 
-        // Vehicles going the other way are left out of the reading.
+        if (!confirmOnly) {
+            lastInRange = seen.inRange.associateBy { it.tripId }
+            lastReadingMs = nowMs
+        }
+        val inRange = seen.inRange
+
+        // The group the nearest cannot be told apart from: itself, and every
+        // vehicle within DECISIVE_MARGIN of it.
+        val nearestDist = inRange.first().distanceMetres
+        val fullTie = inRange.filter { it.distanceMetres - nearestDist < VehicleMatcher.DECISIVE_MARGIN }
+        val tiedIds = fullTie.map { it.tripId }.toSet()
+
+        // The compass breaks a tie, and does nothing else.
         //
-        // One travelling opposite to us cannot be the one we are in, yet it
-        // passes within range on any street with two-way traffic — at 0 m
-        // beside the bus the passenger was in, on one test ride — and made
-        // the reading undecided, or worse. Judged by compass: ours from the
-        // receiver, the vehicle's as in vehicleHeading. Only while moving
-        // (standing, our heading is unknown), and only where both are known;
-        // otherwise the vehicle stays in as before. The vehicle already being
-        // followed is never left out here — whether it is still with us is
-        // the parting check's question, not this one's.
-        val heading = if (confirmOnly) null else ourHeading()
-        val inRange = if (heading == null) seen.inRange else seen.inRange.filter { s ->
+        // Of vehicles that cannot be told apart by distance, those going the
+        // other way are dropped from the group: one travelling opposite to us
+        // cannot be the one we are in, yet passes within range on any street
+        // with two-way traffic. Judged by our heading from the receiver and
+        // the vehicle's as in vehicleHeading; only while moving (standing,
+        // ours is unknown), only where both are known, and never the vehicle
+        // already being followed.
+        //
+        // Only within a tie, and only if something is left. The vehicle's
+        // heading is worked out from the straight line between two of its
+        // stops, which on a bend can point anywhere — the passenger's own bus
+        // looked opposite twice running on one test ride. So a vehicle alone
+        // beside us is never judged by it, a group that all looks opposite is
+        // left as it was, and a vehicle dropped here is still remembered as
+        // beside us (lastInRange): as a rival, it must visibly leave before
+        // any other is confirmed. A tie broken by compass is also never
+        // enough for the boarding stop's single reading (compassBroke).
+        val heading = if (confirmOnly || fullTie.size < 2) null else ourHeading()
+        val notOpposite = if (heading == null) fullTie else fullTie.filter { s ->
             if (identified && s.tripId == tripId) return@filter true
             val (vh, source) = vehicleHeading(s) ?: return@filter true
             val diff = angleDiff(vh, heading)
             if (diff > OPPOSITE_VEHICLE_DEG) {
-                FileLogger.d(TAG, "Opposite vehicle excluded: ${s.routeId}/${s.tripId} " +
-                    "at ${s.distanceMetres.toInt()} m heading ${vh.toInt()}° ($source), " +
-                    "ours ${heading.toInt()}° (Δ${diff.toInt()}°)")
+                FileLogger.d(TAG, "Opposite vehicle dropped from the tie: " +
+                    "${s.routeId}/${s.tripId} at ${s.distanceMetres.toInt()} m heading " +
+                    "${vh.toInt()}° ($source), ours ${heading.toInt()}° (Δ${diff.toInt()}°)")
                 false
             } else true
         }
-        if (inRange.isEmpty()) {
-            // Only vehicles going the other way were beside us: as good as
-            // nobody.
-            if (!confirmOnly) {
-                lastInRange = emptyMap()
-                lastReadingMs = nowMs
-            }
-            return sooner
-        }
-        if (!confirmOnly) {
-            lastInRange = inRange.associateBy { it.tripId }
-            lastReadingMs = nowMs
-        }
-
-        // The group the nearest cannot be told apart from: itself, and every
-        // vehicle within DECISIVE_MARGIN of it. (The nearest of those left —
-        // the nearest of all may have been one going the other way.)
-        val nearestDist = inRange.first().distanceMetres
-        val tied = inRange.filter { it.distanceMetres - nearestDist < VehicleMatcher.DECISIVE_MARGIN }
-        val tiedIds = tied.map { it.tripId }.toSet()
+        val compassBroke = notOpposite.isNotEmpty() && notOpposite.size < fullTie.size
+        val tied = if (compassBroke) notOpposite else fullTie
 
         // Already following one of them: nothing to decide. Once identified,
         // being in range at all is enough — ours need not be the nearest of
@@ -2296,11 +2330,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // the moment the vehicles separate. Otherwise the reading votes for
         // nobody — including when the chosen line's vehicle in the group is
         // going the other way (checked below, once its direction is known).
+        //
+        // A tie made only of vehicles of one line running one way — two
+        // buses of a line bunched together — does not leave the line in
+        // doubt, only which of the two we are in. The reading then votes for
+        // the nearest (or for the one voted for last time, so the vote does
+        // not swap between them), and the ordinary second reading confirms
+        // it. Should it be the other one after all, it takes over silently
+        // when the two part — see swapToSibling. The boarding stop's single
+        // reading applies as to one vehicle: the one of the two that was due
+        // there is picked (siblingDueAtBoarding).
         val chosenLineTied = if (identified) emptyList()
                              else tied.filter { it.routeId == selectedRouteId }
         val tieBroken = tied.size > 1 && chosenLineTied.isNotEmpty()
+        val siblingTie = tied.size > 1 && tied.all { sameLineAndDirection(it, tied.first()) }
         val pick: VehicleMatcher.Sighting? = when {
             tied.size == 1 -> tied.first()
+            siblingTie     -> siblingDueAtBoarding(tied, compassBroke)
+                ?: tied.firstOrNull { it.tripId == candidateVote } ?: tied.first()
             tieBroken      -> chosenLineTied.first()
             else           -> null
         }
@@ -2358,19 +2405,31 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // bus passing in the opposite direction, at 0 m beside the one we were
         // in on one test ride — wins nothing: the reading votes for nobody,
         // as any other tie.
-        if (tieBroken) {
-            if (!agreesWithBelief) {
-                FileLogger.d(TAG, "Undecided: " + tied.joinToString(", ") {
-                    "${it.routeId}/${it.tripId}@${it.distanceMetres.toInt()} m" } +
-                    " — the chosen line's vehicle is not in our direction; no vote")
-                return sooner
-            }
+        //
+        // Except for a pair of one line and direction (siblingTie): the line
+        // is not in doubt there, and the reading is an ordinary vote — also
+        // when it is the chosen line's pair, not yet known to run our way.
+        if (tieBroken && agreesWithBelief) {
             FileLogger.d(TAG, "Tie broken in favour of the chosen line")
+        } else if (siblingTie) {
+            FileLogger.d(TAG, "Tie of one line and direction: " +
+                tied.joinToString(", ") { "${it.tripId}@${it.distanceMetres.toInt()} m" } +
+                " — voting for ${pick.tripId}")
+        } else if (tieBroken) {
+            FileLogger.d(TAG, "Undecided: " + tied.joinToString(", ") {
+                "${it.routeId}/${it.tripId}@${it.distanceMetres.toInt()} m" } +
+                " — the chosen line's vehicle is not in our direction; no vote")
+            return sooner
         }
 
         if (!agreesWithBelief) {
             val before = previous[candidate.tripId]
-            val rivals = previous.keys - candidate.tripId
+            // A vehicle of the candidate's own line and direction beside it
+            // is no rival: the line is the same whichever of the two we are
+            // in, and it need not move away first (see siblingTie).
+            val rivals = previous.values
+                .filter { it.tripId != candidate.tripId && !sameLineAndDirection(it, pick) }
+                .map { it.tripId }
             val rivalsGone = rivals.all { id ->
                 val now = seen.watched[id]
                 val then = previous[id]
@@ -2387,14 +2446,21 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // only for the first identification — the boarding is spent after
             // that — and only on a decisive reading, never to break a tie.
             val decisive = tied.size == 1
-            val boardingIds = if (!confirmed && decisive && !everIdentified) boardingStops() else null
+            // Also for a pair of one line and direction: of the two, the one
+            // due at our stop was picked (siblingDueAtBoarding). That one of
+            // them was due there shows the line we boarded; which of the two
+            // we are in, the parting sets right (swapToSibling).
+            // Not on a tie broken by compass (compassBroke): without it the
+            // reading would not have been decisive.
+            val boardingIds = if (!confirmed && (decisive || siblingTie) &&
+                !everIdentified && !compassBroke) boardingStops() else null
             val due = boardingIds?.let { expectedAtBoarding(candidate.tripId, it) }
 
             if (!confirmed && due == null) {
                 // Decisive, after departure, but the boarding stop cannot be
                 // told yet: kept, to be checked once it can.
                 if (decisive && !confirmOnly && !everIdentified && boardingStopIds == null &&
-                    movingSinceMs != 0L) {
+                    movingSinceMs != 0L && !compassBroke) {
                     pendingBoarding = candidate
                     pendingBoardingAtMs = System.currentTimeMillis()
                 }
@@ -2743,6 +2809,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             FileLogger.i(TAG, "At the chosen stop; our vehicle is now " +
                 "${s.distanceMetres.toInt()} m away (report ${s.ageSec}s old) " +
                 "and we are not riding")
+            if (swapToSibling("Our vehicle has left")) return PartingOutcome.NONE
             beginAlightPending(s.distanceMetres, atChosenStop = true)
             return PartingOutcome.NONE
         }
@@ -2777,6 +2844,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val peak = maxOf(partingPeakKmh, shortSpeedKmh() ?: 0.0)
         partingPeakKmh = 0.0
 
+        if (swapToSibling("Tracked vehicle ${s.distanceMetres.toInt()} m away")) {
+            return PartingOutcome.NONE
+        }
         if (peak >= MIN_SPEED_FOR_IDENTIFY) {
             revokeIdentification("Tracked vehicle left while we kept moving " +
                 "(${s.distanceMetres.toInt()} m, our peak ${peak.toInt()} km/h)")
@@ -3231,7 +3301,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             FileLogger.i(TAG, "No vehicle speed for ${ALIGHT_SETTLE_MS / 1000} s after the " +
                 "vehicle left (${alightPendingDistance.toInt()} m) — got off")
             if (atChosen) {
-                // Silent: "Слизате тук" has been said.
+                // "Слизате тук" has been said; only the end itself is told,
+                // briefly — tracking must never stop unnoticed, least of all
+                // if the passenger in fact stayed aboard.
+                announce("Следенето приключи.")
                 _events.tryEmit(JourneyEvent.DestinationReached)
                 endJourney()
             } else {
@@ -3243,7 +3316,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // At the chosen stop. "Слизате тук" has been said; if the phone has
         // not since been carried off at vehicle speed — which would have
         // been a departure, clearing the destination — the passenger got off.
-        // Ends silently: they already know they have arrived.
+        // They already know they have arrived; only the end itself is told,
+        // briefly.
         //
         // Unless the vehicle we are following is still where we are. Speed
         // alone cannot tell a passenger who stayed aboard a bus crawling in a
@@ -3261,6 +3335,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 }
             } else {
                 FileLogger.i(TAG, "5 min at the chosen stop without departing — journey over")
+                announce("Следенето приключи.")
                 _events.tryEmit(JourneyEvent.DestinationReached)
                 endJourney()
                 return
@@ -3457,13 +3532,31 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val key = "$kind|${orderedStops[idx].stopId}"
         if (repeatGuardArmed) {
             repeatGuardArmed = false
-            if (key == lastStopAnnouncement) {
-                FileLogger.d(TAG, "Not repeating \"$text\" right after the stop order changed")
-                return
+            // A repeat is the same stop announced again at the same stage or
+            // an earlier one: "Следваща спирка X" after "Наближава спирка X"
+            // tells nothing new — it followed a line switch on one test ride.
+            // A later stage ("Спирка X" after "Наближава спирка X") is news.
+            val last = lastStopAnnouncement
+            if (last != null) {
+                val lastKind = last.substringBefore('|')
+                val lastStop = last.substringAfter('|')
+                if (lastStop == orderedStops[idx].stopId &&
+                    stageOf(kind) <= stageOf(lastKind)) {
+                    FileLogger.d(TAG, "Not repeating \"$text\" right after the stop order changed")
+                    return
+                }
             }
         }
         lastStopAnnouncement = key
         announce(text)
+    }
+
+    /** Order of the stop announcements for one stop: next, approach, arrival. */
+    private fun stageOf(kind: String): Int = when (kind) {
+        "next"     -> 0
+        "approach" -> 1
+        "arrive"   -> 2
+        else       -> -1
     }
 
     /**
@@ -3499,10 +3592,83 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         return h to "route"
     }
 
+    /** Headsign of a trip, from the timetable; blank when unknown. Kept. */
+    private suspend fun headsignOf(tripId: String): String =
+        tripHeadsigns.getOrPut(tripId) {
+            try { gtfsRepo.getHeadsignByTripIdPrefix(tripId) } catch (e: Exception) { null } ?: ""
+        }
+
+    /**
+     * Two vehicles of one line running the same way. Only when both
+     * directions are known from the timetable: an unknown one is never
+     * taken to match.
+     */
+    private suspend fun sameLineAndDirection(
+        a: VehicleMatcher.Sighting, b: VehicleMatcher.Sighting
+    ): Boolean {
+        if (a.routeId != b.routeId) return false
+        val ha = headsignOf(a.tripId)
+        return ha.isNotBlank() && ha.equals(headsignOf(b.tripId), ignoreCase = true)
+    }
+
+    /**
+     * Of a pair of one line and direction beside us (siblingTie), the one
+     * that was due at the stop we boarded at around our departure — usually
+     * both were, being bunched; then the nearer, as they come in [tied].
+     * Null when neither was, or it cannot be told: the first identification
+     * only, and not on a tie broken by compass (compassBroke).
+     */
+    private suspend fun siblingDueAtBoarding(
+        tied: List<VehicleMatcher.Sighting>, compassBroke: Boolean
+    ): VehicleMatcher.Sighting? {
+        if (everIdentified || compassBroke) return null
+        val ids = boardingStops() ?: return null
+        return tied.firstOrNull { expectedAtBoarding(it.tripId, ids) != null }
+    }
+
+    /**
+     * The vehicle we follow has parted from us — but at the last reading
+     * another vehicle of the same line, running the same way, was beside us.
+     * Then that one is taken as ours, silently: two buses of a line bunched
+     * together could not be told apart when one was chosen (see siblingTie),
+     * and the one that stays with us is the one we are in. The line and
+     * direction do not change, so nothing is announced; without this the
+     * passenger would have heard "Изглежда не пътувате с автобус 76" while
+     * riding a 76, or "Изглежда слязохте" while still aboard.
+     *
+     * The price: having got off, with another bus of the line standing at
+     * the stop, the end comes only once that one has left too.
+     */
+    private suspend fun swapToSibling(why: String): Boolean {
+        val now = System.currentTimeMillis()
+        if (headsign.isBlank() || lastReadingMs == 0L ||
+            now - lastReadingMs > SIBLING_READING_MAX_AGE_MS) return false
+        val sibling = lastInRange.values
+            .filter { it.tripId != tripId && it.tripId != swappedFromTripId &&
+                it.routeId == routeId &&
+                headsignOf(it.tripId).equals(headsign, ignoreCase = true) }
+            .minByOrNull { it.distanceMetres } ?: return false
+        FileLogger.i(TAG, "$why — but ${sibling.routeId}/${sibling.tripId}, same line and " +
+            "direction, was beside us at the last reading (${sibling.distanceMetres.toInt()} m): " +
+            "following it instead, silently")
+        swappedFromTripId = tripId
+        tripId = sibling.tripId
+        lastAnnouncedTripId = sibling.tripId
+        partingFirstStamp = 0L
+        partingPeakKmh = 0.0
+        // With us as of that reading — not claimed for now.
+        trackedWithUsMs = lastReadingMs
+        alightPendingSinceMs = 0L
+        restartEtaPolling()
+        publishLastKnown()
+        return true
+    }
+
     /** Clears everything identification keeps between readings. */
     private fun resetIdentificationState() {
         candidateVote = null
         lastInRange = emptyMap()
+        swappedFromTripId = null
         lastReadingMs = 0L
         deferLogged = false
         partingFirstStamp = 0L
@@ -3525,6 +3691,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         repeatGuardArmed = false
         lastStandingReadingMs = 0L
         boardingRefSet = false
+        silentArrivalIdx = null
         boardingStopIds = null
         expectedArrivals.clear()
         lastBoardingFetchMs = 0L
