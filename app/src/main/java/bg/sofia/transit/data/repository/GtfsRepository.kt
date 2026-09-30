@@ -39,6 +39,7 @@ class GtfsRepository @Inject constructor(
         private const val TAG = "GtfsRepository"
         /** Directory where the weekly worker stores fresh GTFS files. */
         const val EXTERNAL_DIR_NAME = "gtfs"
+        private const val KEY_IMPORT_IN_PROGRESS = "in_progress"
     }
 
     private val _dataReady = MutableStateFlow(false)
@@ -60,13 +61,22 @@ class GtfsRepository @Inject constructor(
     private val importMutex = Mutex()
 
     /**
+     * Holds a flag that is set (synchronously, commit()) before an import
+     * starts clearing tables and cleared only after it completed. If the
+     * process dies in between, the next start sees it and reinstalls.
+     */
+    private val importPrefs by lazy {
+        context.getSharedPreferences("gtfs_import", Context.MODE_PRIVATE)
+    }
+
+    /**
      * Application-lifetime scope for the first-run import. Deliberately NOT
      * the Activity's lifecycleScope: that scope dies on rotation or when the
      * Activity is destroyed, which would abort a 40-second import halfway
      * and leave the DB partially populated.
      */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var initialLoadJob: Job? = null
+    @Volatile private var initialLoadJob: Job? = null
 
     /**
      * True once the DB has been populated at least once — either found
@@ -105,6 +115,13 @@ class GtfsRepository @Inject constructor(
      * Also sets dataReady so that NearbyViewModel doesn't need to re-check.
      */
     suspend fun isDatabaseReady(): Boolean {
+        // An import that was cut off (process killed, worker stopped) leaves
+        // tables half filled, which the row counts below would take for a
+        // complete database — and nothing would ever repair it.
+        if (importPrefs.getBoolean(KEY_IMPORT_IN_PROGRESS, false)) {
+            FileLogger.w(TAG, "Previous import did not finish — database treated as not ready")
+            return false
+        }
         val ready = stopDao.count() > 0 && routeDao.count() > 0 && stopTimeDao.count() > 0
         if (ready) {
             _dataReady.value = true
@@ -145,57 +162,69 @@ class GtfsRepository @Inject constructor(
     fun startInitialLoadIfNeeded() {
         synchronized(this) {
             if (initialLoadJob?.isActive == true) return
+            // An update import is replacing the tables right now (e.g. the
+            // Activity was recreated mid-import): the tables may look empty,
+            // but a "first-run" import on top of it would be wrong.
+            if (importMutex.isLocked) return
             initialLoadJob = appScope.launch {
                 try {
-                    // A new app version can ship newer bundled data than the
-                    // database already holds. Without this check the import is
-                    // skipped (the DB is "ready") and the refresh is skipped
-                    // too (the bundle looks fresh), so the app keeps running on
-                    // months-old data while claiming to be current — which is
-                    // how line 88 stayed invisible after its stops were added
-                    // to the feed.
-                    val bundleMs = GtfsUpdateWorker.bundledDateMs(context)
-                    val haveMs   = GtfsUpdateWorker.lastSuccessMs(context)
-                    val bundleIsNewer = bundleMs != null && bundleMs > haveMs
-
-                    if (isDatabaseReady() && bundleIsNewer) {
-                        FileLogger.i(TAG, "Bundled data is newer than the database " +
-                            "($bundleMs > $haveMs) — reimporting from assets")
-                        loadStaticData()
-                        GtfsUpdateWorker.recordBundledDate(context)
-                        _initialLoadDone.value = true
+                    if (isDatabaseReady()) {
+                        // A new app version can ship newer bundled data than
+                        // the data installed — which is how line 88 stayed
+                        // invisible after its stops were added to the feed.
+                        // Then the data is reinstalled by the worker (server
+                        // first, else the new bundle), like an update: in the
+                        // background, with the dialog only while installing,
+                        // and never during a journey.
+                        if (GtfsUpdateWorker.bundleIsNewerThanData(context)) {
+                            FileLogger.i(TAG, "Bundled data is newer than the installed data — reinstalling")
+                            GtfsUpdateWorker.enqueueInstall(context, replaceLocal = true)
+                        }
                         return@launch
                     }
 
-                    if (!isDatabaseReady()) {
-                        // Remember whether we're about to import bundled or
-                        // downloaded data BEFORE the import runs. If bundled,
-                        // we set the freshness clock to the bundle's own date
-                        // afterwards, so scheduleIfStale() can tell whether the
-                        // baked-in data is recent enough to skip the immediate
-                        // download — avoiding the double import on a fresh APK.
-                        val usingBundled = getActiveDataDir() == null
-                        FileLogger.i(TAG, "DB empty — starting first-run import " +
-                            "(${if (usingBundled) "bundled" else "downloaded"})")
-                        loadStaticData()
-                        if (usingBundled) {
-                            GtfsUpdateWorker.recordBundledDate(context)
-                        }
-                        _initialLoadDone.value = true
+                    run {
+                        // First run (or an emptied database). The install is
+                        // done by the update worker: it first asks the server
+                        // for newer data and installs that directly; with no
+                        // newer data, no internet or a failed download it
+                        // installs the local data (bundled, or a previously
+                        // downloaded set). The UI follows it with a dialog.
+                        // initialLoadDone is set by loadStaticData() when the
+                        // worker's import completes.
+                        FileLogger.i(TAG, "DB empty — handing first-run install to the update worker")
+                        GtfsUpdateWorker.enqueueInstall(context)
                     }
                 } catch (e: Throwable) {
                     // Never rethrow: an uncaught CancellationException here is
                     // what used to kill the caller silently and strand the UI.
-                    FileLogger.e(TAG, "First-run import failed: ${e.message}", e)
+                    FileLogger.e(TAG, "First-run check failed: ${e.message}", e)
+                    // Still hand over to the install: it waits for other
+                    // imports, and if it fails the user gets "Опитай отново".
+                    try { GtfsUpdateWorker.enqueueInstall(context) } catch (_: Throwable) { }
                 }
             }
         }
     }
 
-    /** Retries the first-run import after a failure. */
+    /**
+     * True while any import is running or about to run (first-run or
+     * bundled re-import job, or an import holding the mutex). The update
+     * worker must not swap the data directory underneath it.
+     */
+    fun isImportBusy(): Boolean =
+        importMutex.isLocked || initialLoadJob?.isActive == true
+
+    /**
+     * "Опитай отново" after a failed install: queue the install directly.
+     * (Going through startInitialLoadIfNeeded could return silently while
+     * another import holds the lock; the worker waits for it instead.)
+     */
     fun retryInitialLoad() {
-        synchronized(this) { initialLoadJob = null }
-        startInitialLoadIfNeeded()
+        appScope.launch {
+            try { GtfsUpdateWorker.enqueueInstall(context) }
+            catch (e: Throwable) { FileLogger.e(TAG, "Retry could not be queued: ${e.message}", e) }
+        }
     }
 
     private suspend fun loadStaticDataLocked(onProgress: (String) -> Unit = {}) {
@@ -204,6 +233,7 @@ class GtfsRepository @Inject constructor(
         // tables. Also flips on subsequent reloads (weekly worker), giving
         // observers a true → false → true edge to re-trigger queries.
         _dataReady.value = false
+        importPrefs.edit().putBoolean(KEY_IMPORT_IN_PROGRESS, true).commit()
         // Invalidate derived caches BEFORE touching the tables as well as
         // after: if an import fails halfway, the tables have changed but the
         // final invalidation is never reached, and a stale cache would
@@ -262,6 +292,7 @@ class GtfsRepository @Inject constructor(
                 FileLogger.i(TAG, "DB loaded ($source): stops=${stops.size} routes=${routes.size} " +
                            "trips=${trips.size} calendar=${calendar.size}")
             }
+            importPrefs.edit().putBoolean(KEY_IMPORT_IN_PROGRESS, false).commit()
             _dataReady.value = true
             _initialLoadDone.value = true
         } catch (e: Throwable) {

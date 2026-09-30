@@ -23,7 +23,7 @@ class TransitApplication : Application(), Configuration.Provider {
         FileLogger.init(this)
         // No background work is scheduled here on purpose. The GTFS refresh
         // is triggered from MainActivity once the database is confirmed
-        // populated (see GtfsUpdateWorker.scheduleIfStale) so that nothing
+        // populated (see GtfsUpdateWorker.checkForUpdate) so that nothing
         // ever runs unless the user actually opens the app, and so that a
         // refresh can never collide with the first-run import.
     }

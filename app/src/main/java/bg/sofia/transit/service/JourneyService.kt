@@ -308,6 +308,31 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * within seconds.
          */
         private const val DEPARTURE_MIN_DISPLACEMENT = 30.0
+        /**
+         * How long a stop close ahead must go unapproached, the direction
+         * known, before the stops are placed anyway. Longer than a brief
+         * slowing, which would otherwise have the stop named seconds before
+         * its arrival; shorter than a red light.
+         */
+        private const val NOT_APPROACHING_ATTACH_MS = 12_000L
+        /**
+         * A stop this far or more off the way we were last going is behind
+         * us (see the attaching while waiting in onFix); and how old that
+         * heading may be.
+         */
+        private const val STOP_BEHIND_DEG = 120.0
+        /** How far the route's way into the stop may differ from ours. */
+        private const val ROUTE_WAY_DEG = 90.0
+        private const val HEADING_FOR_ATTACH_MAX_AGE_MS = 120_000L
+        /** Drawn this much farther from the stop, the count restarts. */
+        private const val NOT_APPROACHING_DRIFT = 20.0
+        /**
+         * A gap this long in the counted fixes restarts the count. Long
+         * enough for fixes throttled with the screen off (6-8 s apart when
+         * power saving was on), short enough that a count interrupted by
+         * other handling does not carry over.
+         */
+        private const val NOT_APPROACHING_GAP_MS = 10_000L
 
         /**
          * Speed samples in the short average, used where the question is
@@ -849,6 +874,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     private var silentArrivalIdx: Int? = null
     /**
+     * Since when the stop to attach to has gone unapproached while attaching
+     * to it without approach would be allowed; 0 when not counting. With the
+     * stop, its distance then, and the last fix counted: the count restarts
+     * if the stop changes, if we have drawn away from it (it may be behind
+     * us), or if fixes stopped being counted in between.
+     */
+    private var notApproachingSinceMs = 0L
+    private var notApproachingIdx = -1
+    private var notApproachingFromDist = 0.0
+    private var notApproachingLastMs = 0L
+    /**
      * The stop ids of the stop we boarded at: null while it cannot be told
      * yet (direction unknown), empty once it is known that it cannot be told.
      */
@@ -882,6 +918,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     @Volatile private var currentHeading: Double? = null
     @Volatile private var currentHeadingAtMs = 0L
+    /**
+     * The last heading we had while moving, kept after we stop (ourHeading
+     * lapses within seconds): which way the vehicle was going when it came
+     * to a halt. See the attaching while waiting in onFix.
+     */
+    private var lastMovingHeading: Double? = null
+    private var lastMovingHeadingAtMs = 0L
     private var lastCompassLogMs = 0L
     /** Trip → direction (headsign; "" when unknown), and route direction → stops. */
     private val tripHeadsigns = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -1770,6 +1813,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // Standing at the stop is the exception: there the distance is
             // small and unchanging, and waiting for it to shrink would mean
             // never starting.
+            var attachedWhileWaiting = false
             if (bestDist > ARRIVAL_RADIUS) {
                 if (prevLat == 0.0 && prevLon == 0.0) {
                     // Nothing to compare against yet; one more fix will tell.
@@ -1781,14 +1825,69 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     prevLat, prevLon,
                     stopLatLon[best].first, stopLatLon[best].second)
                 if (before - bestDist < APPROACHING_MARGIN) {
-                    awaitingFirstFix = true
-                    FileLogger.d(TAG, "Not approaching ${orderedStops[best].stopName} " +
-                        "(${before.toInt()} m → ${bestDist.toInt()} m) — not attaching yet")
-                    watchUnattached(bestDist, orderedStops[best].stopName)
-                    publish(distance = null)
-                    return
+                    val now = System.currentTimeMillis()
+                    val allowed = movingSinceMs != 0L && candidates.isEmpty() && !offRoute &&
+                        accurateFix && bestDist <= SNAP_SUPPRESS_APPROACH_RADIUS
+                    if (!allowed) {
+                        notApproachingSinceMs = 0L
+                    } else if (notApproachingSinceMs == 0L || best != notApproachingIdx ||
+                        bestDist > notApproachingFromDist + NOT_APPROACHING_DRIFT ||
+                        now - notApproachingLastMs > NOT_APPROACHING_GAP_MS) {
+                        notApproachingSinceMs = now
+                        notApproachingIdx = best
+                        notApproachingFromDist = bestDist
+                    }
+                    notApproachingLastMs = now
+                    // Waiting or circling close to a stop, the way known.
+                    //
+                    // With the direction found by compass, it can be known
+                    // well before the bus moves towards any stop: around
+                    // ДЪРЖАВНА ПЕЧАТНИЦА the bus circled 100-110 m from it
+                    // for 42 s after "Посока, ЦЕНТРАЛНА ГАРА" and nothing
+                    // was said the whole time; at a red light 98 m short of
+                    // БЛ. 43 it was 35 s. Close by, with the direction known,
+                    // an accurate fix, after departure, and no approach for
+                    // NOT_APPROACHING_ATTACH_MS, the stop is taken as the one
+                    // ahead and named — its arrival is not seconds away, as
+                    // it is when we are moving towards it (see below).
+                    val waited = allowed && notApproachingSinceMs != 0L &&
+                        now - notApproachingSinceMs >= NOT_APPROACHING_ATTACH_MS
+                    // And only if the stop is not behind us, by the way we
+                    // were last going: one just passed, the bus stopped at a
+                    // light beyond it, is not the next stop — on a bend the
+                    // passed-stop test above may miss it. Beside us, as when
+                    // circling a block around it, it may be ahead.
+                    //
+                    // Nor a stop whose route runs the other way from ours: a
+                    // later stop of the line on a parallel street or on the
+                    // other side of a loop can lie nearer than the true next
+                    // one. The route's way into the stop — from the stop
+                    // before it — must be within ROUTE_WAY_DEG of ours.
+                    val notBehind = lastMovingHeading?.let { h ->
+                        val stop = stopLatLon.getOrNull(best)
+                        val prevStop = stopLatLon.getOrNull(best - 1)
+                        now - lastMovingHeadingAtMs <= HEADING_FOR_ATTACH_MAX_AGE_MS &&
+                            stop != null && prevStop != null &&
+                            angleDiff(bearingDeg(loc.latitude, loc.longitude,
+                                stop.first, stop.second), h) < STOP_BEHIND_DEG &&
+                            angleDiff(bearingDeg(prevStop.first, prevStop.second,
+                                stop.first, stop.second), h) <= ROUTE_WAY_DEG
+                    } == true
+                    if (!waited || !notBehind) {
+                        awaitingFirstFix = true
+                        FileLogger.d(TAG, "Not approaching ${orderedStops[best].stopName} " +
+                            "(${before.toInt()} m → ${bestDist.toInt()} m) — not attaching yet")
+                        watchUnattached(bestDist, orderedStops[best].stopName)
+                        publish(distance = null)
+                        return
+                    }
+                    attachedWhileWaiting = true
+                    FileLogger.i(TAG, "Not approaching ${orderedStops[best].stopName} for " +
+                        "${(now - notApproachingSinceMs) / 1000} s, ${bestDist.toInt()} m off, " +
+                        "the direction known — attaching")
                 }
             }
+            notApproachingSinceMs = 0L
 
             currentIdx = best
             windowMin.clear()
@@ -1829,8 +1928,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // — "Следваща спирка, БЛ. 43" and "Спирка, БЛ. 43" came 7 s apart
             // on one test ride, 6 s apart at ДЪРЖАВНА ПЕЧАТНИЦА on another.
             // As with the approach warning above, the arrival alone is said.
-            if (bestDist > SNAP_SUPPRESS_APPROACH_RADIUS) {
-                announceStop("next", best, "Следваща спирка, ${orderedStops[best].stopName}.")
+            if (bestDist > SNAP_SUPPRESS_APPROACH_RADIUS || attachedWhileWaiting) {
+                announceNextStop(best, loc)
             } else if (bestDist > ARRIVAL_RADIUS) {
                 FileLogger.d(TAG, "Placed ${bestDist.toInt()} m from " +
                     "${orderedStops[best].stopName} — its arrival follows; next stop not said")
@@ -1945,8 +2044,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 approachAnnounced = false
                 if (currentIdx < orderedStops.lastIndex) {
                     currentIdx += 1
-                    announceStop("next", currentIdx, "Следваща спирка, ${orderedStops[currentIdx].stopName}.")
-                    suppressRedundantApproach(loc)
+                    announceNextStop(currentIdx, loc)
                 }
                 // No terminus case here any more — arriving at the final stop
                 // already ended the journey above.
@@ -1971,8 +2069,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     "stop(s) — not announcing them")
                 currentIdx = nearest
                 approachAnnounced = false
-                announceStop("next", nearest, "Следваща спирка, ${orderedStops[nearest].stopName}.")
-                suppressRedundantApproach(loc)
+                announceNextStop(nearest, loc)
             }
 
             // ── Approaching warning ───────────────────────────────────────
@@ -2067,9 +2164,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         when (remaining) {
             2 -> announce("Остават две спирки до слизане.")
             1 -> announce("Остава една спирка до слизане.")
-            // No name here: "Следваща спирка, X" has just been announced from
-            // the same fix, so repeating X would be the second mention in one
-            // breath.
+            // No name here: "Следваща спирка, X" (or "Наближава спирка, X")
+            // has just been announced from the same fix, so repeating X would
+            // be the second mention in one breath.
             0 -> announce("Слизате на следващата спирка.")
         }
     }
@@ -3298,8 +3395,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (currentIdx < orderedStops.lastIndex) {
             currentIdx += 1
             approachAnnounced = false
-            announceStop("next", currentIdx, "Следваща спирка, ${orderedStops[currentIdx].stopName}.")
-            suppressRedundantApproach(loc)
+            announceNextStop(currentIdx, loc)
         }
         return false
     }
@@ -3797,6 +3893,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         boardingRefSet = false
         departureRefSet = false
         silentArrivalIdx = null
+        notApproachingSinceMs = 0L
         boardingStopIds = null
         expectedArrivals.clear()
         lastBoardingFetchMs = 0L
@@ -3804,6 +3901,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         pendingBoarding = null
         pendingBoardingAtMs = 0L
         headingSamples.clear()
+        lastMovingHeading = null
+        lastMovingHeadingAtMs = 0L
         headingTrail.clear()
         currentHeading = null
         lastCompassLogMs = 0L
@@ -4045,6 +4144,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (consistent) {
             currentHeading = circularMean(headingSamples)
             currentHeadingAtMs = now
+            lastMovingHeading = currentHeading
+            lastMovingHeadingAtMs = now
         } else {
             currentHeading = null
         }
@@ -4232,6 +4333,31 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         return bySpeed
             .coerceIn(APPROACH_MIN_RADIUS, APPROACH_RADIUS)
             .coerceAtMost(spacing / 2.0)
+    }
+
+    /**
+     * Names the stop we are now heading for: "Следваща спирка, X" — or, if
+     * X is already inside its approach radius, "Наближава спирка, X" in its
+     * place, the warning then counting as given. Both would otherwise be
+     * due at once: after a line switch on one test ride, "Следваща спирка,
+     * ХОТЕЛ ПЛИСКА" and "Наближава спирка, ХОТЕЛ ПЛИСКА" were spoken in the
+     * same second, 154 m out at 50 km/h, and "Спирка" nine seconds later.
+     * With the warning switched off it is always "Следваща спирка", as
+     * before (see suppressRedundantApproach).
+     */
+    private fun announceNextStop(idx: Int, loc: Location) {
+        val name = orderedStops[idx].stopName
+        val radius = approachRadiusFor(idx)
+        val dist = distTo(loc, idx)
+        if (radius != null && dist <= radius) {
+            approachAnnounced = true
+            FileLogger.i(TAG, "APPROACH at ${dist.toInt()} m, " +
+                "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → $name (first naming it)")
+            announceStop("approach", idx, "Наближава спирка, $name.")
+        } else {
+            announceStop("next", idx, "Следваща спирка, $name.")
+            suppressRedundantApproach(loc)
+        }
     }
 
     /**
