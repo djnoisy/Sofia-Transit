@@ -297,6 +297,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         private const val DEPARTURE_CONFIRM_FIXES = 3
         /** Fixes vaguer than this take no part in detecting departure. */
         private const val DEPARTURE_MAX_ACCURACY = 30.0f
+        /**
+         * Departure also needs us this far from where we stood once the
+         * receiver had settled (the departure reference). In the first seconds
+         * after tracking starts the position settles in jumps of 10-15 m, and
+         * worked out from those jumps the speed read 12 km/h three fixes
+         * running: "departure" was taken 6 s after tracking began at the
+         * stop, nine minutes before the bus came. Jitter does not carry the
+         * position this far away and keep it there; a bus pulling out does,
+         * within seconds.
+         */
+        private const val DEPARTURE_MIN_DISPLACEMENT = 30.0
 
         /**
          * Speed samples in the short average, used where the question is
@@ -796,6 +807,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     private var lastInRange: Map<String, VehicleMatcher.Sighting> = emptyMap()
     private var lastReadingMs = 0L
+    /**
+     * The vehicle picked at consecutive readings while moving, and at how
+     * many in a row. A vote won only by having stayed with us through a tie
+     * (the persistent pick in checkVehicle) confirms only once it has been
+     * the pick at two readings before this one.
+     */
+    private var pickStreakTrip: String? = null
+    private var pickStreak = 0
     /** The vehicle swapToSibling last moved away from: never moved back to. */
     private var swappedFromTripId: String? = null
     /** True while a run of deferred checks has already been logged. */
@@ -808,6 +827,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var boardingRefLat = 0.0
     private var boardingRefLon = 0.0
     private var boardingRefSet = false
+    /**
+     * Where we were once the receiver had settled, whether standing or not:
+     * the point departure is measured from (DEPARTURE_MIN_DISPLACEMENT).
+     * Kept apart from the boarding reference, which is taken only standing.
+     */
+    private var departureRefLat = 0.0
+    private var departureRefLon = 0.0
+    private var departureRefSet = false
     /**
      * The stop whose arrival is to pass unspoken: the one we waited at, when
      * the stops are first placed only as we pull away from it. See the
@@ -1570,10 +1597,21 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val accurateFix = loc.hasAccuracy() && loc.accuracy <= DEPARTURE_MAX_ACCURACY
         updateHeading(loc, accurateFix)
 
-        // Where we stand before departure, once the receiver has settled: the
-        // reference for telling which stop we board at. See boardingStopIds.
-        if (!boardingRefSet && movingSinceMs == 0L && accurateFix && timersStartMs != 0L &&
-            System.currentTimeMillis() - timersStartMs >= DIRECTION_SETTLE_MS) {
+        // Where we are before departure, once the receiver has settled: the
+        // point departure is measured from (see recordSpeed), and — if we
+        // are standing there — the reference for telling which stop we board
+        // at (see boardingStopIds). Started aboard a moving vehicle, there is
+        // no stop we boarded at: that reference is not taken, as it never
+        // was when departure used to be detected before this moment.
+        val settledFix = movingSinceMs == 0L && accurateFix && timersStartMs != 0L &&
+            System.currentTimeMillis() - timersStartMs >= DIRECTION_SETTLE_MS
+        if (!departureRefSet && settledFix) {
+            departureRefSet = true
+            departureRefLat = loc.latitude
+            departureRefLon = loc.longitude
+        }
+        if (!boardingRefSet && settledFix &&
+            (shortSpeedKmh() ?: 0.0) < MIN_SPEED_FOR_FOREIGN_CHECK) {
             boardingRefSet = true
             boardingRefLat = loc.latitude
             boardingRefLon = loc.longitude
@@ -1777,8 +1815,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // switched off, and then nothing at all is spoken until the stop
             // is reached. It matters most after switching lines mid-journey,
             // where the route has just changed under them.
-            if (bestDist > ARRIVAL_RADIUS) {
+            //
+            // Nor when it is this close. The stops are placed only once we are
+            // moving towards one (see the approach test above), so within
+            // SNAP_SUPPRESS_APPROACH_RADIUS the arrival follows within seconds
+            // — "Следваща спирка, БЛ. 43" and "Спирка, БЛ. 43" came 7 s apart
+            // on one test ride, 6 s apart at ДЪРЖАВНА ПЕЧАТНИЦА on another.
+            // As with the approach warning above, the arrival alone is said.
+            if (bestDist > SNAP_SUPPRESS_APPROACH_RADIUS) {
                 announceStop("next", best, "Следваща спирка, ${orderedStops[best].stopName}.")
+            } else if (bestDist > ARRIVAL_RADIUS) {
+                FileLogger.d(TAG, "Placed ${bestDist.toInt()} m from " +
+                    "${orderedStops[best].stopName} — its arrival follows; next stop not said")
             }
 
             // Pulling away from the stop we waited at. With the direction
@@ -2249,6 +2297,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             if (!confirmOnly) {
                 lastInRange = emptyMap()
                 lastReadingMs = nowMs
+                pickStreakTrip = null
+                pickStreak = 0
             }
             return sooner
         }
@@ -2344,19 +2394,53 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                              else tied.filter { it.routeId == selectedRouteId }
         val tieBroken = tied.size > 1 && chosenLineTied.isNotEmpty()
         val siblingTie = tied.size > 1 && tied.all { sameLineAndDirection(it, tied.first()) }
+        // A tie in which just one vehicle was beside us at the previous
+        // reading too, the others being newcomers, votes for that one. The
+        // vehicle we are in stays with us from reading to reading; the ones
+        // we pass come and go. On Цариградско шосе the bus the passenger was
+        // in was at 0-5 m at four readings running, each time beside a
+        // different vehicle — a trolleybus, another trolleybus, a bus — and
+        // every reading but the last was left undecided. Only the vote: the
+        // ordinary confirmation still follows (the rivals of the previous
+        // reading must visibly have left), and never the boarding stop's
+        // single reading, this being no decisive reading. Before any
+        // identification only, and not where the chosen line is in the tie
+        // (tieBroken, which has rules of its own).
+        val carriedOver = if (identified || tied.size < 2) emptyList()
+                          else tied.filter { previous.containsKey(it.tripId) }
+        val persistent = if (carriedOver.size == 1) carriedOver.first() else null
         val pick: VehicleMatcher.Sighting? = when {
             tied.size == 1 -> tied.first()
             siblingTie     -> siblingDueAtBoarding(tied, compassBroke)
                 ?: tied.firstOrNull { it.tripId == candidateVote } ?: tied.first()
             tieBroken      -> chosenLineTied.first()
+            persistent != null -> persistent
             else           -> null
+        }
+        if (pick != null && pick === persistent && tied.size > 1 && !siblingTie && !tieBroken) {
+            FileLogger.d(TAG, "Tie: ${persistent.routeId}/${persistent.tripId} was beside us at " +
+                "the previous reading too, " + tied.filter { it !== persistent }.joinToString(", ") {
+                    "${it.routeId}/${it.tripId}@${it.distanceMetres.toInt()} m" } +
+                " not — voting for it")
         }
 
         if (pick == null) {
             FileLogger.d(TAG, "Undecided: " + tied.joinToString(", ") {
                 "${it.routeId}/${it.tripId}@${it.distanceMetres.toInt()} m" } + " — no vote")
+            if (!confirmOnly) {
+                pickStreakTrip = null
+                pickStreak = 0
+            }
             return sooner
         }
+        // How many readings running this vehicle was the pick before this
+        // one; counted on moving readings only, as the memory is.
+        val priorStreak = if (pickStreakTrip == pick.tripId) pickStreak else 0
+        if (!confirmOnly) {
+            pickStreakTrip = pick.tripId
+            pickStreak = priorStreak + 1
+        }
+        val viaPersistence = pick === persistent && tied.size > 1 && !siblingTie && !tieBroken
         if (confirmOnly && !previous.containsKey(pick.tripId)) {
             FileLogger.d(TAG, "Standing: ${pick.routeId}/${pick.tripId} was not beside us " +
                 "while moving — not a candidate")
@@ -2436,8 +2520,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 now != null && then != null && now.timestamp > then.timestamp &&
                     now.distanceMetres > VehicleMatcher.RIDING_WITH_RADIUS
             }
+            // A vote won only by staying with us through a tie confirms once
+            // it has been the pick at two readings before this one. Our own
+            // vehicle, silent at the previous reading, may be the newcomer
+            // beside the one that stayed; a reading more lets it show itself
+            // — carried over too, it turns the next reading back into a tie.
             val confirmed = before != null &&
-                before.timestamp != candidate.timestamp && rivalsGone
+                before.timestamp != candidate.timestamp && rivalsGone &&
+                (!viaPersistence || priorStreak >= 2)
 
             // Where we boarded tells which vehicle to expect. A decisive
             // reading of a vehicle that was due at our boarding stop around
@@ -2903,6 +2993,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightPendingSinceMs = 0L
         detourSinceMs = 0L
         lastInRange = emptyMap()
+        pickStreakTrip = null
+        pickStreak = 0
         lastAnnouncedTripId = null
         lastProgressMs = System.currentTimeMillis()
 
@@ -3669,6 +3761,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         candidateVote = null
         lastInRange = emptyMap()
         swappedFromTripId = null
+        pickStreakTrip = null
+        pickStreak = 0
         lastReadingMs = 0L
         deferLogged = false
         partingFirstStamp = 0L
@@ -3691,6 +3785,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         repeatGuardArmed = false
         lastStandingReadingMs = 0L
         boardingRefSet = false
+        departureRefSet = false
         silentArrivalIdx = null
         boardingStopIds = null
         expectedArrivals.clear()
@@ -3868,12 +3963,23 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // threshold, not one — see DEPARTURE_CONFIRM_FIXES.
         if (movingSinceMs == 0L) {
             val accurate = loc.hasAccuracy() && loc.accuracy <= DEPARTURE_MAX_ACCURACY
+            // Only once the receiver has settled, which is when the departure
+            // reference is taken (onFix): not in the first seconds.
+            val settled = departureRefSet
             departureStreak =
-                if (accurate && mps * 3.6 >= MIN_SPEED_FOR_FOREIGN_CHECK) departureStreak + 1 else 0
+                if (settled && accurate && mps * 3.6 >= MIN_SPEED_FOR_FOREIGN_CHECK)
+                    departureStreak + 1 else 0
             if (departureStreak >= DEPARTURE_CONFIRM_FIXES) {
-                movingSinceMs = System.currentTimeMillis()
-                FileLogger.i(TAG, "Departure detected: $departureStreak fixes in a row " +
-                    "at ${(mps * 3.6).toInt()} km/h and above, ±${loc.accuracy.toInt()} m")
+                // And only once we are clearly away from where we stood; until
+                // then the streak is kept, to be confirmed by a later fix.
+                val away = LocationHelper.distanceMetres(
+                    departureRefLat, departureRefLon, loc.latitude, loc.longitude)
+                if (away >= DEPARTURE_MIN_DISPLACEMENT) {
+                    movingSinceMs = System.currentTimeMillis()
+                    FileLogger.i(TAG, "Departure detected: $departureStreak fixes in a row " +
+                        "at ${(mps * 3.6).toInt()} km/h and above, ±${loc.accuracy.toInt()} m, " +
+                        "${away.toInt()} m from where we stood")
+                }
             }
         }
         speedSamples.addLast(mps)
