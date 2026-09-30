@@ -89,6 +89,12 @@ class GtfsUpdateWorker @AssistedInject constructor(
          * instead of pulling tens of MB again every 30 minutes.
          */
         private const val KEY_DOWNLOAD_FAIL_MS = "download_fail_ms"
+        private const val KEY_PENDING_ID = "pending_id"
+        private const val KEY_PENDING_KIND = "pending_kind"
+        private const val KEY_PENDING_RESULT = "pending_result"
+        const val KIND_INSTALL = "install"
+        const val KIND_REINSTALL = "reinstall"
+        const val KIND_UPDATE = "update"
         /** Id of the finished run whose result dialog the user has closed. */
         private const val KEY_ACK_WORK_ID = "ack_work_id"
 
@@ -194,7 +200,28 @@ class GtfsUpdateWorker @AssistedInject constructor(
             prefs(context).getString(KEY_ACK_WORK_ID, null) == id.toString()
 
         fun acknowledge(context: Context, id: java.util.UUID) {
-            prefs(context).edit().putString(KEY_ACK_WORK_ID, id.toString()).apply()
+            val e = prefs(context).edit().putString(KEY_ACK_WORK_ID, id.toString())
+            if (prefs(context).getString(KEY_PENDING_ID, null) == id.toString()) {
+                e.remove(KEY_PENDING_ID).remove(KEY_PENDING_KIND).remove(KEY_PENDING_RESULT)
+            }
+            e.apply()
+        }
+
+        /** Result of a finished run the user should still be told about. */
+        class PendingResult(val id: java.util.UUID, val kind: String, val result: String?)
+
+        /**
+         * The last run the user must be told about, kept by the app itself.
+         * WorkManager keeps only the latest run under the unique name, so a
+         * new check queued on a cold start can delete a finished run's record
+         * before the Activity has read it; this copy survives that.
+         */
+        fun pendingResult(context: Context): PendingResult? {
+            val p = prefs(context)
+            val id = p.getString(KEY_PENDING_ID, null) ?: return null
+            val uuid = try { java.util.UUID.fromString(id) } catch (e: Exception) { return null }
+            return PendingResult(uuid, p.getString(KEY_PENDING_KIND, KIND_UPDATE) ?: KIND_UPDATE,
+                p.getString(KEY_PENDING_RESULT, null))
         }
 
         private fun sameDay(a: Long, b: Long): Boolean {
@@ -251,6 +278,11 @@ class GtfsUpdateWorker @AssistedInject constructor(
                 .addTag(if (replaceLocal) TAG_REINSTALL else TAG_INSTALL)
                 .setInputData(workDataOf(KEY_INSTALL to true, KEY_REPLACE_LOCAL to replaceLocal))
                 .build()
+            if (!replaceLocal) {
+                // A (re)install from scratch: any older unseen result is moot.
+                prefs(context).edit().remove(KEY_PENDING_ID).remove(KEY_PENDING_KIND)
+                    .remove(KEY_PENDING_RESULT).apply()
+            }
             wm.enqueueUniqueWork(WORK_NAME,
                 if (installPending) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE, req)
         }
@@ -382,10 +414,31 @@ class GtfsUpdateWorker @AssistedInject constructor(
     private fun out(result: String) = workDataOf(
         KEY_RESULT to result,
         KEY_VISIBLE to importStarted
-    )
+    ).also { lastOutput = it }
 
-    override suspend fun doWork(): Result =
-        if (inputData.getBoolean(KEY_INSTALL, false)) install() else update()
+    /** The output of this run, as last built by [out] / install's done(). */
+    private var lastOutput: androidx.work.Data? = null
+
+    override suspend fun doWork(): Result {
+        val install = inputData.getBoolean(KEY_INSTALL, false)
+        val result = if (install) install() else update()
+        // Keep the result the user must see in the app's own storage too
+        // (see [pendingResult]). Only for runs that showed a dialog.
+        val o = lastOutput
+        if (o != null && o.getBoolean(KEY_VISIBLE, false)) {
+            val kind = when {
+                !install -> KIND_UPDATE
+                inputData.getBoolean(KEY_REPLACE_LOCAL, false) -> KIND_REINSTALL
+                else -> KIND_INSTALL
+            }
+            prefs(applicationContext).edit()
+                .putString(KEY_PENDING_ID, id.toString())
+                .putString(KEY_PENDING_KIND, kind)
+                .putString(KEY_PENDING_RESULT, o.getString(KEY_RESULT))
+                .commit()
+        }
+        return result
+    }
 
     /**
      * First-run install; see [enqueueInstall]. Never leaves the app without
@@ -401,7 +454,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
         // First run: the dialog is up for the whole install. A reinstall
         // (the app has data) is shown only once its import has started.
         fun done(result: String) = workDataOf(KEY_RESULT to result,
-            KEY_VISIBLE to (!replaceLocal || importStarted))
+            KEY_VISIBLE to (!replaceLocal || importStarted)).also { lastOutput = it }
 
         try {
             setProgress(workDataOf())
@@ -753,7 +806,8 @@ class GtfsUpdateWorker @AssistedInject constructor(
         if (gtfsRepo.isImportBusy()) {
             FileLogger.i(TAG, "Install: another import is running — not replacing the tables")
             return if (replaceLocal) Result.success(out(RESULT_DEFERRED))
-                   else Result.failure(workDataOf(KEY_RESULT to RESULT_FAILED, KEY_VISIBLE to true))
+                   else Result.failure(workDataOf(KEY_RESULT to RESULT_FAILED, KEY_VISIBLE to true)
+                                        .also { lastOutput = it })
         }
         return null
     }

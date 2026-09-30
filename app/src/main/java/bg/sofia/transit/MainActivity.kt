@@ -100,6 +100,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderDataUpdate(info: WorkInfo?) {
         if (info == null) {
             dismissUpdateProgress()
+            showPendingResult()
             return
         }
         val install = GtfsUpdateWorker.TAG_INSTALL in info.tags
@@ -123,7 +124,12 @@ class MainActivity : AppCompatActivity() {
             when (phase) {
                 GtfsUpdateWorker.PHASE_IMPORT ->
                     showUpdateProgress(UPDATE_TITLE, "Инсталиране на новите данни…")
-                else -> dismissUpdateProgress()
+                else -> {
+                    dismissUpdateProgress()
+                    // A silent new check: a result from an earlier run the
+                    // user has not seen yet can still be shown meanwhile.
+                    showPendingResult()
+                }
             }
             return
         }
@@ -140,23 +146,51 @@ class MainActivity : AppCompatActivity() {
             showInstallResult(info.id, GtfsUpdateWorker.RESULT_FAILED)
             return
         }
-        if (!out.getBoolean(GtfsUpdateWorker.KEY_VISIBLE, false)) return
-        if (GtfsUpdateWorker.isAcknowledged(this, info.id)) return
+        if (!out.getBoolean(GtfsUpdateWorker.KEY_VISIBLE, false) ||
+            GtfsUpdateWorker.isAcknowledged(this, info.id)) {
+            // Nothing to tell about this run — but maybe about an earlier one
+            // whose record WorkManager has already replaced.
+            showPendingResult()
+            return
+        }
 
-        val id = info.id
-        if (GtfsUpdateWorker.TAG_REINSTALL in info.tags && installFailed) {
+        val kind = when {
+            GtfsUpdateWorker.TAG_REINSTALL in info.tags -> GtfsUpdateWorker.KIND_REINSTALL
+            install -> GtfsUpdateWorker.KIND_INSTALL
+            else -> GtfsUpdateWorker.KIND_UPDATE
+        }
+        showResult(info.id, kind,
+            if (installFailed) GtfsUpdateWorker.RESULT_FAILED else out.getString(GtfsUpdateWorker.KEY_RESULT))
+    }
+
+    /** The result the app kept for itself (see GtfsUpdateWorker.pendingResult). */
+    private fun showPendingResult() {
+        if (updateResultDialog?.isShowing == true) return
+        val p = GtfsUpdateWorker.pendingResult(this) ?: return
+        if (GtfsUpdateWorker.isAcknowledged(this, p.id)) return
+        if (p.kind != GtfsUpdateWorker.KIND_UPDATE &&
+            p.result == GtfsUpdateWorker.RESULT_FAILED && gtfsRepo.initialLoadDone.value) {
+            // An old install failure, but the data has been loaded since —
+            // "Опитай отново" would be stale. Drop it quietly.
+            GtfsUpdateWorker.acknowledge(this, p.id)
+            return
+        }
+        showResult(p.id, p.kind, p.result)
+    }
+
+    private fun showResult(id: java.util.UUID, kind: String, result: String?) {
+        if (kind == GtfsUpdateWorker.KIND_REINSTALL && result == GtfsUpdateWorker.RESULT_FAILED) {
             // A reinstall (new app version) that failed after it began
             // replacing the tables: the data is incomplete. Same as a failed
             // first install — offer "Опитай отново".
             showInstallResult(id, GtfsUpdateWorker.RESULT_FAILED)
             return
         }
-        if (install) {
-            showInstallResult(id, out.getString(GtfsUpdateWorker.KEY_RESULT))
+        if (kind == GtfsUpdateWorker.KIND_INSTALL) {
+            showInstallResult(id, result)
             return
         }
-        // Only runs that reached the install get here (KEY_VISIBLE).
-        val text = when (out.getString(GtfsUpdateWorker.KEY_RESULT)) {
+        val text = when (result) {
             // An update, or a reinstall after a new app version brought
             // newer bundled data — to the user both are the same thing.
             GtfsUpdateWorker.RESULT_UPDATED,
