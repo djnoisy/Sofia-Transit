@@ -794,10 +794,14 @@ class GtfsUpdateWorker @AssistedInject constructor(
         val e = prefs(ctx).edit()
         e.putLong(KEY_LAST_MODIFIED_MS, v.lastModifiedMs)
         e.putString(KEY_ETAG, v.etag)
-        e.putBoolean(KEY_NO_VALIDATOR, v.lastModifiedMs <= 0L && v.etag == null)
+        val noValidator = v.lastModifiedMs <= 0L && v.etag == null
+        e.putBoolean(KEY_NO_VALIDATOR, noValidator)
         if (v.hash != null) e.putString(KEY_FEED_HASH, v.hash)
         e.remove(KEY_LAST_MODIFIED)
         e.apply()
+        FileLogger.i(TAG, if (noValidator)
+            "Server gives no version marker — from now on at most one download a day"
+            else "Server version marker stored — later checks cost no download when unchanged")
     }
 
     /**
@@ -854,6 +858,15 @@ class GtfsUpdateWorker @AssistedInject constructor(
             // the 30-minute spacing. (No network → exception above → the
             // next opening of the app tries again.)
             p.edit().putLong(KEY_LAST_ATTEMPT_MS, System.currentTimeMillis()).apply()
+            // Diagnostics: what the server tells us about its version, so the
+            // log shows whether "unchanged" can be recognised without a
+            // download.
+            FileLogger.i(TAG, "Server answer: HTTP $code, " +
+                "Last-Modified=${conn.getHeaderField("Last-Modified") ?: "none"}, " +
+                "ETag=${conn.getHeaderField("ETag") ?: "none"}, " +
+                "Content-Length=${conn.getHeaderField("Content-Length") ?: "none"} " +
+                "(sent If-Modified-Since=${if (baseline > 0L) baseline else "none"}, " +
+                "If-None-Match=${storedEtag ?: "none"})")
             if (code == HttpURLConnection.HTTP_NOT_MODIFIED) {
                 return null
             }
@@ -889,7 +902,15 @@ class GtfsUpdateWorker @AssistedInject constructor(
             // timetable is the same.
             val digest = java.security.MessageDigest.getInstance("SHA-256")
             val deadline = System.currentTimeMillis() + maxDownloadMs
-            ZipInputStream(conn.inputStream.buffered()).use { zip ->
+            // Counts the bytes actually received (the ZIP as sent), for the log.
+            var received = 0L
+            val counting = object : java.io.FilterInputStream(conn.inputStream) {
+                override fun read(): Int = super.read().also { if (it >= 0) received++ }
+                override fun read(b: ByteArray, off: Int, len: Int): Int =
+                    super.read(b, off, len).also { if (it > 0) received += it }
+            }
+            val startMs = System.currentTimeMillis()
+            ZipInputStream(counting.buffered()).use { zip ->
                 val buf = ByteArray(64 * 1024)
                 var entry = zip.nextEntry
                 while (entry != null) {
@@ -921,6 +942,9 @@ class GtfsUpdateWorker @AssistedInject constructor(
                 }
             }
             val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            FileLogger.i(TAG, "Downloaded ${received} bytes (%.1f MB) in %.1f s".format(
+                java.util.Locale.US, received / 1_048_576.0,
+                (System.currentTimeMillis() - startMs) / 1000.0))
             return Validators(lastModified, etag, hash)
         } finally {
             conn.disconnect()
