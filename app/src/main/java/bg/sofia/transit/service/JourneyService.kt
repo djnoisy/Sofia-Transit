@@ -808,13 +808,20 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var lastInRange: Map<String, VehicleMatcher.Sighting> = emptyMap()
     private var lastReadingMs = 0L
     /**
-     * The vehicle picked at consecutive readings while moving, and at how
-     * many in a row. A vote won only by having stayed with us through a tie
-     * (the persistent pick in checkVehicle) confirms only once it has been
-     * the pick at two readings before this one.
+     * For each vehicle in range at the previous reading, at how many moving
+     * readings running it has been in range. A vote won only by having
+     * stayed with us through a tie (the persistent pick in checkVehicle)
+     * confirms only once the vehicle was beside us at the two readings
+     * before this one.
      */
-    private var pickStreakTrip: String? = null
-    private var pickStreak = 0
+    private var presence: Map<String, Int> = emptyMap()
+    /**
+     * The vehicles that were in range at the reading before the previous
+     * one. A vehicle missing from the previous reading but beside us at that
+     * one is no newcomer: it may be ours, having reported late once. See
+     * the persistent pick in checkVehicle.
+     */
+    private var earlierInRange: Set<String> = emptySet()
     /** The vehicle swapToSibling last moved away from: never moved back to. */
     private var swappedFromTripId: String? = null
     /** True while a run of deferred checks has already been logged. */
@@ -2265,6 +2272,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // Nothing is fetched meanwhile.
         val nowMs = System.currentTimeMillis()
         val previous = if (nowMs - lastReadingMs <= READING_MEMORY_MS) lastInRange else emptyMap()
+        val previousPresence = if (nowMs - lastReadingMs <= READING_MEMORY_MS) presence else emptyMap()
+        val previousEarlier = if (nowMs - lastReadingMs <= READING_MEMORY_MS) earlierInRange else emptySet()
         val confirmOnly = !identified && !underWay
         if (confirmOnly) {
             val regular = if (movingSinceMs == 0L || nowMs - movingSinceMs < EARLY_PHASE_MS)
@@ -2297,15 +2306,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             if (!confirmOnly) {
                 lastInRange = emptyMap()
                 lastReadingMs = nowMs
-                pickStreakTrip = null
-                pickStreak = 0
+                presence = emptyMap()
+                earlierInRange = emptySet()
             }
             return sooner
         }
 
         if (!confirmOnly) {
+            earlierInRange = previous.keys
             lastInRange = seen.inRange.associateBy { it.tripId }
             lastReadingMs = nowMs
+            presence = seen.inRange.associate { it.tripId to (previousPresence[it.tripId] ?: 0) + 1 }
         }
         val inRange = seen.inRange
 
@@ -2427,19 +2438,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (pick == null) {
             FileLogger.d(TAG, "Undecided: " + tied.joinToString(", ") {
                 "${it.routeId}/${it.tripId}@${it.distanceMetres.toInt()} m" } + " — no vote")
-            if (!confirmOnly) {
-                pickStreakTrip = null
-                pickStreak = 0
-            }
             return sooner
         }
-        // How many readings running this vehicle was the pick before this
-        // one; counted on moving readings only, as the memory is.
-        val priorStreak = if (pickStreakTrip == pick.tripId) pickStreak else 0
-        if (!confirmOnly) {
-            pickStreakTrip = pick.tripId
-            pickStreak = priorStreak + 1
-        }
+        // At how many readings running before this one the pick was beside
+        // us; counted on moving readings only, as the memory is.
+        val priorPresence = previousPresence[pick.tripId] ?: 0
         val viaPersistence = pick === persistent && tied.size > 1 && !siblingTie && !tieBroken
         if (confirmOnly && !previous.containsKey(pick.tripId)) {
             FileLogger.d(TAG, "Standing: ${pick.routeId}/${pick.tripId} was not beside us " +
@@ -2521,13 +2524,20 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     now.distanceMetres > VehicleMatcher.RIDING_WITH_RADIUS
             }
             // A vote won only by staying with us through a tie confirms once
-            // it has been the pick at two readings before this one. Our own
-            // vehicle, silent at the previous reading, may be the newcomer
-            // beside the one that stayed; a reading more lets it show itself
-            // — carried over too, it turns the next reading back into a tie.
+            // the vehicle was beside us at the two readings before this one.
+            // Our own vehicle, silent at the previous reading, may be the
+            // newcomer beside the one that stayed; a reading more lets it
+            // show itself — carried over too, it turns the next reading back
+            // into a tie.
+            //
+            // And none of the "newcomers" beside it may have been beside us
+            // the reading before last: that one only missed the previous
+            // reading — our own vehicle reporting late once looks exactly
+            // like this — and is no newcomer at all.
+            val newcomerSeenBefore = tied.any { it !== pick && it.tripId in previousEarlier }
             val confirmed = before != null &&
                 before.timestamp != candidate.timestamp && rivalsGone &&
-                (!viaPersistence || priorStreak >= 2)
+                (!viaPersistence || (priorPresence >= 2 && !newcomerSeenBefore))
 
             // Where we boarded tells which vehicle to expect. A decisive
             // reading of a vehicle that was due at our boarding stop around
@@ -2993,8 +3003,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         alightPendingSinceMs = 0L
         detourSinceMs = 0L
         lastInRange = emptyMap()
-        pickStreakTrip = null
-        pickStreak = 0
+        presence = emptyMap()
+        earlierInRange = emptySet()
         lastAnnouncedTripId = null
         lastProgressMs = System.currentTimeMillis()
 
@@ -3761,8 +3771,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         candidateVote = null
         lastInRange = emptyMap()
         swappedFromTripId = null
-        pickStreakTrip = null
-        pickStreak = 0
+        presence = emptyMap()
+        earlierInRange = emptySet()
         lastReadingMs = 0L
         deferLogged = false
         partingFirstStamp = 0L
