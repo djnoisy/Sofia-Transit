@@ -15,7 +15,7 @@ import java.io.InputStreamReader
  * Parses GTFS CSV files. Two sources are supported, in order of preference:
  *
  *   1. An external directory (e.g. /data/data/<pkg>/files/gtfs/) — used after
- *      the weekly background update has successfully downloaded fresh data.
+ *      the background update has successfully downloaded fresh data.
  *   2. The bundled assets/gtfs/ folder — used on first launch, or as fallback
  *      if the external directory does not contain the requested file.
  *

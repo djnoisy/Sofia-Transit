@@ -37,7 +37,7 @@ class GtfsRepository @Inject constructor(
 
     companion object {
         private const val TAG = "GtfsRepository"
-        /** Directory where the weekly worker stores fresh GTFS files. */
+        /** Directory where the update worker stores downloaded GTFS files. */
         const val EXTERNAL_DIR_NAME = "gtfs"
         private const val KEY_IMPORT_IN_PROGRESS = "in_progress"
     }
@@ -83,7 +83,7 @@ class GtfsRepository @Inject constructor(
      * already full, or filled by the first-run import. Unlike [dataReady],
      * this never flips back to false during a later refresh, so the UI can
      * use it to dismiss the first-run overlay without the overlay
-     * reappearing when the weekly worker reimports.
+     * reappearing when a later update reimports.
      */
     private val _initialLoadDone = MutableStateFlow(false)
     val initialLoadDone: StateFlow<Boolean> = _initialLoadDone
@@ -176,7 +176,11 @@ class GtfsRepository @Inject constructor(
                         // first, else the new bundle), like an update: in the
                         // background, with the dialog only while installing,
                         // and never during a journey.
-                        if (GtfsUpdateWorker.bundleIsNewerThanData(context)) {
+                        // Not while the message about the previous install /
+                        // update is still unclosed — closing it calls this
+                        // again (see MainActivity.resultClosed).
+                        if (GtfsUpdateWorker.bundleIsNewerThanData(context) &&
+                            !GtfsUpdateWorker.hasUnseenResult(context)) {
                             FileLogger.i(TAG, "Bundled data is newer than the installed data — reinstalling")
                             GtfsUpdateWorker.enqueueInstall(context, replaceLocal = true)
                         }
@@ -230,7 +234,7 @@ class GtfsRepository @Inject constructor(
     private suspend fun loadStaticDataLocked(onProgress: (String) -> Unit = {}) {
         // Mark DB unavailable for the whole reload window, so location-driven
         // queries buffer their input instead of running against half-empty
-        // tables. Also flips on subsequent reloads (weekly worker), giving
+        // tables. Also flips on subsequent reloads (update worker), giving
         // observers a true → false → true edge to re-trigger queries.
         _dataReady.value = false
         importPrefs.edit().putBoolean(KEY_IMPORT_IN_PROGRESS, true).commit()
@@ -278,7 +282,7 @@ class GtfsRepository @Inject constructor(
                 // route_type=11) and invalidate the trolley-route cache.
                 // Must run AFTER stop_times because the marking JOINs
                 // stops → stop_times → trips → routes. Runs on every
-                // import (initial from bundled assets and the weekly Wi-Fi
+                // import (initial from bundled assets and every downloaded
                 // refresh) so the flag is always in sync with the data.
                 onProgress("Определяне на тролейбусната мрежа…")
                 stopDao.clearTrolleyFlags()

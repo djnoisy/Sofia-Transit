@@ -47,7 +47,7 @@ class NearbyViewModel @Inject constructor(
     init {
         // When the GTFS import finishes (or is confirmed already loaded),
         // replay any location update that arrived during the loading window.
-        // Also covers the weekly-worker reload while the user is stationary:
+        // Also covers an update-worker reload while the user is stationary:
         // re-query against the last known position so the list refreshes
         // against the new data even without a new GPS callback.
         viewModelScope.launch {

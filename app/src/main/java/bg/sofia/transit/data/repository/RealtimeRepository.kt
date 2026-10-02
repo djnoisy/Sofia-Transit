@@ -497,7 +497,7 @@ class RealtimeRepository @Inject constructor() {
         }
     }
 
-    // ── Static GTFS download URL (for weekly update) ──────────────────────
+    // ── Static GTFS download URL (for the data update) ──────────────────────
     fun getStaticFeedUrl() = "$BASE_URL/static"
 
     // ── Diagnostics ───────────────────────────────────────────────────────

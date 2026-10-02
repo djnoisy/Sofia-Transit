@@ -3,8 +3,10 @@ package bg.sofia.transit.worker
 import android.content.Context
 import bg.sofia.transit.util.FileLogger
 import androidx.hilt.work.HiltWorker
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -12,6 +14,7 @@ import bg.sofia.transit.data.repository.GtfsRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
@@ -28,8 +31,10 @@ import java.util.zip.ZipInputStream
  *   3. Re-imports the new data into the Room database
  *
  * Triggered whenever the app comes to the foreground (see [checkForUpdate]),
- * over any connection — Wi-Fi or mobile data. An unchanged feed costs one
- * tiny request; the full download happens only when there is new data.
+ * over any connection, mobile data included. A server that answers "not
+ * modified" costs one tiny request. The current server gives no version
+ * marker, so a check means a full download: on Wi-Fi at most one an hour,
+ * on mobile data at most one successful download a day.
  *
  * The UI (MainActivity) follows the run through [KEY_PHASE] progress and the
  * [KEY_RESULT] / [KEY_VISIBLE] output, and shows a dialog only for runs that
@@ -52,15 +57,13 @@ class GtfsUpdateWorker @AssistedInject constructor(
 
         private const val PREFS_NAME     = "gtfs_update"
         private const val KEY_LAST_OK_MS = "last_success_ms"
-        /** Marker stored by earlier versions; no longer trusted, removed on the next update. */
-        private const val KEY_LAST_MODIFIED = "last_modified"
         private const val KEY_LAST_MODIFIED_MS = "last_modified_ms"
         private const val KEY_ETAG = "etag"
         /** Start time of the last run that actually contacted the server. */
         private const val KEY_LAST_ATTEMPT_MS = "last_attempt_ms"
         /** Set when the server sent neither Last-Modified nor ETag. */
         private const val KEY_NO_VALIDATOR = "no_validator"
-        /** SHA-256 of the ZIP behind the data we hold. */
+        /** Fingerprint of the data we hold (see fingerprintOf). */
         private const val KEY_FEED_HASH = "feed_hash"
         /**
          * Set when the last feed the server announced as new turned out to be
@@ -74,7 +77,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
          * When the full feed was last downloaded successfully (complete, and
          * either imported or found identical). A download that broke off,
          * was rejected, or was discarded because a journey started does not
-         * count, so once-a-day mode may try again the same day.
+         * count, so on mobile data a new try is allowed the same day.
          */
         private const val KEY_LAST_DOWNLOAD_MS = "last_download_ms"
         /**
@@ -83,12 +86,14 @@ class GtfsUpdateWorker @AssistedInject constructor(
          * check; after such a failure we wait [BAD_FEED_BACKOFF_MS].
          */
         private const val KEY_BAD_FEED_MS = "bad_feed_ms"
+        /** Run whose install was finished although WorkManager had stopped it. */
+        private const val KEY_DONE_WHILE_STOPPED = "done_while_stopped"
         /**
-         * When a download broke off (connection lost midway). On a flaky
-         * mobile connection the next attempt waits [DOWNLOAD_FAIL_BACKOFF_MS]
-         * instead of pulling tens of MB again every 30 minutes.
+         * Runs of one update in all: Android stops a run when the connection
+         * drops and starts it again when it returns, each time downloading
+         * from zero. On a flapping connection that must not go on and on.
          */
-        private const val KEY_DOWNLOAD_FAIL_MS = "download_fail_ms"
+        private const val MAX_RUNS = 3
         private const val KEY_PENDING_ID = "pending_id"
         private const val KEY_PENDING_KIND = "pending_kind"
         private const val KEY_PENDING_RESULT = "pending_result"
@@ -108,6 +113,10 @@ class GtfsUpdateWorker @AssistedInject constructor(
         const val RESULT_SKIPPED   = "skipped"
         const val RESULT_DEFERRED  = "deferred"
         const val RESULT_FAILED    = "failed"
+        /** An update failed AND the old data could not be put back: no usable data. */
+        const val RESULT_FAILED_NO_DATA = "failed_no_data"
+        /** A rerun completed an install another run left unfinished. */
+        const val RESULT_REPAIRED  = "repaired"
         /**
          * True when the run got as far as installing (importing), i.e. the
          * user saw the dialog. Checking and downloading run silently in the
@@ -139,13 +148,14 @@ class GtfsUpdateWorker @AssistedInject constructor(
         /**
          * Minimum spacing between two checks. Coming back to the app from
          * another screen or app a few times a minute must not fire a request
-         * each time; half an hour still catches a new feed the same day.
+         * each time. On Wi-Fi this is what limits checks (an hour still
+         * catches same-day corrections); on mobile data see
+         * [mobileDayLimitReached].
          */
-        private val MIN_CHECK_INTERVAL_MS = TimeUnit.MINUTES.toMillis(30)
+        private val MIN_CHECK_INTERVAL_MS = TimeUnit.MINUTES.toMillis(60)
 
 
         private val BAD_FEED_BACKOFF_MS = TimeUnit.HOURS.toMillis(24)
-        private val DOWNLOAD_FAIL_BACKOFF_MS = TimeUnit.HOURS.toMillis(2)
 
         /** How long a run waits for another import to finish before giving up. */
         private const val BUSY_WAIT_MAX_MS = 180_000L
@@ -232,25 +242,34 @@ class GtfsUpdateWorker @AssistedInject constructor(
                 ca.get(java.util.Calendar.DAY_OF_YEAR) == cb.get(java.util.Calendar.DAY_OF_YEAR)
         }
 
+        /** Whether the phone has an internet connection right now. */
+        private fun isOnline(context: Context): Boolean = try {
+            val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+            val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+            // VALIDATED too: a network Android has confirmed actually works —
+            // what WorkManager's CONNECTED waits for. Without it (captive
+            // portal, unconfirmed Wi-Fi) a queued check could wait for hours.
+            caps != null &&
+                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        } catch (e: Exception) { true }   // unknown → try; the run fails quietly if offline
+
+        /**
+         * Whether the current connection may cost the user money: mobile
+         * data, or a Wi-Fi that Android marks as metered (e.g. a phone's
+         * hotspot). Unknown counts as metered.
+         */
+        private fun isMetered(context: Context): Boolean = try {
+            val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+            val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+            caps == null ||
+                !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        } catch (e: Exception) { true }
+
         private fun journeyActive(): Boolean =
             bg.sofia.transit.service.JourneyService.trackingState.value is
                 bg.sofia.transit.service.JourneyService.TrackingState.Tracking
 
-        /**
-         * Called whenever the app comes to the foreground, once the database
-         * is known to be populated. Enqueues one check unless:
-         *   - a journey is being tracked — replacing the tables mid-journey
-         *     would leave the tracker querying half-empty tables; the check
-         *     runs the next time the app is opened after the journey;
-         *   - the last check was less than [MIN_CHECK_INTERVAL_MS] ago.
-         *
-         * The check itself is cheap: the server answers "not modified" when
-         * the feed is unchanged, and only new data is downloaded. It runs on
-         * any network, mobile data included.
-         *
-         * Deliberately NOT a PeriodicWorkRequest: nothing is ever scheduled
-         * behind the user's back — no launch, no refresh.
-         */
         /**
          * First run (empty database): one run that installs the data. It asks
          * the server for anything newer than the bundled data; if there is,
@@ -287,56 +306,101 @@ class GtfsUpdateWorker @AssistedInject constructor(
                 if (installPending) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE, req)
         }
 
-        fun checkForUpdate(context: Context) {
-            if (journeyActive()) {
-                FileLogger.d(TAG, "Journey in progress — data check postponed")
-                return
-            }
+        /** A finished install/update whose message the user has not closed yet. */
+        fun hasUnseenResult(context: Context): Boolean {
+            val p = pendingResult(context) ?: return false
+            return !isAcknowledged(context, p.id)
+        }
+
+        /** Why a check must not start now, or null if it may. */
+        private fun whyNoCheck(context: Context): String? {
+            // While the message about the previous install/update is still
+            // waiting to be closed, nothing new starts: the user always knows
+            // which data is installed, and dialogs never replace one another.
+            // Closing the message calls checkForUpdate again.
+            if (hasUnseenResult(context)) return "Previous result not closed yet"
+            if (journeyActive()) return "Journey in progress"
             val p = prefs(context)
             val now = System.currentTimeMillis()
             val sinceAttempt = now - p.getLong(KEY_LAST_ATTEMPT_MS, 0L)
             if (sinceAttempt in 0 until MIN_CHECK_INTERVAL_MS) {
-                FileLogger.d(TAG, "Checked ${TimeUnit.MILLISECONDS.toMinutes(sinceAttempt)} min ago — no check now")
-                return
+                return "Checked ${TimeUnit.MILLISECONDS.toMinutes(sinceAttempt)} min ago"
             }
             val sinceBad = now - p.getLong(KEY_BAD_FEED_MS, 0L)
             if (sinceBad in 0 until BAD_FEED_BACKOFF_MS) {
-                FileLogger.d(TAG, "Last downloaded feed was rejected " +
-                    "${TimeUnit.MILLISECONDS.toHours(sinceBad)} h ago — no check now")
-                return
+                return "Last downloaded feed was rejected ${TimeUnit.MILLISECONDS.toHours(sinceBad)} h ago"
             }
-            val sinceDlFail = now - p.getLong(KEY_DOWNLOAD_FAIL_MS, 0L)
-            if (sinceDlFail in 0 until DOWNLOAD_FAIL_BACKOFF_MS) {
-                FileLogger.d(TAG, "Last download broke off " +
-                    "${TimeUnit.MILLISECONDS.toMinutes(sinceDlFail)} min ago — no check now")
-                return
+            if (mobileDayLimitReached(context)) {
+                return "On mobile data and already downloaded today"
             }
-            if (p.getBoolean(KEY_NO_VALIDATOR, false) ||
-                p.getBoolean(KEY_MARKERS_UNRELIABLE, false)) {
-                // The server cannot reliably tell us "unchanged" (no date /
-                // version marker, or a marker that announced the same data as
-                // new), so a check may mean a full download. Allow one per
-                // calendar day: the first opening of the app that day, on any
-                // network. A day on which the app is not opened has none.
-                if (sameDay(p.getLong(KEY_LAST_DOWNLOAD_MS, 0L), now)) {
-                    FileLogger.d(TAG, "Server change markers unreliable; " +
-                        "already downloaded today — no check now")
-                    return
-                }
-            }
+            return null
+        }
+
+        /**
+         * The once-a-day rule for mobile data. The server cannot reliably
+         * tell us "unchanged" (no date / version marker, or a marker that
+         * announced the same data as new), so a check may mean a full
+         * download. On mobile data (any metered network) at most one
+         * successful download per calendar day — on Wi-Fi or mobile data,
+         * whichever came first. On Wi-Fi there is no daily limit, only the
+         * spacing between checks. A day on which the app is not opened has
+         * no download.
+         */
+        private fun mobileDayLimitReached(context: Context): Boolean {
+            val p = prefs(context)
+            if (!p.getBoolean(KEY_NO_VALIDATOR, false) &&
+                !p.getBoolean(KEY_MARKERS_UNRELIABLE, false)) return false
+            if (!sameDay(p.getLong(KEY_LAST_DOWNLOAD_MS, 0L), System.currentTimeMillis())) return false
+            return isMetered(context)
+        }
+
+        /**
+         * Called whenever the app comes to the foreground, once the database
+         * is known to be populated. Enqueues one check unless [whyNoCheck]
+         * gives a reason (unclosed message, journey, last check less than
+         * [MIN_CHECK_INTERVAL_MS] ago, rejected feed, mobile-data daily
+         * limit) or there is no internet now.
+         *
+         * Deliberately NOT a PeriodicWorkRequest: nothing is ever scheduled
+         * behind the user's back — no launch, no refresh.
+         */
+        fun checkForUpdate(context: Context) {
+            whyNoCheck(context)?.let { FileLogger.d(TAG, "$it — no check now"); return }
+            // No connection now: nothing is queued (a queued check would wait
+            // for one, possibly until another day). The next opening checks.
+            if (!isOnline(context)) { FileLogger.d(TAG, "No internet — no check now"); return }
 
             FileLogger.i(TAG, "Enqueuing data check")
-            // No network constraint on purpose. With one, WorkManager stops
-            // the worker the moment the signal drops — including in the middle
-            // of the import, after the tables were cleared, leaving the app
-            // without data until the network returns. Without a constraint an
-            // offline check simply fails at once, silently, and the next
-            // opening of the app tries again (a failed connection does not
-            // count as a check for the 30-minute spacing).
-            val req = androidx.work.OneTimeWorkRequestBuilder<GtfsUpdateWorker>()
-                .build()
             WorkManager.getInstance(context)
-                .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP, req)
+                .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP, updateRequest())
+        }
+
+        /**
+         * An update run. It declares that it needs the network: Android then
+         * keeps the app's network access while the app is in the background
+         * (without the declaration, Android 14+ may cut it the moment the user
+         * presses Home — seen in the logs as "Software caused connection
+         * abort") and runs the work only when there is a connection. If the
+         * connection is lost, WorkManager stops the run; the download simply
+         * starts again later, and an install already under way is finished
+         * first (see [importUninterrupted]).
+         */
+        private fun updateRequest() = androidx.work.OneTimeWorkRequestBuilder<GtfsUpdateWorker>()
+            .setConstraints(Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+
+        /**
+         * After the user closed "Данните са инсталирани." for an install that
+         * had to fall back to the local data (no internet, or the download
+         * failed): look for the newer data right away — without the usual
+         * spacing between checks. Without internet now, the next opening checks.
+         */
+        fun updateAfterFallbackInstall(context: Context) {
+            if (journeyActive() || !isOnline(context)) return
+            FileLogger.i(TAG, "Fallback install acknowledged — looking for newer data now")
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP, updateRequest())
         }
 
         /**
@@ -353,9 +417,49 @@ class GtfsUpdateWorker @AssistedInject constructor(
                 FileLogger.w(TAG, "No bundle date found; will check for new data")
                 0L
             }
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putLong(KEY_LAST_OK_MS, bundleMs).putLong(KEY_DATA_DATE_MS, bundleMs).apply()
+            val e = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putLong(KEY_LAST_OK_MS, bundleMs).putLong(KEY_DATA_DATE_MS, bundleMs)
+            // The bundled data's fingerprint, computed the same way as for a
+            // download: a later download with the very same timetable is then
+            // recognised and not installed (nor announced) again.
+            bundledFingerprint(context)?.let {
+                e.putString(KEY_FEED_HASH, it)
+            } ?: e.remove(KEY_FEED_HASH)
+            e.apply()
             FileLogger.i(TAG, "Bundled data dated ${bundleMs}ms; freshness clock set")
+        }
+
+        /**
+         * Fingerprint of a data set: SHA-256 over "name:sha256(content)" of each
+         * file we use, sorted by name — independent of the order of the files
+         * in the ZIP.
+         */
+        private fun fingerprintOf(fileHashes: Map<String, String>): String {
+            val d = java.security.MessageDigest.getInstance("SHA-256")
+            fileHashes.toSortedMap().forEach { (name, h) -> d.update("$name:$h\n".toByteArray()) }
+            return d.digest().joinToString("") { "%02x".format(it) }
+        }
+
+        private fun bundledFingerprint(context: Context): String? =
+            fingerprintOfFiles { name -> context.assets.open("gtfs/$name") }
+
+        private fun fingerprintOfFiles(open: (String) -> java.io.InputStream): String? = try {
+            val hashes = HashMap<String, String>()
+            val buf = ByteArray(64 * 1024)
+            for (name in FILES_TO_KEEP) {
+                val d = java.security.MessageDigest.getInstance("SHA-256")
+                val ok = try {
+                    open(name).use { inp ->
+                        while (true) { val n = inp.read(buf); if (n < 0) break; d.update(buf, 0, n) }
+                    }
+                    true
+                } catch (e: java.io.FileNotFoundException) { false }
+                if (ok) hashes[name] = d.digest().joinToString("") { "%02x".format(it) }
+            }
+            if (hashes.isEmpty()) null else fingerprintOf(hashes)
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "Fingerprint not computed: ${e.message}")
+            null
         }
 
         /**
@@ -372,12 +476,8 @@ class GtfsUpdateWorker @AssistedInject constructor(
         fun bundleIsNewerThanData(context: Context): Boolean {
             val bundle = readBundleDateMs(context) ?: return false
             val data = prefs(context).getLong(KEY_DATA_DATE_MS, 0L)
-            // Installed by a version that did not record the data's date:
-            // unknown, so try a reinstall. It asks the server first and
-            // replaces nothing unless the result is known to be at least as
-            // new. The time of the last check cannot stand in — a "not
-            // modified" answer moves it.
-            if (data <= 0L) return true
+            // Date unknown: nothing to compare — leave the data alone.
+            if (data <= 0L) return false
             // A day's tolerance: the bundle is dated by its day (midnight),
             // a download by the server's exact time — the same feed built into
             // the bundle the next morning must not count as newer.
@@ -421,24 +521,52 @@ class GtfsUpdateWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         val install = inputData.getBoolean(KEY_INSTALL, false)
-        val result = if (install) install() else update()
-        // Keep the result the user must see in the app's own storage too
-        // (see [pendingResult]). Only for runs that showed a dialog.
-        val o = lastOutput
-        if (o != null && o.getBoolean(KEY_VISIBLE, false)) {
-            val kind = when {
-                !install -> KIND_UPDATE
-                inputData.getBoolean(KEY_REPLACE_LOCAL, false) -> KIND_REINSTALL
-                else -> KIND_INSTALL
-            }
-            prefs(applicationContext).edit()
-                .putString(KEY_PENDING_ID, id.toString())
-                .putString(KEY_PENDING_KIND, kind)
-                .putString(KEY_PENDING_RESULT, o.getString(KEY_RESULT))
-                .commit()
+        val p = prefs(applicationContext)
+        // WorkManager reruns a run it had stopped (e.g. the connection was
+        // lost). If that run still finished its install, there is nothing
+        // left to do — its result has already been kept for the user.
+        if (p.getString(KEY_DONE_WHILE_STOPPED, null) == id.toString()) {
+            p.edit().remove(KEY_DONE_WHILE_STOPPED).apply()
+            FileLogger.i(TAG, "Rerun of a run that already finished its install — nothing to do")
+            return Result.success(out(RESULT_SKIPPED))
         }
-        return result
+        try {
+            return if (install) install() else update()
+        } finally {
+            // Keep the result the user must see in the app's own storage too
+            // (see [pendingResult]). Only for runs that showed a dialog — also
+            // when the run itself was stopped after its install finished.
+            val o = lastOutput
+            if (o != null && o.getBoolean(KEY_VISIBLE, false)) {
+                val kind = when {
+                    !install -> KIND_UPDATE
+                    inputData.getBoolean(KEY_REPLACE_LOCAL, false) -> KIND_REINSTALL
+                    else -> KIND_INSTALL
+                }
+                p.edit()
+                    .putString(KEY_PENDING_ID, id.toString())
+                    .putString(KEY_PENDING_KIND, kind)
+                    .putString(KEY_PENDING_RESULT, o.getString(KEY_RESULT))
+                    .commit()
+            }
+        }
     }
+
+    /**
+     * Runs an install step (writing the tables, and the bookkeeping right
+     * after) to the end even if WorkManager stops the run meanwhile — e.g.
+     * because the connection was lost, which the install itself does not
+     * need. Stopping it halfway would leave the tables half filled.
+     */
+    private suspend fun <T> importUninterrupted(block: suspend () -> T): T =
+        withContext(NonCancellable) {
+            block().also {
+                if (isStopped) {
+                    prefs(applicationContext).edit()
+                        .putString(KEY_DONE_WHILE_STOPPED, id.toString()).commit()
+                }
+            }
+        }
 
     /**
      * First-run install; see [enqueueInstall]. Never leaves the app without
@@ -494,6 +622,9 @@ class GtfsUpdateWorker @AssistedInject constructor(
         }
 
         var serverSaidCurrent = false
+        // The server's feed itself was bad (rejected / failed to parse): an
+        // update right after the install would only fetch the same feed again.
+        var badFeed = false
         try {
             tmpDir.mkdirs()
             // A reinstall asks for anything newer than the new bundle
@@ -511,6 +642,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
                 if (missing.isNotEmpty()) {
                     FileLogger.e(TAG, "Install: downloaded feed rejected, missing $missing")
                     markBadFeed(ctx)
+                    badFeed = true
                 } else {
                     mayNotImport()?.let { return@withContext it }
                     if (finalDir.exists() && !finalDir.renameTo(backupDir)) {
@@ -522,33 +654,39 @@ class GtfsUpdateWorker @AssistedInject constructor(
                     }
                     importStarted = true
                     setProgress(workDataOf(KEY_PHASE to PHASE_IMPORT))
-                    try {
-                        gtfsRepo.loadStaticData()
-                        backupDir.deleteRecursively()
-                        storeValidators(ctx, v)
-                        recordDownloadedDataDate(ctx, v.lastModifiedMs)
-                        prefs(ctx).edit()
-                            .putLong(KEY_LAST_DOWNLOAD_MS, System.currentTimeMillis())
-                            .apply()
-                        recordSuccess(ctx)
-                        FileLogger.i(TAG, "Install: newest data installed")
-                        return@withContext Result.success(done(RESULT_INSTALLED_NEW))
-                    } catch (e: kotlinx.coroutines.CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        FileLogger.e(TAG, "Install: new data failed to parse: ${e.message}")
-                        finalDir.deleteRecursively()
-                        backupDir.renameTo(finalDir)
-                        markBadFeed(ctx)
+                    val installed: Result? = importUninterrupted {
+                        try {
+                            gtfsRepo.loadStaticData()
+                            backupDir.deleteRecursively()
+                            storeValidators(ctx, v)
+                            recordDownloadedDataDate(ctx, v.lastModifiedMs)
+                            prefs(ctx).edit()
+                                .putLong(KEY_LAST_DOWNLOAD_MS, System.currentTimeMillis())
+                                .apply()
+                            recordSuccess(ctx)
+                            FileLogger.i(TAG, "Install: newest data installed")
+                            Result.success(done(RESULT_INSTALLED_NEW))
+                        } catch (e: Exception) {
+                            FileLogger.e(TAG, "Install: new data failed to parse: ${e.message}")
+                            finalDir.deleteRecursively()
+                            backupDir.renameTo(finalDir)
+                            markBadFeed(ctx)
+                            badFeed = true
+                            null
+                        }
                     }
+                    if (installed != null) return@withContext installed
                 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
+            // Closing the result message looks for newer
+            // data at once. A damaged archive counts as a bad feed (24 h).
             FileLogger.w(TAG, "Install: newer data not available (${e.message}) — using local data")
-            if (downloadStarted) {
-                prefs(ctx).edit().putLong(KEY_DOWNLOAD_FAIL_MS, System.currentTimeMillis()).apply()
+            if (e is java.util.zip.ZipException) {
+                markBadFeed(ctx)
+                badFeed = true
             }
         } finally {
             tmpDir.deleteRecursively()
@@ -577,17 +715,21 @@ class GtfsUpdateWorker @AssistedInject constructor(
         importStarted = true
         setProgress(workDataOf(KEY_PHASE to PHASE_IMPORT))
         val usingBundled = gtfsRepo.getActiveDataDir() == null
-        try {
-            gtfsRepo.loadStaticData()
-            if (usingBundled) recordBundledDate(ctx)
-            FileLogger.i(TAG, "Install: local data installed (${if (usingBundled) "bundled" else "downloaded"})")
-            Result.success(done(
-                if (serverSaidCurrent) RESULT_INSTALLED_CURRENT else RESULT_INSTALLED_FALLBACK))
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            FileLogger.e(TAG, "Install: local data failed: ${e.message}", e)
-            Result.failure(done(RESULT_FAILED))
+        importUninterrupted {
+            try {
+                gtfsRepo.loadStaticData()
+                if (usingBundled) recordBundledDate(ctx)
+                FileLogger.i(TAG, "Install: local data installed (${if (usingBundled) "bundled" else "downloaded"})")
+                // FALLBACK = newer data may exist but could not be fetched;
+                // closing the message then looks for it at once. A bad feed
+                // counts as CURRENT: fetching it again would not help (the
+                // normal checks retry after the 24-hour wait).
+                Result.success(done(
+                    if (serverSaidCurrent || badFeed) RESULT_INSTALLED_CURRENT else RESULT_INSTALLED_FALLBACK))
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "Install: local data failed: ${e.message}", e)
+                Result.failure(done(RESULT_FAILED))
+            }
         }
     }
 
@@ -600,6 +742,10 @@ class GtfsUpdateWorker @AssistedInject constructor(
             // WorkManager keeps the last progress of a stopped run; clear it
             // so the UI never shows a phase this run has not reached.
             setProgress(workDataOf())
+            if (runAttemptCount >= MAX_RUNS) {
+                FileLogger.i(TAG, "Already $runAttemptCount attempts — giving up until the next opening")
+                return@withContext Result.failure(out(RESULT_FAILED))
+            }
             if (journeyActive()) {
                 FileLogger.i(TAG, "Journey in progress — data check skipped")
                 return@withContext Result.success(out(RESULT_SKIPPED))
@@ -619,17 +765,26 @@ class GtfsUpdateWorker @AssistedInject constructor(
                 FileLogger.w(TAG, "Previous import unfinished — installing the local data first")
                 importStarted = true
                 setProgress(workDataOf(KEY_PHASE to PHASE_IMPORT))
-                return@withContext try {
-                    val usingBundled = gtfsRepo.getActiveDataDir() == null
-                    gtfsRepo.loadStaticData()
-                    if (usingBundled) recordBundledDate(ctx)
-                    Result.success(out(RESULT_UPDATED))
-                } catch (c: kotlinx.coroutines.CancellationException) {
-                    throw c
-                } catch (e: Exception) {
-                    FileLogger.e(TAG, "Local install failed: ${e.message}", e)
-                    Result.failure(out(RESULT_FAILED))
+                return@withContext importUninterrupted {
+                    try {
+                        val usingBundled = gtfsRepo.getActiveDataDir() == null
+                        gtfsRepo.loadStaticData()
+                        if (usingBundled) recordBundledDate(ctx)
+                        // Which set it was (new, old or bundled) is not known
+                        // here: say only that the data is installed.
+                        Result.success(out(RESULT_REPAIRED))
+                    } catch (e: Exception) {
+                        FileLogger.e(TAG, "Local install failed: ${e.message}", e)
+                        Result.failure(out(RESULT_FAILED_NO_DATA))
+                    }
                 }
+            }
+            // The check was allowed on Wi-Fi, but the phone may be on mobile
+            // data by now (Wi-Fi lost while the run waited): the mobile-data
+            // rule applies again.
+            if (mobileDayLimitReached(ctx)) {
+                FileLogger.i(TAG, "On mobile data and already downloaded today — data check skipped")
+                return@withContext Result.success(out(RESULT_SKIPPED))
             }
             FileLogger.i(TAG, "GTFS check starting")
 
@@ -645,7 +800,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
                 FileLogger.i(TAG, "Feed unchanged — keeping current data")
                 tmpDir.deleteRecursively()
                 // The server itself said "unchanged" (304, same ETag or an
-                // older date): its markers work, so the once-a-day limit can
+                // older date): its markers work, so the mobile-data daily limit can
                 // go. A real new feed being different proves nothing — a
                 // server that stamps every response "new" does that too.
                 prefs(ctx).edit().putBoolean(KEY_MARKERS_UNRELIABLE, false).apply()
@@ -655,12 +810,12 @@ class GtfsUpdateWorker @AssistedInject constructor(
 
             // 1.2) Same content as the feed we already hold: the server's
             //      change markers misled us. Keep the current data (no
-            //      re-import) and allow one download per day until an
-            //      announced feed really differs.
+            //      re-import); on mobile data allow one download per day
+            //      until the server itself answers "unchanged".
             val oldHash = prefs(ctx).getString(KEY_FEED_HASH, null)
             if (validators.hash != null && validators.hash == oldHash) {
                 FileLogger.w(TAG, "Downloaded feed is identical to the current one — " +
-                    "server change markers unreliable; downloads limited to once a day")
+                    "server change markers unreliable; on mobile data once a day")
                 tmpDir.deleteRecursively()
                 prefs(ctx).edit()
                     .putBoolean(KEY_MARKERS_UNRELIABLE, true)
@@ -710,18 +865,21 @@ class GtfsUpdateWorker @AssistedInject constructor(
             importStarted = true
             setProgress(workDataOf(KEY_PHASE to PHASE_IMPORT))
 
+            // From here on nothing needs the network: finish even if the run
+            // is stopped meanwhile (see importUninterrupted).
+            return@withContext importUninterrupted { run {
             // 3) Atomic swap: keep old data as backup until new data parses OK
             if (finalDir.exists()) {
                 if (!finalDir.renameTo(backupDir)) {
                     FileLogger.e(TAG, "Failed to move old data to backup")
                     tmpDir.deleteRecursively()
-                    return@withContext Result.failure(out(RESULT_FAILED))
+                    return@run Result.failure(out(RESULT_FAILED))
                 }
             }
             if (!tmpDir.renameTo(finalDir)) {
                 FileLogger.e(TAG, "Failed to rename tmp → final; restoring backup")
                 backupDir.renameTo(finalDir)
-                return@withContext Result.failure(out(RESULT_FAILED))
+                return@run Result.failure(out(RESULT_FAILED))
             }
 
             // 4) Re-import into Room
@@ -739,21 +897,19 @@ class GtfsUpdateWorker @AssistedInject constructor(
                 FileLogger.i(TAG, "GTFS refresh complete")
                 Result.success(out(RESULT_UPDATED))
             } catch (e: kotlinx.coroutines.CancellationException) {
-                // WorkManager stopped us (system pressure, timeout). This is NOT a parse failure: rolling back here
-                // would try to run yet another import inside an already
-                // cancelled scope, which just throws again — exactly the
-                // confusing "Parse failed: Job was cancelled" pair we saw in
-                // the logs. Leave the data alone; the next check (validators
-                // were not stored) downloads and imports it again.
-                FileLogger.i(TAG, "Import cancelled by WorkManager")
+                // Not expected here (the install runs uninterrupted); if it
+                // ever happens, it is not a parse failure — don't roll back.
+                FileLogger.i(TAG, "Import cancelled")
                 throw e
             } catch (e: Exception) {
                 // Parse failed — roll back to old data
                 FileLogger.e(TAG, "Parse failed, rolling back: ${e.message}")
                 finalDir.deleteRecursively()
                 backupDir.renameTo(finalDir)
+                var reloadOk = false
                 try {
                     gtfsRepo.loadStaticData()  // reload old data
+                    reloadOk = true
                 } catch (c: kotlinx.coroutines.CancellationException) {
                     // Stopped by WorkManager mid-rollback: let it stop. The
                     // unfinished-import flag makes the next start reinstall.
@@ -766,19 +922,23 @@ class GtfsUpdateWorker @AssistedInject constructor(
                     FileLogger.e(TAG, "Rollback reload also failed: ${reloadError.message}")
                 }
                 markBadFeed(ctx)
-                Result.failure(out(RESULT_FAILED))
+                // Only claim "continuing with the old data" if it is back.
+                Result.failure(out(if (reloadOk) RESULT_FAILED else RESULT_FAILED_NO_DATA))
             }
+            } }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            // No automatic retry: the next time the app is opened (after
-            // MIN_CHECK_INTERVAL_MS) a fresh check is made anyway, and a
-            // silent retry could start a download mid-journey.
             FileLogger.e(TAG, "Update failed: ${e.message}", e)
             tmpDir.deleteRecursively()
-            if (downloadStarted) {
-                prefs(ctx).edit().putLong(KEY_DOWNLOAD_FAIL_MS, System.currentTimeMillis()).apply()
+            // A damaged archive is a bad feed, not a broken connection: the
+            // same file would come again — wait 24 h, no retries.
+            if (e is java.util.zip.ZipException) {
+                markBadFeed(ctx)
+                return@withContext Result.failure(out(RESULT_FAILED))
             }
+            // Anything else (connection lost, too slow, server error): quietly
+            // give up; the next opening (an hour later at the earliest) tries again.
             Result.failure(out(RESULT_FAILED))
         }
     }
@@ -851,10 +1011,9 @@ class GtfsUpdateWorker @AssistedInject constructor(
         val noValidator = v.lastModifiedMs <= 0L && v.etag == null
         e.putBoolean(KEY_NO_VALIDATOR, noValidator)
         if (v.hash != null) e.putString(KEY_FEED_HASH, v.hash)
-        e.remove(KEY_LAST_MODIFIED)
         e.apply()
         FileLogger.i(TAG, if (noValidator)
-            "Server gives no version marker — from now on at most one download a day"
+            "Server gives no version marker — on mobile data at most one download a day"
             else "Server version marker stored — later checks cost no download when unchanged")
     }
 
@@ -864,11 +1023,6 @@ class GtfsUpdateWorker @AssistedInject constructor(
      * bundled in the APK, falls back to the bundle's own date, so a fresh
      * install whose bundled data is already current does not download it
      * again.
-     *
-     * The marker stored by earlier versions ([KEY_LAST_MODIFIED]) is ignored
-     * on purpose: they saved it before the download had finished, so it may
-     * describe a feed that never made it into the database. Ignoring it costs
-     * one full download after the upgrade.
      */
     private fun baselineMs(ctx: Context): Long {
         val p = prefs(ctx)
@@ -909,7 +1063,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
         try {
             val code = conn.responseCode
             // The server answered: from here on this counts as a check for
-            // the 30-minute spacing. (No network → exception above → the
+            // the one-hour spacing. (No network → exception above → the
             // next opening of the app tries again.)
             p.edit().putLong(KEY_LAST_ATTEMPT_MS, System.currentTimeMillis()).apply()
             // Diagnostics: what the server tells us about its version, so the
@@ -950,11 +1104,10 @@ class GtfsUpdateWorker @AssistedInject constructor(
             downloadStarted = true
             setProgress(workDataOf(KEY_PHASE to PHASE_DOWNLOAD))
 
-            // Fingerprint of the files we actually use (names + contents), in
-            // archive order. Hashing the ZIP bytes instead would differ on
-            // every rebuild of the archive (entry timestamps) even when the
-            // timetable is the same.
-            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            // Fingerprint of the files we actually use (see fingerprintOf).
+            // Hashing the ZIP bytes instead would differ on every rebuild of
+            // the archive (entry timestamps) even when the timetable is the same.
+            val fileHashes = HashMap<String, String>()
             val deadline = System.currentTimeMillis() + maxDownloadMs
             // Counts the bytes actually received (the ZIP as sent), for the log.
             var received = 0L
@@ -973,7 +1126,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
                         val safeName = File(entry.name).name
                         val outFile  = File(target, safeName)
                         val fingerprint = safeName in FILES_TO_KEEP
-                        if (fingerprint) digest.update(safeName.toByteArray())
+                        val digest = java.security.MessageDigest.getInstance("SHA-256")
                         outFile.outputStream().buffered().use { out ->
                             while (true) {
                                 // Stopped by WorkManager: stop writing at once,
@@ -989,13 +1142,14 @@ class GtfsUpdateWorker @AssistedInject constructor(
                                 if (fingerprint) digest.update(buf, 0, n)
                             }
                         }
+                        if (fingerprint) fileHashes[safeName] = digest.digest().joinToString("") { "%02x".format(it) }
                         FileLogger.d(TAG, "Extracted ${entry.name} (${outFile.length()} bytes)")
                     }
                     zip.closeEntry()
                     entry = zip.nextEntry
                 }
             }
-            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            val hash = fingerprintOf(fileHashes)
             FileLogger.i(TAG, "Downloaded ${received} bytes (%.1f MB) in %.1f s".format(
                 java.util.Locale.US, received / 1_048_576.0,
                 (System.currentTimeMillis() - startMs) / 1000.0))

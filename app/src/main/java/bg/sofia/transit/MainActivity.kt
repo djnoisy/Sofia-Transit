@@ -37,6 +37,8 @@ class MainActivity : AppCompatActivity() {
     private var updateProgressMessage: String? = null
     /** Shown when an update the user saw has finished; has a close button. */
     private var updateResultDialog: AlertDialog? = null
+    /** Run whose result [updateResultDialog] shows. */
+    private var updateResultId: java.util.UUID? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -92,7 +94,10 @@ class MainActivity : AppCompatActivity() {
         WorkManager.getInstance(this)
             .getWorkInfosForUniqueWorkLiveData(GtfsUpdateWorker.WORK_NAME)
             .observe(this) { infos ->
-                val info = infos?.firstOrNull { !it.state.isFinished } ?: infos?.firstOrNull()
+                // A running run first (an install can have its follow-up
+                // update already queued behind it), then any unfinished one.
+                val info = infos?.firstOrNull { it.state == WorkInfo.State.RUNNING }
+                    ?: infos?.firstOrNull { !it.state.isFinished } ?: infos?.firstOrNull()
                 renderDataUpdate(info)
             }
     }
@@ -114,7 +119,7 @@ class MainActivity : AppCompatActivity() {
                 // First run: there is no data yet, so the dialog stays up for
                 // the whole install, from the first moment. One text for all
                 // of it — checking, downloading and installing alike.
-                showUpdateProgress(INSTALL_TITLE, "Инсталиране на данните…")
+                showUpdateProgress(info.id, INSTALL_TITLE, "Инсталиране на данните…")
                 return
             }
             // A later update: checking and downloading happen silently in
@@ -123,7 +128,7 @@ class MainActivity : AppCompatActivity() {
             // browsed, as they would come back half empty.
             when (phase) {
                 GtfsUpdateWorker.PHASE_IMPORT ->
-                    showUpdateProgress(UPDATE_TITLE, "Инсталиране на новите данни…")
+                    showUpdateProgress(info.id, UPDATE_TITLE, "Инсталиране на новите данни…")
                 else -> {
                     dismissUpdateProgress()
                     // A silent new check: a result from an earlier run the
@@ -146,6 +151,14 @@ class MainActivity : AppCompatActivity() {
             showInstallResult(info.id, GtfsUpdateWorker.RESULT_FAILED)
             return
         }
+        if (install && installFailed && gtfsRepo.initialLoadDone.value) {
+            // A failed install whose data has been loaded since (e.g. it
+            // gave up because another import was busy): "Опитай отново"
+            // would be stale. Drop it quietly.
+            GtfsUpdateWorker.acknowledge(this, info.id)
+            showPendingResult()
+            return
+        }
         if (!out.getBoolean(GtfsUpdateWorker.KEY_VISIBLE, false) ||
             GtfsUpdateWorker.isAcknowledged(this, info.id)) {
             // Nothing to tell about this run — but maybe about an earlier one
@@ -159,8 +172,12 @@ class MainActivity : AppCompatActivity() {
             install -> GtfsUpdateWorker.KIND_INSTALL
             else -> GtfsUpdateWorker.KIND_UPDATE
         }
-        showResult(info.id, kind,
-            if (installFailed) GtfsUpdateWorker.RESULT_FAILED else out.getString(GtfsUpdateWorker.KEY_RESULT))
+        val reported = out.getString(GtfsUpdateWorker.KEY_RESULT)
+        showResult(info.id, kind, when {
+            reported == GtfsUpdateWorker.RESULT_FAILED_NO_DATA -> reported
+            installFailed -> GtfsUpdateWorker.RESULT_FAILED
+            else -> reported
+        })
     }
 
     /** The result the app kept for itself (see GtfsUpdateWorker.pendingResult). */
@@ -179,6 +196,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showResult(id: java.util.UUID, kind: String, result: String?) {
+        if (result == GtfsUpdateWorker.RESULT_FAILED_NO_DATA) {
+            // The update failed and the old data could not be put back
+            // either: same as a failed install — offer "Опитай отново".
+            showInstallResult(id, GtfsUpdateWorker.RESULT_FAILED)
+            return
+        }
         if (kind == GtfsUpdateWorker.KIND_REINSTALL && result == GtfsUpdateWorker.RESULT_FAILED) {
             // A reinstall (new app version) that failed after it began
             // replacing the tables: the data is incomplete. Same as a failed
@@ -191,6 +214,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val text = when (result) {
+            // An unfinished install completed from the local files: which
+            // data it is is not known — say only that it is installed.
+            GtfsUpdateWorker.RESULT_REPAIRED ->
+                "Данните са инсталирани."
             // An update, or a reinstall after a new app version brought
             // newer bundled data — to the user both are the same thing.
             GtfsUpdateWorker.RESULT_UPDATED,
@@ -202,14 +229,30 @@ class MainActivity : AppCompatActivity() {
                 "Актуализирането на данните не бе успешно. Приложението " +
                 "продължава с досегашните данни и ще опита отново по-късно."
         }
+        updateResultId = id
         updateResultDialog = AlertDialog.Builder(this)
             .setTitle(UPDATE_TITLE)
             .setMessage(text)
-            .setPositiveButton("Затвори") { _, _ ->
-                GtfsUpdateWorker.acknowledge(this, id)
-            }
-            .setOnCancelListener { GtfsUpdateWorker.acknowledge(this, id) }
+            .setPositiveButton("Затвори") { _, _ -> resultClosed(id, result) }
+            .setOnCancelListener { resultClosed(id, result) }
             .show()
+    }
+
+    /**
+     * The user closed the message about a finished install/update. Only now
+     * may the next one start (checkForUpdate waits for this), so that data
+     * never changes behind a message that is still on screen. After an
+     * install that fell back to the local data, look for newer data at once.
+     */
+    private fun resultClosed(id: java.util.UUID, result: String?) {
+        GtfsUpdateWorker.acknowledge(this, id)
+        // A reinstall due after an app upgrade waited for this too.
+        gtfsRepo.startInitialLoadIfNeeded()
+        if (result == GtfsUpdateWorker.RESULT_INSTALLED_FALLBACK) {
+            GtfsUpdateWorker.updateAfterFallbackInstall(this)
+        } else {
+            GtfsUpdateWorker.checkForUpdate(this)
+        }
     }
 
     private fun showInstallResult(id: java.util.UUID, result: String?) {
@@ -229,19 +272,36 @@ class MainActivity : AppCompatActivity() {
                 gtfsRepo.retryInitialLoad()
             }
         } else {
-            b.setPositiveButton("Затвори") { _, _ ->
-                GtfsUpdateWorker.acknowledge(this, id)
-            }
-            .setOnCancelListener { GtfsUpdateWorker.acknowledge(this, id) }
+            b.setPositiveButton("Затвори") { _, _ -> resultClosed(id, result) }
+            .setOnCancelListener { resultClosed(id, result) }
         }
+        updateResultId = id
         updateResultDialog = b.show()
     }
 
-    private fun showUpdateProgress(title: String, message: String) {
-        // A result left over from an earlier run (e.g. a failed install being
-        // retried) gives way to the run in progress; it is not acknowledged.
-        updateResultDialog?.dismiss()
-        updateResultDialog = null
+    private fun showUpdateProgress(runId: java.util.UUID, title: String, message: String) {
+        // A late progress report of a run that has already finished (its
+        // result is kept or on screen): nothing is in progress any more.
+        if (GtfsUpdateWorker.pendingResult(this)?.id == runId ||
+            (updateResultId == runId && updateResultDialog?.isShowing == true)) {
+            dismissUpdateProgress()
+            showPendingResult()
+            return
+        }
+        // A new install is starting: a result from an earlier run the user
+        // has not closed yet is outdated — the new run ends with its own
+        // message. Discard it for good rather than show it later.
+        // (Never the result of this very run: a late progress report of a run
+        // that has just finished must not swallow its own message.)
+        if (updateResultId != null && updateResultId != runId) {
+            updateResultDialog?.dismiss()
+            updateResultDialog = null
+            GtfsUpdateWorker.acknowledge(this, updateResultId!!)
+            updateResultId = null
+        }
+        GtfsUpdateWorker.pendingResult(this)?.let {
+            if (it.id != runId) GtfsUpdateWorker.acknowledge(this, it.id)
+        }
         val existing = updateProgressDialog
         if (existing != null && existing.isShowing) {
             // Already up: the work reports each new phase, but the text is
@@ -306,8 +366,8 @@ class MainActivity : AppCompatActivity() {
                             // refresh in the whole app. It runs every time the
                             // app comes to the foreground (this block restarts
                             // on each STARTED); the worker itself skips it
-                            // during a journey and within 30 min of the last
-                            // check, and downloads only when the feed changed.
+                            // during a journey and within an hour of the last
+                            // check, and on mobile data downloads once a day.
                             GtfsUpdateWorker.checkForUpdate(this@MainActivity)
                         } else {
                             binding.layoutLoading.visibility = View.VISIBLE

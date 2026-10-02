@@ -5,7 +5,6 @@ import android.util.Log
 import java.io.File
 import java.io.FileWriter
 import java.io.PrintWriter
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -35,7 +34,12 @@ object FileLogger {
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "FileLogger").apply { isDaemon = true }
     }
-    private val timestampFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    /**
+     * Thread-safe (SimpleDateFormat is not, and every part of the app logs
+     * from its own thread — a clash could throw inside the caller's code).
+     */
+    private val timestampFmt: java.time.format.DateTimeFormatter =
+        java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS", Locale.US)
 
     /** Call once at app startup (e.g. from Application.onCreate). */
     fun init(context: Context) {
@@ -55,9 +59,12 @@ object FileLogger {
     fun d(tag: String, msg: String) { Log.d(tag, msg); enqueue("D", tag, msg) }
 
     private fun enqueue(level: String, tag: String, msg: String) {
-        val ts = timestampFmt.format(Date())
-        queue.add("$ts $level/$tag: $msg")
-        executor.execute { flush() }
+        // Logging must never affect the app: whatever goes wrong here stays here.
+        try {
+            val ts = timestampFmt.format(java.time.LocalTime.now())
+            queue.add("$ts $level/$tag: $msg")
+            executor.execute { flush() }
+        } catch (_: Throwable) { }
     }
 
     private fun flush() {
