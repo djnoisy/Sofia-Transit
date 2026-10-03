@@ -21,7 +21,30 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Persistent signing key, so a new APK installs over the previous one.
+    // CI decodes the KEYSTORE_BASE64 secret into a file and passes its path
+    // and the passwords as environment variables (see build.yml). Without
+    // them (local builds, missing secrets) the default debug key is used.
+    def keystorePath = System.getenv("SIGNING_KEYSTORE_FILE")
+    def hasPersistentKey = keystorePath && file(keystorePath).exists()
+
+    signingConfigs {
+        if (hasPersistentKey) {
+            persistent {
+                storeFile file(keystorePath)
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (hasPersistentKey) {
+                signingConfig signingConfigs.persistent
+            }
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
