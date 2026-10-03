@@ -13,6 +13,7 @@ captures/
 # Keystore (for release builds)
 *.jks
 *.keystore
+*.jks
 
 # OS
 .DS_Store
