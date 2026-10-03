@@ -220,7 +220,10 @@ class VehicleMatcher @Inject constructor(
         val ageSec = if (best.timestamp > 0) nowSec - best.timestamp else -1
         FileLogger.i(TAG, "Riding vehicle: $name → ${headsign ?: "?"} " +
             "at ${dist.toInt()} m, report ${ageSec}s old" +
-            (if (contested) ", contested" else "") + " (trip=${best.tripId})")
+            (if (contested) ", contested" else "") + " (trip=${best.tripId}" +
+            // Diagnostic only: which stop the vehicle itself says it is at.
+            ", stop=${best.currentStopId ?: "-"} seq=${best.currentStopSequence ?: "-"}" +
+            " status=${best.currentStatus ?: "-"})")
         fun sighting(v: VehicleInfo, d: Double) = Sighting(
             v.tripId, v.routeId, d, v.timestamp,
             if (v.timestamp > 0) (nowSec - v.timestamp).coerceAtLeast(0) else -1,
