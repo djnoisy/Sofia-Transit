@@ -649,7 +649,9 @@ class GtfsRepository @Inject constructor(
         // the ugly row does. The log below carries what is needed to find the
         // cause if it recurs.
         (realtimeArrivals + scheduledArrivals)
-            .filter { it.routeShortName == it.routeId }
+            // Missing from the map, not "name equals id": metro lines are
+            // named after their ids (M1 is short name M1) and are fine.
+            .filter { it.routeId !in routeShortNames }
             .forEach {
                 FileLogger.w("GtfsRepo", "Route name unresolved at $stopId: " +
                     "id=${it.routeId}, headsign=${it.headsign}, " +
