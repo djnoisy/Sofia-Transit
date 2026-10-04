@@ -12,7 +12,6 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.result.ActivityResultCaller
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 
@@ -63,28 +62,22 @@ object Permissions {
             .putBoolean(KEY_INTRO_SHOWN, true).apply()
     }
 
-    /** Whether the system dialog for [key] has been launched before. */
-    internal fun askedBefore(ctx: Context, key: String): Boolean =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("asked_$key", false)
-
-    internal fun markAsked(ctx: Context, key: String) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putBoolean("asked_$key", true).apply()
-    }
-
     private fun granted(ctx: Context, perm: String) =
         ContextCompat.checkSelfPermission(ctx, perm) == PackageManager.PERMISSION_GRANTED
 }
 
 /**
- * Asks for the permissions, choosing between the system dialog and the
- * system settings page.
+ * Asks for the permissions: the system dialog first, always.
  *
  * After two refusals Android stops showing the dialog and refuses at once,
- * without the user seeing anything. That case is recognised (asked before,
- * and the system no longer wants a rationale) and the app's page in the
- * system settings is opened instead, where the permission can still be
- * turned on.
+ * without the user seeing anything. The app cannot tell beforehand: the one
+ * hint the system gives (shouldShowRequestPermissionRationale) reads the
+ * same for a blocked dialog as for a permission switched off by hand in
+ * the system settings, where the dialog does appear. So the dialog is
+ * always tried, and a refusal that comes back faster than anyone could
+ * answer ([INSTANT_REFUSAL_MS]) means it was never shown — only then is
+ * the system settings page opened, where the permission can still be
+ * turned on. A refusal the user gave in the dialog is left at that.
  *
  * Every request takes a continuation, run once the user is back — so the
  * permissions screen can chain all three. [onChanged] runs after each step
@@ -100,17 +93,38 @@ class PermissionRequester(
 ) {
     private companion object {
         const val TAG = "PermissionRequester"
-        const val KEY_LOCATION = "location"
-        const val KEY_NOTIFICATIONS = "notifications"
+        /** Below this, a refusal came without the dialog being shown. */
+        const val INSTANT_REFUSAL_MS = 500L
         const val SETTINGS_HINT =
             "Включете разрешението в отворената страница и се върнете с бутона Назад."
     }
 
     private var next: (() -> Unit)? = null
 
+    /** The dialog in progress: what it asks for, when, and where else to go. */
+    private var asked: String? = null
+    private var askedAtMs = 0L
+    private var fallback: Intent? = null
+
     private val permissionLauncher = caller.registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { finishStep() }
+    ) { result ->
+        val perm = asked
+        val elapsed = android.os.SystemClock.elapsedRealtime() - askedAtMs
+        val settings = fallback
+        asked = null
+        fallback = null
+        if (perm != null && result[perm] != true && elapsed < INSTANT_REFUSAL_MS &&
+            settings != null) {
+            FileLogger.i(TAG, "Dialog for $perm not shown (refused in $elapsed ms); " +
+                "opening system settings")
+            val then = next ?: {}
+            next = null
+            openScreen(settings, then)
+        } else {
+            finishStep()
+        }
+    }
 
     /** System settings screens; the result only tells that the user is back. */
     private val screenLauncher = caller.registerForActivityResult(
@@ -128,16 +142,10 @@ class PermissionRequester(
     fun requestLocation(then: () -> Unit = {}) {
         val act = activity()
         if (Permissions.hasFineLocation(act)) { then(); return }
-        if (dialogBlocked(act, KEY_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)) {
-            openScreen(appDetailsIntent(act), then)
-            return
-        }
-        Permissions.markAsked(act, KEY_LOCATION)
-        FileLogger.i(TAG, "Asking for location")
-        next = then
-        permissionLauncher.launch(arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION))
+        askDialog(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,
+                          Manifest.permission.ACCESS_COARSE_LOCATION),
+            required = Manifest.permission.ACCESS_FINE_LOCATION,
+            settings = appDetailsIntent(act), then = then)
     }
 
     fun requestNotifications(then: () -> Unit = {}) {
@@ -146,16 +154,15 @@ class PermissionRequester(
         val permissionMissing = Permissions.notificationsAreRuntime &&
             ContextCompat.checkSelfPermission(act, Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED
-        if (permissionMissing &&
-            !dialogBlocked(act, KEY_NOTIFICATIONS, Manifest.permission.POST_NOTIFICATIONS)) {
-            Permissions.markAsked(act, KEY_NOTIFICATIONS)
-            FileLogger.i(TAG, "Asking for notifications")
-            next = then
-            permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+        if (permissionMissing) {
+            askDialog(arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                required = Manifest.permission.POST_NOTIFICATIONS,
+                settings = notificationSettingsIntent(act), then = then)
             return
         }
-        // Dialog no longer shown, or notifications switched off by hand
-        // (any Android version): only the settings page can turn them on.
+        // Permission held but notifications switched off in the settings
+        // (or Android 12 and older, which has no dialog): only the settings
+        // page can turn them on.
         openScreen(notificationSettingsIntent(act), then)
     }
 
@@ -192,14 +199,15 @@ class PermissionRequester(
         }
     }
 
-    /**
-     * True when the system will refuse without showing its dialog: it was
-     * asked before and no longer wants a rationale. A first request also has
-     * no rationale, hence the "asked before" record.
-     */
-    private fun dialogBlocked(act: Activity, key: String, perm: String): Boolean =
-        Permissions.askedBefore(act, key) &&
-            !ActivityCompat.shouldShowRequestPermissionRationale(act, perm)
+    private fun askDialog(perms: Array<String>, required: String, settings: Intent,
+                          then: () -> Unit) {
+        FileLogger.i(TAG, "Asking for $required")
+        next = then
+        asked = required
+        fallback = settings
+        askedAtMs = android.os.SystemClock.elapsedRealtime()
+        permissionLauncher.launch(perms)
+    }
 
     private fun openScreen(intent: Intent, then: () -> Unit) {
         Toast.makeText(activity(), SETTINGS_HINT, Toast.LENGTH_LONG).show()
