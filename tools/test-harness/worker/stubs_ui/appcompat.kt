@@ -41,6 +41,9 @@ open class AppCompatActivity : Context(TestEnv.files, TestEnv.assets), androidx.
     val supportFragmentManager = FragmentManager()
     val resources = Resources()
     fun setContentView(v: View) {}
+    /** Activities started, for the tests. */
+    val started = mutableListOf<android.content.Intent>()
+    fun startActivity(i: android.content.Intent) { started += i }
     open fun onCreate(savedInstanceState: android.os.Bundle?) {}
     open fun onDestroy() { androidx.lifecycle.Registry.destroyed(this) }
 }

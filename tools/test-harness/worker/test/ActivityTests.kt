@@ -22,7 +22,10 @@ class Env(dbReady: Boolean = true) {
     val root = kotlin.io.path.createTempDirectory("ui").toFile()
     init { TestEnv.files = File(root, "f").apply { mkdirs() }; TestEnv.assets = File(root, "a").apply { mkdirs() }
         Dialogs.all.clear(); A11y.spoken.clear(); WorkManager.INSTANCE.enqueued.clear()
-        WorkManager.INSTANCE.live.resetForTest() }
+        WorkManager.INSTANCE.live.resetForTest()
+        bg.sofia.transit.util.Permissions.reset()
+        bg.sofia.transit.service.JourneyService._trackingState.value =
+            bg.sofia.transit.service.JourneyService.TrackingState.Idle }
     val act = MainActivity()
     val repo = GtfsRepository(act)
     init { if (dbReady) repo.db = "bundled:x"; act.gtfsRepo = repo; act.onCreate(null) }
@@ -30,6 +33,8 @@ class Env(dbReady: Boolean = true) {
     fun showing() = Dialogs.all.filter { it.isShowing }
     fun only(): AlertDialog { val s = showing(); eq("dialogs showing", 1, s.size); return s[0] }
     fun binding() = ActivityMainBinding.last!!
+    fun permissionScreens() = act.started.count {
+        it.cls == bg.sofia.transit.ui.permissions.PermissionsActivity::class.java }
 }
 val INST = setOf("gtfs_install")
 fun info(id: UUID, st: WorkInfo.State, tags: Set<String> = emptySet(), phase: String? = null, vararg out: Pair<String, Any?>) =
@@ -283,7 +288,43 @@ fun main() {
         WorkManager.INSTANCE.enqueued.clear(); d.clickPositive(); eq("check queued", 1, WorkManager.INSTANCE.enqueued.size)
     }
 
+    // ── first-run permissions screen ──
+    val P = bg.sofia.transit.util.Permissions
+    t("P1 first install → permissions screen only after 'Данните са инсталирани.' is closed") {
+        val e = Env(false); val id = UUID.randomUUID()
+        e.post(info(id, R, INST, "import")); e.repo._initialLoadDone.value = true
+        eq("not over the install dialog", 0, e.permissionScreens())
+        e.post(info(id, S, INST, null, "result" to "installed_new", "visible" to true))
+        eq("not over the result", 0, e.permissionScreens())
+        e.only().clickPositive()
+        eq("shown after close", 1, e.permissionScreens()); yes("marked shown", P.shown)
+    }
+    t("P2 already shown once → never again") {
+        val e = Env(true); P.shown = true; e.repo._initialLoadDone.value = true
+        eq("screens", 0, e.permissionScreens())
+    }
+    t("P3 everything already granted → not shown, and not later either") {
+        val e = Env(true); P.all = true; e.repo._initialLoadDone.value = true
+        eq("screens", 0, e.permissionScreens()); yes("marked shown", P.shown)
+    }
+    t("P4 data already there (app update), no window → shown at start") {
+        val e = Env(true); e.repo._initialLoadDone.value = true
+        eq("screens", 1, e.permissionScreens())
+    }
+    t("P5 during a journey → not shown, kept for later") {
+        val e = Env(true)
+        bg.sofia.transit.service.JourneyService._trackingState.value =
+            bg.sofia.transit.service.JourneyService.TrackingState.Tracking()
+        e.repo._initialLoadDone.value = true
+        eq("screens", 0, e.permissionScreens()); yes("not marked", !P.shown)
+    }
+    t("P6 install failed, no data → not shown") {
+        val e = Env(false)
+        e.post(info(UUID.randomUUID(), F, INST, null, "result" to "failed", "visible" to true))
+        eq("screens", 0, e.permissionScreens())
+    }
     println("\n$ok passed, ${bad.size} failed"); bad.forEach { println("  ✗ $it") }
     kotlin.system.exitProcess(if (bad.isEmpty()) 0 else 1)
+
 }
 fun runBlockingReady(e: Env) { kotlinx.coroutines.runBlocking { e.repo.isDatabaseReady() } }

@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The three permission rows, shared by the first-run permissions screen
+     and the "Разрешения" section of Settings. Each row: status line (name
+     and state in one sentence, so a screen reader reads them together),
+     explanation, and a button shown only where there is something to do. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView android:id="@+id/tvLocationStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="16sp"
+        android:textStyle="bold"/>
+
+    <TextView android:id="@+id/tvLocationInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="14sp"
+        android:alpha="0.75"
+        android:lineSpacingMultiplier="1.15"
+        android:paddingTop="4dp"/>
+
+    <Button android:id="@+id/btnLocation"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="8dp"
+        android:text="Разреши местоположение"
+        style="@style/Widget.Material3.Button.OutlinedButton"/>
+
+    <LinearLayout android:id="@+id/rowNotifications"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingTop="20dp">
+
+        <TextView android:id="@+id/tvNotificationsStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="По време на пътуване в панела с известия стои известие, че следенето работи. От него се връщате в приложението с едно докосване."
+            android:textSize="14sp"
+            android:alpha="0.75"
+            android:lineSpacingMultiplier="1.15"
+            android:paddingTop="4dp"/>
+
+        <Button android:id="@+id/btnNotifications"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="8dp"
+            android:text="Разреши известия"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+    </LinearLayout>
+
+    <TextView android:id="@+id/tvBatteryStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="20dp"
+        android:textSize="16sp"
+        android:textStyle="bold"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Без това телефонът може да спре обявяването на спирки, докато екранът е заключен."
+        android:textSize="14sp"
+        android:alpha="0.75"
+        android:lineSpacingMultiplier="1.15"
+        android:paddingTop="4dp"/>
+
+    <Button android:id="@+id/btnBattery"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="8dp"
+        style="@style/Widget.Material3.Button.OutlinedButton"/>
+
+</LinearLayout>

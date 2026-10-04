@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Разрешения"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:accessibilityHeading="true"
+            android:paddingBottom="12dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="За да работи пълноценно, приложението има нужда от следните разрешения:"
+            android:textSize="16sp"
+            android:lineSpacingMultiplier="1.15"
+            android:paddingBottom="20dp"/>
+
+        <include android:id="@+id/permissionRows"
+            layout="@layout/view_permission_rows"/>
+
+        <Button android:id="@+id/btnAllowAll"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="28dp"
+            android:text="Разреши всички"/>
+
+        <Button android:id="@+id/btnNotNow"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="8dp"
+            android:text="Не сега"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Може да промените разрешенията по-късно от Настройки → Разрешения."
+            android:textSize="14sp"
+            android:alpha="0.75"
+            android:lineSpacingMultiplier="1.15"
+            android:paddingTop="20dp"/>
+    </LinearLayout>
+</ScrollView>

@@ -13,8 +13,10 @@ import androidx.fragment.app.Fragment
 import bg.sofia.transit.R
 import bg.sofia.transit.databinding.FragmentSettingsBinding
 import bg.sofia.transit.service.JourneyService
+import bg.sofia.transit.ui.permissions.PermissionRows
 import bg.sofia.transit.util.AppSettings
 import bg.sofia.transit.util.FileLogger
+import bg.sofia.transit.util.PermissionRequester
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.Locale
 import java.util.UUID
@@ -48,6 +50,11 @@ class SettingsFragment : Fragment() {
      */
     private var suppressSpinnerCallback = true
 
+    private var permissionRows: PermissionRows? = null
+    private val requester = PermissionRequester(this, { requireActivity() }) {
+        permissionRows?.refresh()
+    }
+
     /** Pending debounced preview of the speaking rate. */
     private var previewRunnable: Runnable? = null
 
@@ -74,10 +81,10 @@ class SettingsFragment : Fragment() {
         setUpRateSlider()
         setUpApproachMode()
         setUpAutoDirection()
-        showBatteryStatus()
+        permissionRows = PermissionRows(binding.permissionRows, requester, withButtons = true)
+            .also { it.refresh() }
 
         binding.btnTestSpeech.setOnClickListener { speak(SAMPLE) }
-        binding.btnBatterySettings.setOnClickListener { openBatterySettings() }
     }
 
     // ── Speech engine ─────────────────────────────────────────────────────
@@ -288,70 +295,10 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    // ── Battery optimisation ──────────────────────────────────────────────
-
-    /**
-     * Reflects whether the system currently exempts us from battery
-     * optimisation. Re-read in onResume, since the user changes it in a
-     * system screen and returns.
-     */
-    private fun showBatteryStatus() {
-        val exempt = isIgnoringBatteryOptimisations()
-        binding.tvBatteryStatus.text = if (exempt)
-            "Ограниченията са изключени"
-        else
-            "Ограниченията са включени"
-        binding.btnBatterySettings.text = if (exempt)
-            "Отвори системните настройки"
-        else
-            "Изключи ограниченията"
-    }
-
-    private fun isIgnoringBatteryOptimisations(): Boolean = try {
-        val pm = requireContext().getSystemService(android.content.Context.POWER_SERVICE)
-                as android.os.PowerManager
-        pm.isIgnoringBatteryOptimizations(requireContext().packageName)
-    } catch (e: Exception) {
-        FileLogger.w(TAG, "Battery optimisation state unknown: ${e.message}")
-        false
-    }
-
-    /**
-     * Asks the system to exempt the app. When already exempt — or when the
-     * direct request is unavailable — falls back to opening the battery
-     * optimisation list, since manufacturers layer their own restrictions
-     * ("sleeping apps" and the like) that no API can switch off.
-     */
-    private fun openBatterySettings() {
-        val ctx = requireContext()
-        if (!isIgnoringBatteryOptimisations()) {
-            try {
-                @Suppress("BatteryLife")
-                val intent = android.content.Intent(
-                    android.provider.Settings
-                        .ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                    android.net.Uri.parse("package:${ctx.packageName}")
-                )
-                startActivity(intent)
-                return
-            } catch (e: Exception) {
-                FileLogger.w(TAG, "Direct exemption request failed: ${e.message}")
-            }
-        }
-        try {
-            startActivity(android.content.Intent(
-                android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        } catch (e: Exception) {
-            Toast.makeText(ctx,
-                "Отворете Настройки → Батерия за това приложение",
-                Toast.LENGTH_LONG).show()
-        }
-    }
-
     override fun onResume() {
         super.onResume()
-        // The exemption is granted in a system screen, so refresh on return.
-        _binding?.let { showBatteryStatus() }
+        // Permissions are changed in system screens, so refresh on return.
+        permissionRows?.refresh()
     }
 
     private fun speak(text: String) {
@@ -369,6 +316,7 @@ class SettingsFragment : Fragment() {
         previewRunnable = null
         tts?.shutdown()
         tts = null
+        permissionRows = null
         _binding = null
     }
 }

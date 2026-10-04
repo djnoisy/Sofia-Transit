@@ -1,16 +1,11 @@
 package bg.sofia.transit.ui.journey
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.appcompat.app.AlertDialog
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
@@ -19,6 +14,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.databinding.FragmentJourneyBinding
 import bg.sofia.transit.service.JourneyService
+import bg.sofia.transit.util.PermissionRequester
+import bg.sofia.transit.util.Permissions
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -50,24 +47,13 @@ class JourneyFragment : Fragment() {
     private var lastLon = 0.0
     private var hasLocation = false
 
-    private val permLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { perms ->
-        val locGranted = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true
-        if (locGranted) startLocationAndLoad()
-        else Toast.makeText(requireContext(),
-            "Необходим е достъп до местоположение", Toast.LENGTH_LONG).show()
-    }
-
-    private fun requiredPermissions(): Array<String> {
-        val perms = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        return perms.toTypedArray()
+    // Location is asked for only from the button: the first-run permissions
+    // screen and Settings are where permissions are given. Notifications are
+    // no longer asked for here at all — this screen asked for them only
+    // together with location, so they were never asked for once location
+    // had been given on the Stops tab.
+    private val requester = PermissionRequester(this, { requireActivity() }) {
+        if (_binding != null) refreshLocationAccess()
     }
 
     override fun onCreateView(
@@ -148,18 +134,28 @@ class JourneyFragment : Fragment() {
             }
         }
 
-        if (ContextCompat.checkSelfPermission(
-                requireContext(), Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            startLocationAndLoad()
-        } else {
-            permLauncher.launch(requiredPermissions())
-        }
+        binding.btnGrantLocation.setOnClickListener { requester.requestLocation() }
+    }
+
+    /**
+     * Starts location for the selection list when access is there; the
+     * render shows the message with its button otherwise. Runs on every
+     * resume: access may have been given in the system settings meanwhile,
+     * and onPause stops the updates.
+     */
+    private fun refreshLocationAccess() {
+        if (Permissions.hasAnyLocation(requireContext())) startLocationAndLoad()
+        render()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshLocationAccess()
     }
 
     /** Single render entry: decides between tracking and selection modes. */
     private fun render() {
+        binding.btnGrantLocation.visibility = View.GONE
         val trackingState = vm.tracking.value
         if (trackingState is JourneyService.TrackingState.Tracking) {
             renderTracking(trackingState)
@@ -418,8 +414,13 @@ class JourneyFragment : Fragment() {
         if (!state.hasLocation) {
             binding.panelUpcoming.visibility = View.GONE
             binding.tvJourneyHint.visibility = View.VISIBLE
-            binding.tvJourneyHint.text = "Определяне на местоположение…"
             binding.tvJourneyHint.contentDescription = null
+            if (Permissions.hasAnyLocation(requireContext())) {
+                binding.tvJourneyHint.text = "Определяне на местоположение…"
+            } else {
+                binding.tvJourneyHint.text = "Няма достъп до местоположението."
+                binding.btnGrantLocation.visibility = View.VISIBLE
+            }
             return
         }
 

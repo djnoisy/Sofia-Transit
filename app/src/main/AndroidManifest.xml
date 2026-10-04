@@ -61,6 +61,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.permissions.PermissionsActivity"
+            android:exported="false"
+            android:label="Разрешения"/>
+
         <service
             android:name=".service.JourneyService"
             android:enabled="true"

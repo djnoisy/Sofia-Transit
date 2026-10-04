@@ -1,20 +1,18 @@
 package bg.sofia.transit.ui.nearby
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.databinding.FragmentNearbyTabBinding
+import bg.sofia.transit.util.PermissionRequester
+import bg.sofia.transit.util.Permissions
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -41,15 +39,10 @@ class NearbyTabFragment : Fragment() {
     private lateinit var fusedClient: FusedLocationProviderClient
     private lateinit var nearbyAdapter: NearbyStopAdapter
 
-    private val locPermLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { perms ->
-        if (perms[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            startLocationUpdates()
-        } else {
-            Toast.makeText(requireContext(),
-                "Необходим е достъп до местоположение", Toast.LENGTH_LONG).show()
-        }
+    // The system dialog is asked for only from the button: the first-run
+    // permissions screen and Settings are where permissions are given.
+    private val requester = PermissionRequester(this, { requireActivity() }) {
+        if (_binding != null) refreshLocationAccess()
     }
 
     override fun onCreateView(
@@ -91,20 +84,23 @@ class NearbyTabFragment : Fragment() {
             }
         }
 
-        checkAndRequestPermissions()
+        binding.btnGrantLocation.setOnClickListener { requester.requestLocation() }
     }
 
-    private fun checkAndRequestPermissions() {
-        val perms = arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-        if (perms.all { ContextCompat.checkSelfPermission(requireContext(), it) ==
-                        PackageManager.PERMISSION_GRANTED }) {
-            startLocationUpdates()
-        } else {
-            locPermLauncher.launch(perms)
-        }
+    /**
+     * Starts location updates when access is there, otherwise shows the
+     * message with its button. Runs on every resume: access may have been
+     * given in the system settings meanwhile, and onPause stops the updates.
+     */
+    private fun refreshLocationAccess() {
+        val allowed = Permissions.hasAnyLocation(requireContext())
+        binding.panelNoLocation.visibility = if (allowed) View.GONE else View.VISIBLE
+        if (allowed) startLocationUpdates()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshLocationAccess()
     }
 
     @Suppress("MissingPermission")

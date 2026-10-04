@@ -14,6 +14,9 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import bg.sofia.transit.data.repository.GtfsRepository
 import bg.sofia.transit.databinding.ActivityMainBinding
+import bg.sofia.transit.service.JourneyService
+import bg.sofia.transit.ui.permissions.PermissionsActivity
+import bg.sofia.transit.util.Permissions
 import bg.sofia.transit.worker.GtfsUpdateWorker
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -246,6 +249,9 @@ class MainActivity : AppCompatActivity() {
      */
     private fun resultClosed(id: java.util.UUID, result: String?) {
         GtfsUpdateWorker.acknowledge(this, id)
+        updateResultId = null
+        updateResultDialog = null
+        maybeShowPermissions()
         // A reinstall due after an app upgrade waited for this too.
         gtfsRepo.startInitialLoadIfNeeded()
         if (result == GtfsUpdateWorker.RESULT_INSTALLED_FALLBACK) {
@@ -339,6 +345,27 @@ class MainActivity : AppCompatActivity() {
         updateProgressMessage = null
     }
 
+    /**
+     * The first-run permissions screen, once the data is in. Never on top of
+     * an install or update window: during the first install it comes when
+     * the user closes "Данните са инсталирани." ([resultClosed]). Shown once
+     * — not again after "Не сега", and not when everything is already granted
+     * (e.g. an update of the app that brought this screen). Not during a
+     * journey either: that would cover the tracking screen.
+     */
+    private fun maybeShowPermissions() {
+        if (Permissions.introShown(this)) return
+        if (!gtfsRepo.initialLoadDone.value) return
+        if (updateProgressDialog?.isShowing == true || updateResultDialog?.isShowing == true) return
+        GtfsUpdateWorker.pendingResult(this)?.let {
+            if (!GtfsUpdateWorker.isAcknowledged(this, it.id)) return
+        }
+        if (JourneyService.trackingState.value is JourneyService.TrackingState.Tracking) return
+        Permissions.markIntroShown(this)
+        if (Permissions.allGranted(this)) return
+        startActivity(android.content.Intent(this, PermissionsActivity::class.java))
+    }
+
     private fun observeInitialLoad() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -369,6 +396,7 @@ class MainActivity : AppCompatActivity() {
                             // during a journey and within an hour of the last
                             // check, and on mobile data downloads once a day.
                             GtfsUpdateWorker.checkForUpdate(this@MainActivity)
+                            maybeShowPermissions()
                         } else {
                             binding.layoutLoading.visibility = View.VISIBLE
                             // Plain backdrop until the data is there; the
