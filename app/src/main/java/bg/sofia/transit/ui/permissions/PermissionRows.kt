@@ -28,11 +28,7 @@ class PermissionRows(
     init {
         rows.btnLocation.setOnClickListener { requester.requestLocation() }
         rows.btnNotifications.setOnClickListener { requester.requestNotifications() }
-        rows.btnBattery.setOnClickListener {
-            val ctx = rows.root.context
-            if (Permissions.isBatteryExempt(ctx)) requester.openBatteryList()
-            else requester.requestBattery()
-        }
+        rows.btnBattery.setOnClickListener { requester.requestBattery() }
     }
 
     /** Re-reads the state; call on resume and after each request. */
@@ -62,8 +58,7 @@ class PermissionRows(
         val exempt = Permissions.isBatteryExempt(ctx)
         rows.tvBatteryStatus.text =
             "Работа при заключен екран: " + if (exempt) "без ограничения" else "ограничено"
-        rows.btnBattery.text = if (exempt) "Отвори системните настройки" else "Изключи ограниченията"
-        rows.btnBattery.visibility = visibleIf(withButtons)
+        rows.btnBattery.visibility = visibleIf(withButtons && !exempt)
     }
 
     private fun visibleIf(b: Boolean) = if (b) View.VISIBLE else View.GONE

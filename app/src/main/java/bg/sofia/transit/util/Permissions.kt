@@ -160,8 +160,8 @@ class PermissionRequester(
     }
 
     /**
-     * Exemption from battery optimisation, via the system's direct request.
-     * When already exempt, [openBatteryList] is the way to the settings.
+     * Exemption from battery optimisation, via the system's direct request;
+     * the optimisation list when the direct request is unavailable.
      */
     fun requestBattery(then: () -> Unit = {}) {
         val act = activity()
@@ -173,12 +173,7 @@ class PermissionRequester(
         openBatteryList(then)
     }
 
-    /**
-     * The battery optimisation list. Manufacturers layer their own
-     * restrictions ("sleeping apps" and the like) that no API can switch
-     * off, so this stays reachable even when the app is already exempt.
-     */
-    fun openBatteryList(then: () -> Unit = {}) {
+    private fun openBatteryList(then: () -> Unit) {
         if (launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), then)) return
         Toast.makeText(activity(), "Отворете Настройки → Батерия за това приложение",
             Toast.LENGTH_LONG).show()
