@@ -48,6 +48,12 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: gradle assembleDebug
 
+      # Prints who signed the APK: "Android Debug" means the temporary key.
+      - name: Show signing certificate
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -E "DN|SHA-256"
+
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
