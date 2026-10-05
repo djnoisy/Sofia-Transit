@@ -11,11 +11,15 @@ fun t(name: String, body: () -> Unit) {
 }
 fun eq(w: String, e: Any?, a: Any?) { if (e != a) throw AssertionError("$w: expected <$e> but was <$a>") }
 
+val root = kotlin.io.path.createTempDirectory("shapes").toFile()
+val dir = File(root, "downloaded").apply { mkdirs() }
+val assets = File(root, "assets").apply { File(this, "gtfs").mkdirs() }
+val ctx = android.content.Context(root, assets)
+
 fun parse(dir: File?, wanted: Set<String>) =
-    kotlinx.coroutines.runBlocking { GtfsParser.parseShapes(dir, wanted) }
+    kotlinx.coroutines.runBlocking { GtfsParser.parseShapes(ctx, dir, wanted) }
 
 fun main() {
-    val dir = kotlin.io.path.createTempDirectory("shapes").toFile()
 
     t("P1 points kept as given, sorted by sequence, duplicates included; unwanted shapes left out") {
         File(dir, "shapes.txt").writeText(
@@ -37,10 +41,12 @@ fun main() {
         eq("float coordinates kept exactly", 42.65686798095703, a2[0].toDouble())
     }
 
-    t("P2 no shapes.txt, or no downloaded set at all → no shapes (straight lines)") {
-        File(dir, "shapes.txt").delete()
-        eq("missing file", 0, parse(dir, setOf("A1")).size)
-        eq("bundled data (no dir)", 0, parse(null, setOf("A1")).size)
+    t("P2 no downloaded set → the bundled shapes.txt is read, like every other file") {
+        File(assets, "gtfs/shapes.txt").writeText(
+            "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence,shape_dist_traveled\n" +
+            "A1,42.1,23.1,1,\nA1,42.2,23.2,2,\n")
+        eq("bundled", listOf(42.1f, 23.1f, 42.2f, 23.2f),
+            ShapePoints.decode(parse(null, setOf("A1")).single().points).toList())
     }
 
     t("P3 packing round trip") {

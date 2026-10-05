@@ -178,7 +178,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
 
         /** Required files — if any of these are missing, the update is rejected. */
         private val REQUIRED_FILES = setOf(
-            "stops.txt", "routes.txt", "trips.txt", "stop_times.txt"
+            "stops.txt", "routes.txt", "trips.txt", "stop_times.txt", "shapes.txt"
         )
 
         /**
@@ -186,11 +186,6 @@ class GtfsUpdateWorker @AssistedInject constructor(
          * is new (see fingerprintOf). After extraction we delete everything
          * else (transfers.txt, translations.txt, pathways.txt, ...) to save
          * disk space.
-         *
-         * shapes.txt is optional — without it stops are measured in straight
-         * lines — and the bundled data has none. A feed with shapes therefore
-         * differs from the bundle even on the same timetable, and is
-         * installed: that is how the roads get onto the phone.
          */
         private val FILES_TO_KEEP = setOf(
             "stops.txt",
@@ -453,8 +448,6 @@ class GtfsUpdateWorker @AssistedInject constructor(
         private fun fingerprintOfFiles(open: (String) -> java.io.InputStream): String? = try {
             val hashes = HashMap<String, String>()
             val buf = ByteArray(64 * 1024)
-            // A file the set does not have (shapes.txt in the bundle) is left
-            // out of the fingerprint rather than failing it.
             for (name in FILES_TO_KEEP) {
                 val d = java.security.MessageDigest.getInstance("SHA-256")
                 val ok = try {

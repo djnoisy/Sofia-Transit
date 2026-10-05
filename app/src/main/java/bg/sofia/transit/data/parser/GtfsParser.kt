@@ -228,20 +228,12 @@ object GtfsParser {
     /**
      * The road shapes of [wanted] (the shapes the trips use; the feed holds
      * three to four times as many), every point kept, in sequence order.
-     *
-     * Only from a downloaded set: the data bundled in the app has no
-     * shapes.txt. Without it the list is empty and journeys measure the way
-     * to a stop in a straight line, as before shapes were used.
      */
     suspend fun parseShapes(
-        dataDir: File?,
+        context: Context,
+        dataDir: File? = null,
         wanted: Set<String>
     ): List<Shape> = withContext(Dispatchers.IO) {
-        val file = dataDir?.let { File(it, "shapes.txt") }?.takeIf { it.exists() && it.length() > 0 }
-        if (file == null) {
-            FileLogger.i(TAG, "No shapes.txt — stops will be measured in straight lines")
-            return@withContext emptyList<Shape>()
-        }
         class Points {
             var seq = IntArray(256); var lat = FloatArray(256); var lon = FloatArray(256); var n = 0
             fun add(s: Int, la: Float, lo: Float) {
@@ -253,7 +245,7 @@ object GtfsParser {
         }
         val byShape = HashMap<String, Points>()
         var skipped = 0
-        file.inputStream().use { input ->
+        openFile(context, dataDir, "shapes.txt").use { input ->
             val reader = BufferedReader(InputStreamReader(input, "UTF-8"), 1024 * 64)
             val header = reader.readLine()?.split(",") ?: return@withContext emptyList<Shape>()
             val idx = header.mapIndexed { i, col -> col.trim().removeSurrounding("\"").removePrefix("\uFEFF") to i }.toMap()

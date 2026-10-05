@@ -104,8 +104,8 @@ class GtfsRepository @Inject constructor(
      */
     fun getActiveDataDir(): File? {
         val dir = File(context.filesDir, EXTERNAL_DIR_NAME)
-        // Check that at least the four core files we need are present
-        val required = listOf("stops.txt", "routes.txt", "trips.txt", "stop_times.txt")
+        // Check that the core files we need are present
+        val required = listOf("stops.txt", "routes.txt", "trips.txt", "stop_times.txt", "shapes.txt")
         val allPresent = dir.isDirectory && required.all { File(dir, it).exists() }
         return if (allPresent) dir else null
     }
@@ -266,22 +266,12 @@ class GtfsRepository @Inject constructor(
                 tripDao.deleteAll()
                 tripDao.insertAll(trips)
 
-                // Road shapes, for measuring the way to a stop by road. Never
-                // allowed to fail the import: without them journeys measure
-                // in straight lines, as they did before shapes were used.
-                // Cleared even when there are none, so no stale shapes outlive
-                // the trips they belonged to.
+                // Road shapes, for measuring the way to a stop by road.
                 onProgress("Зареждане на маршрутите…")
-                try {
-                    shapeDao.deleteAll()
-                    val shapes = GtfsParser.parseShapes(dataDir,
-                        trips.mapNotNullTo(HashSet()) { it.shapeId })
-                    shapes.chunked(100).forEach { shapeDao.insertAll(it) }
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    FileLogger.w(TAG, "Shapes not loaded: ${e.message}")
-                }
+                val shapes = GtfsParser.parseShapes(context, dataDir,
+                    trips.mapNotNullTo(HashSet()) { it.shapeId })
+                shapeDao.deleteAll()
+                shapes.chunked(100).forEach { shapeDao.insertAll(it) }
 
                 onProgress("Зареждане на разписания…")
                 stopTimeDao.deleteAll()

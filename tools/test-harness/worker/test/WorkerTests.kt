@@ -78,7 +78,8 @@ fun zipOf(files: Map<String, String>): ByteArray {
 /** Deterministic, hard-to-compress filler so large bodies stay large inside the ZIP. */
 fun noise(n: Int): String { val r = java.util.Random(42); val cs = "abcdefghijklmnopqrstuvwxyz0123456789"
     return buildString(n) { repeat(n) { append(cs[r.nextInt(cs.length)]) } } }
-fun feed(tag: String, big: Int = 0, dropStopTimes: Boolean = false, broken: Boolean = false): Map<String, String> {
+fun feed(tag: String, big: Int = 0, dropStopTimes: Boolean = false, broken: Boolean = false,
+         dropShapes: Boolean = false): Map<String, String> {
     val m = linkedMapOf(
         "agency.txt" to "agency",
         "stops.txt" to (if (broken) "BROKEN " else "") + "stops-$tag",
@@ -89,6 +90,7 @@ fun feed(tag: String, big: Int = 0, dropStopTimes: Boolean = false, broken: Bool
         "shapes.txt" to "shapes-$tag",
         "feed_info.txt" to "generated ${System.nanoTime()}")   // differs every build
     if (dropStopTimes) m.remove("stop_times.txt")
+    if (dropShapes) m.remove("shapes.txt")
     return m
 }
 
@@ -211,6 +213,12 @@ fun main() {
         eq("no 2 h wait (follow-up retries instead)", null, f.p("download_fail_ms")); eq("no gtfs dir", emptyList<String>(), f.gtfsFiles())
         eq("nothing started behind the user's back", 0, WorkManager.INSTANCE.enqueued.size)
         eq("no tmp left", 0, f.tmpDirs().size); eq("validators not stored", null, f.p("last_modified_ms"))
+    }
+    test("I8b install: feed missing shapes.txt → rejected like any required file, bundled installed") {
+        val f = Fx(); Srv.body = zipOf(feed("NOSH", dropShapes = true)); Srv.lastModified = NEW
+        val (r, _) = f.run(true)
+        eq("result", "installed_current", out(r)["result"]); eq("db", "bundled:stops-BUNDLED", f.repo.db)
+        yes("bad feed marked", f.p("bad_feed_ms") != null); eq("no gtfs dir", emptyList<String>(), f.gtfsFiles())
     }
     test("I8 install: feed missing stop_times → rejected, bundled, 24 h bad-feed wait") {
         val f = Fx(); Srv.body = zipOf(feed("BAD", dropStopTimes = true)); Srv.lastModified = NEW
@@ -675,18 +683,9 @@ fun main() {
         val f = Fx(); Srv.body = damagedZip(); Srv.lastModified = NEW
         val (r, _) = f.run(true); eq("result", "installed_current", out(r)["result"]); yes("bad feed", f.p("bad_feed_ms") != null)
     }
-    fun Fx.fullBundle(tag: String, shapes: Boolean = true) { val m = feed(tag)
-        (listOf("stops.txt","routes.txt","trips.txt","stop_times.txt","calendar_dates.txt") +
-            (if (shapes) listOf("shapes.txt") else emptyList()))
+    fun Fx.fullBundle(tag: String) { val m = feed(tag)
+        listOf("stops.txt","routes.txt","trips.txt","stop_times.txt","calendar_dates.txt","shapes.txt")
         .forEach { File(assets, "gtfs/$it").writeText(m[it]!!) } }
-    test("Z4b the real bundle (no shapes.txt): server with the same timetable + shapes → installed, for the roads") {
-        val f = Fx(); f.fullBundle("SAME", shapes = false); Srv.stop(); try { f.run(true) } finally { Srv.start() }
-        eq("bundled installed", "bundled:stops-SAME", f.repo.db); yes("bundled fingerprint stored", f.p("feed_hash") != null)
-        f.repo.loadCount = 0; Srv.body = zipOf(feed("SAME")); Srv.lastModified = null
-        val (r, _) = f.run(false); val o = out(r)
-        eq("result", "updated", o["result"]); eq("imported", 1, f.repo.loadCount)
-        yes("shapes now on the phone", File(f.files, "gtfs/shapes.txt").exists())
-    }
     test("Z4 server sends the same data as the bundled data → not installed, not announced") {
         val f = Fx(); f.fullBundle("SAME"); Srv.stop(); try { f.run(true) } finally { Srv.start() }
         eq("bundled installed", "bundled:stops-SAME", f.repo.db); yes("bundled fingerprint stored", f.p("feed_hash") != null)
