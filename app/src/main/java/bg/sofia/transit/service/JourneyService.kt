@@ -860,6 +860,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var prevFixRoadPos: Double? = null
     /** Stop whose straight-line nearness the road contradicted, logged once. */
     private var roadNoteIdx = -1
+    /** Log only: whether the last fix was placed on the road, and the 30 s tally. */
+    private var roadPlacedLast: Boolean? = null
+    private var roadFixes = 0
+    private var roadFixesPlaced = 0
+    private var lastRoadLogMs = 0L
     private var currentIdx = 0
     private var atStop = false
     private var approachAnnounced = false
@@ -2125,7 +2130,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 } == true) best else null
 
             FileLogger.i(TAG, "First fix: snapped to stop #$best " +
-                "(${orderedStops[best].stopName}, ${bestDist.toInt()} m)")
+                "(${orderedStops[best].stopName}, ${bestDist.toInt()} m${measuredHow(loc, best)})")
         }
 
         // Having left a stop on foot, the stop logic stays silent unless
@@ -2174,7 +2179,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     atStop = true
                     leavingPeakKmh = 0.0
                     approachAnnounced = false
-                    FileLogger.i(TAG, "ARRIVE at ${nearestDist.toInt()} m, " +
+                    FileLogger.i(TAG, "ARRIVE at ${nearestDist.toInt()} m" +
+                        "${measuredHow(loc, nearest)}, " +
                         "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → " +
                         orderedStops[nearest].stopName)
                     if (silentArrivalIdx == nearest) {
@@ -2258,7 +2264,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 approachAnnounced = true
                 // Logged with speed and distance so the warning's lead time
                 // can be worked out afterwards from the log alone.
-                FileLogger.i(TAG, "APPROACH at ${stopDist(loc, currentIdx).toInt()} m, " +
+                FileLogger.i(TAG, "APPROACH at ${stopDist(loc, currentIdx).toInt()} m" +
+                    "${measuredHow(loc, currentIdx)}, " +
                     "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → " +
                     orderedStops[currentIdx].stopName)
                 announceStop("approach", currentIdx, "Наближава спирка, ${orderedStops[currentIdx].stopName}.")
@@ -4597,7 +4604,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val dist = stopDist(loc, idx)
         if (radius != null && dist <= radius) {
             approachAnnounced = true
-            FileLogger.i(TAG, "APPROACH at ${dist.toInt()} m, " +
+            FileLogger.i(TAG, "APPROACH at ${dist.toInt()} m${measuredHow(loc, idx)}, " +
                 "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → $name (first naming it)")
             announceStop("approach", idx, "Наближава спирка, $name.")
         } else {
@@ -4666,6 +4673,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                  else g.stopAlong[(currentIdx + LOOKAHEAD).coerceIn(0, lastIdx)] + RouteGeometry.BACK_MARGIN
         val along = g.place(loc.latitude, loc.longitude,
             last, (now - roadPosAtMs) / 1000.0, from, to)
+        logRoadPlacement(loc, g, along, now)
         roadPos = along
         if (along == null) return
         roadPosAtMs = now
@@ -4688,6 +4696,61 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     /**
+     * Log only: ", by road (straight N m)" or ", straight line" — how the
+     * distance to stop [idx] just logged was measured.
+     */
+    private fun measuredHow(loc: Location, idx: Int): String {
+        val straight = distTo(loc, idx)
+        val used = stopDist(loc, idx)
+        return when {
+            geometry == null -> ", straight line (no road shape)"
+            fixRoadPos == null -> ", straight line (fix off the road)"
+            used > straight + 1.0 -> ", by road (straight ${straight.toInt()} m)"
+            else -> ", by road = straight"
+        }
+    }
+
+    /**
+     * Log only. Says when fixes stop or start being placed on the road, and
+     * every 30 s how many were placed and where we are on it — so a log
+     * shows whether road distances were in use throughout a journey.
+     */
+    private fun logRoadPlacement(loc: Location, g: RouteGeometry, along: Double?, now: Long) {
+        roadFixes++
+        if (along != null) roadFixesPlaced++
+        val placed = along != null
+        if (placed != roadPlacedLast) {
+            if (placed) {
+                FileLogger.i(TAG, "Road: fixes placed on the road shape" +
+                    (if (roadPlacedLast == false) " again" else "") +
+                    " (${along!!.toInt()} m of ${g.length.toInt()} m)")
+            } else {
+                val off = g.locate(loc.latitude, loc.longitude, 0.0, g.length)?.offset
+                FileLogger.i(TAG, "Road: fix not placed — " +
+                    (off?.let { "${it.toInt()} m from the road shape" } ?: "no stretch searched") +
+                    ", accuracy ${loc.accuracy.toInt()} m; straight lines until placed again")
+            }
+            roadPlacedLast = placed
+        }
+        if (lastRoadLogMs == 0L) lastRoadLogMs = now
+        if (now - lastRoadLogMs >= 30_000L) {
+            val next = currentIdx.takeIf { it in orderedStops.indices }
+            val nextNote = if (next != null && !awaitingFirstFix) {
+                val straight = distTo(loc, next)
+                val road = g.distanceToStop(along, next, straight)
+                ", next ${orderedStops[next].stopName}: ${road.toInt()} m" +
+                    (if (along != null && road > straight + 1.0) " by road, ${straight.toInt()} m straight" else "")
+            } else ""
+            FileLogger.i(TAG, "Road: $roadFixesPlaced of $roadFixes fixes placed in " +
+                "${(now - lastRoadLogMs) / 1000} s" +
+                (along?.let { ", at ${it.toInt()} of ${g.length.toInt()} m" } ?: "") + nextNote)
+            roadFixes = 0
+            roadFixesPlaced = 0
+            lastRoadLogMs = now
+        }
+    }
+
+    /**
      * A new stop order: its road is looked up and fitted in the background.
      * Until it is ready, distances are straight lines; placing on the stops
      * waits for it (see GEOMETRY_WAIT_MS).
@@ -4700,6 +4763,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         fixRoadPos = null
         prevFixRoadPos = null
         roadNoteIdx = -1
+        roadPlacedLast = null
+        roadFixes = 0
+        roadFixesPlaced = 0
+        lastRoadLogMs = 0L
         if (order.isEmpty()) {
             geometryPending = false
             return
@@ -4735,11 +4802,20 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             FileLogger.i(TAG, "No road shapes for route $route — straight lines")
             return null
         }
+        val own = if (trip.isNotBlank()) gtfsRepo.getShapeIdOfTrip(trip) else null
+        val tried = mutableListOf<String>()
         for ((id, blob) in shapes) {
             val g = RouteGeometry.fit(
-                bg.sofia.transit.data.db.entity.ShapePoints.decode(blob), order) ?: continue
-            FileLogger.i(TAG, "Road geometry: shape $id, ${g.length.toInt()} m, " +
-                "${order.size} stops placed")
+                bg.sofia.transit.data.db.entity.ShapePoints.decode(blob), order)
+            if (g == null) { tried += id; continue }
+            val whose = when {
+                trip.isBlank() -> "trip not known yet, first of the line's ${shapes.size} shapes to fit"
+                id == own -> "the trip's own shape"
+                else -> "another shape of the line (the trip's own did not fit)"
+            }
+            FileLogger.i(TAG, "Road geometry: shape $id ($whose), ${g.length.toInt()} m, " +
+                "${order.size} stops placed" +
+                (if (tried.isNotEmpty()) "; did not fit: ${tried.joinToString()}" else ""))
             return g
         }
         FileLogger.i(TAG, "No shape of route $route fits its ${order.size} stops — straight lines")

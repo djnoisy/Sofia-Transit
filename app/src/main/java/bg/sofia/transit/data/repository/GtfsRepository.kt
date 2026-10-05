@@ -332,6 +332,10 @@ class GtfsRepository @Inject constructor(
             ids.mapNotNull { id -> shapeDao.getById(id)?.let { id to it.points } }
         }
 
+    /** The road shape [tripId] follows, or null (for the log of which shape is used). */
+    suspend fun getShapeIdOfTrip(tripId: String): String? =
+        withContext(Dispatchers.IO) { tripDao.getById(tripId)?.shapeId }
+
     /** Backward-compatible alias for code that still calls the old name. */
     suspend fun initialiseFromAssets(onProgress: (String) -> Unit = {}) =
         loadStaticData(onProgress)
