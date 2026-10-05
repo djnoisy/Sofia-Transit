@@ -182,27 +182,24 @@ class GtfsUpdateWorker @AssistedInject constructor(
         )
 
         /**
-         * The files whose content decides whether a feed is new (see
-         * fingerprintOf). shapes.txt is not among them: the road a line takes
-         * changes together with its timetable, and leaving it out keeps the
-         * fingerprint of data installed before shapes were used — and of the
-         * bundled data, which has none — what it always was.
+         * Files we actually parse, and whose content decides whether a feed
+         * is new (see fingerprintOf). After extraction we delete everything
+         * else (transfers.txt, translations.txt, pathways.txt, ...) to save
+         * disk space.
+         *
+         * shapes.txt is optional — without it stops are measured in straight
+         * lines — and the bundled data has none. A feed with shapes therefore
+         * differs from the bundle even on the same timetable, and is
+         * installed: that is how the roads get onto the phone.
          */
-        private val FINGERPRINT_FILES = setOf(
+        private val FILES_TO_KEEP = setOf(
             "stops.txt",
             "routes.txt",
             "trips.txt",
             "stop_times.txt",
-            "calendar_dates.txt"
+            "calendar_dates.txt",
+            "shapes.txt"
         )
-
-        /**
-         * Files we actually parse. After extraction we delete everything else
-         * (transfers.txt, translations.txt, pathways.txt, ...) to save disk
-         * space. shapes.txt is optional: without it stops are measured in
-         * straight lines.
-         */
-        private val FILES_TO_KEEP = FINGERPRINT_FILES + "shapes.txt"
 
         private fun prefs(context: Context) =
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -456,7 +453,9 @@ class GtfsUpdateWorker @AssistedInject constructor(
         private fun fingerprintOfFiles(open: (String) -> java.io.InputStream): String? = try {
             val hashes = HashMap<String, String>()
             val buf = ByteArray(64 * 1024)
-            for (name in FINGERPRINT_FILES) {
+            // A file the set does not have (shapes.txt in the bundle) is left
+            // out of the fingerprint rather than failing it.
+            for (name in FILES_TO_KEEP) {
                 val d = java.security.MessageDigest.getInstance("SHA-256")
                 val ok = try {
                     open(name).use { inp ->
@@ -1135,7 +1134,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
                         // Avoid path traversal — strip any leading dirs
                         val safeName = File(entry.name).name
                         val outFile  = File(target, safeName)
-                        val fingerprint = safeName in FINGERPRINT_FILES
+                        val fingerprint = safeName in FILES_TO_KEEP
                         val digest = java.security.MessageDigest.getInstance("SHA-256")
                         outFile.outputStream().buffered().use { out ->
                             while (true) {

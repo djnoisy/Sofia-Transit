@@ -300,13 +300,12 @@ fun main() {
         eq("result", "unchanged", o["result"]); eq("visible", false, o["visible"]); eq("imports", 0, f.repo.loadCount)
         eq("unreliable", true, f.p("markers_unreliable")); yes("download day stored", f.p("last_download_ms") != null)
     }
-    test("U6b update: only shapes.txt differs → same data as far as the fingerprint goes → silent, no import") {
-        // shapes.txt is kept but not fingerprinted: data installed before
-        // shapes were used must not count as different because of them.
+    test("U6b update: only shapes.txt differs → new data, installed (a road changed, the timetable did not)") {
         val f = Fx(); f.installedDownloaded("A", NEW); f.repo.loadCount = 0
         Srv.body = zipOf(feed("A") + ("shapes.txt" to "shapes-CHANGED")); Srv.lastModified = NEW + DAY
         val (r, _) = f.run(false); val o = out(r)
-        eq("result", "unchanged", o["result"]); eq("imports", 0, f.repo.loadCount)
+        eq("result", "updated", o["result"]); eq("imports", 1, f.repo.loadCount)
+        eq("new shapes in place", "shapes-CHANGED", File(f.files, "gtfs/shapes.txt").readText())
     }
     test("U7 update: download breaks off → silent failure, markers untouched, next opening may try (after an hour)") {
         val f = Fx(); f.installedDownloaded("A", NEW); f.set("last_download_ms", 0L); f.repo.loadCount = 0
@@ -676,9 +675,19 @@ fun main() {
         val f = Fx(); Srv.body = damagedZip(); Srv.lastModified = NEW
         val (r, _) = f.run(true); eq("result", "installed_current", out(r)["result"]); yes("bad feed", f.p("bad_feed_ms") != null)
     }
-    fun Fx.fullBundle(tag: String) { val m = feed(tag); listOf("stops.txt","routes.txt","trips.txt","stop_times.txt","calendar_dates.txt")
+    fun Fx.fullBundle(tag: String, shapes: Boolean = true) { val m = feed(tag)
+        (listOf("stops.txt","routes.txt","trips.txt","stop_times.txt","calendar_dates.txt") +
+            (if (shapes) listOf("shapes.txt") else emptyList()))
         .forEach { File(assets, "gtfs/$it").writeText(m[it]!!) } }
-    test("Z4 server sends the same timetable as the bundled data → not installed, not announced") {
+    test("Z4b the real bundle (no shapes.txt): server with the same timetable + shapes → installed, for the roads") {
+        val f = Fx(); f.fullBundle("SAME", shapes = false); Srv.stop(); try { f.run(true) } finally { Srv.start() }
+        eq("bundled installed", "bundled:stops-SAME", f.repo.db); yes("bundled fingerprint stored", f.p("feed_hash") != null)
+        f.repo.loadCount = 0; Srv.body = zipOf(feed("SAME")); Srv.lastModified = null
+        val (r, _) = f.run(false); val o = out(r)
+        eq("result", "updated", o["result"]); eq("imported", 1, f.repo.loadCount)
+        yes("shapes now on the phone", File(f.files, "gtfs/shapes.txt").exists())
+    }
+    test("Z4 server sends the same data as the bundled data → not installed, not announced") {
         val f = Fx(); f.fullBundle("SAME"); Srv.stop(); try { f.run(true) } finally { Srv.start() }
         eq("bundled installed", "bundled:stops-SAME", f.repo.db); yes("bundled fingerprint stored", f.p("feed_hash") != null)
         f.repo.loadCount = 0; Srv.body = zipOf(feed("SAME")); Srv.lastModified = null   // no-date server, other files differ
