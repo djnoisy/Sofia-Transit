@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Getting-off logic of JourneyService (see alight/AlightTests.kt). The real
-# functions are copied out of the source, since JourneyService itself cannot
-# be compiled without the Android SDK.
+# The getting-off rule of JourneyService (see alight/AlightTests.kt). The real
+# function is copied out of the source, since JourneyService itself cannot be
+# compiled without the Android SDK.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -13,13 +13,9 @@ python3 - "$SRC" "$HERE/alight/AlightTests.kt" "$OUT/AlightTests.kt" <<'PY'
 import sys
 src, tmpl, out = sys.argv[1:]
 js = open(f"{src}/service/JourneyService.kt").read()
-lh = open(f"{src}/util/LocationHelper.kt").read()
-def block(text, start, end="\n\n"):
-    i = text.index(start); return text[i:text.index(end, i)]
-beside = block(js, "        internal data class BesideTrack(") + "\n" + block(js, "        internal fun updateBeside(")
-i = lh.index("    fun distanceMetres"); dist = lh[i:lh.index("\n    }\n", i) + 7]
-t = open(tmpl).read().replace("// @@BESIDE@@", beside).replace("// @@DISTANCE@@", dist)
-open(out, "w").write(t)
+i = js.index("        internal fun gotOff(")
+fn = js[i:js.index("\n\n", i)]
+open(out, "w").write(open(tmpl).read().replace("// @@GOTOFF@@", fn))
 PY
 "$KOTLINC" "$OUT/AlightTests.kt" -d "$OUT/c" 2>&1 | grep -A3 "error:" || true
 java -cp "$OUT/c:$KLIB/kotlin-stdlib.jar" AlightTestsKt | grep -v "^PASS"

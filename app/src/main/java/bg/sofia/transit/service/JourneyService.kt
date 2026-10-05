@@ -388,103 +388,34 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         private const val DESTINATION_DWELL_MS = 5 * 60 * 1000L
 
         /**
-         * How long, after the vehicle has gone on without us while we were not
-         * moving, the phone is watched for vehicle speed before getting off is
-         * concluded.
+         * Getting off — the one rule for it, in checkJourneyTimers: the
+         * vehicle we follow is beyond PARTED_RADIUS on its latest fresh
+         * report, it was last within riding range at least this long ago, and
+         * we have not moved at vehicle speed since then.
          *
-         * Standing still while the vehicle we followed leaves has two
-         * explanations: we got off, or we are in a different vehicle that is
-         * waiting at a red light or a stop while the one we took for ours
-         * turned away. The second shows itself as soon as our vehicle moves
-         * on, and a red light rarely lasts longer than this.
+         * A passenger aboard moves with the vehicle: while it is beside them
+         * the clock starts again, and once it pulls away they are carried off
+         * at vehicle speed. One who got off stands or walks while it leaves.
+         * The wait is long enough for a passenger held up in another vehicle
+         * — one wrongly taken for theirs left them at a red light, or in a
+         * jam — to show it by moving off: ending late costs a little battery,
+         * ending during a ride leaves the passenger without announcements.
          *
-         * Counted from the first reading that showed the vehicle gone, not
-         * from the one confirming it: our speed is watched from that first
-         * reading on, so the wait runs alongside the confirmation. At least
-         * ALIGHT_MIN_AFTER_CONFIRM_MS is left after the confirmation, though.
-         *
-         * Below vehicle speed, crawling in a jam looks like walking, and a
-         * vehicle merely beside us proves nothing: a bus standing at a
-         * terminus stays beside a passenger who got off for minutes, and
-         * buses creep past one waiting at a busy stop. What tells them apart
-         * is a vehicle that has MOVED with us: beside us at every reading
-         * since it was first seen there, and both its reported position and
-         * our own (an accurate fix) TOGETHER_MIN_MOVE_M on from where they
-         * were, however slowly they got there. The wait is then counted from
-         * the last time a vehicle beside us moved with us (alightHoldMs): the
-         * red-light rule above, applied to the vehicle we are probably in. It
-         * is not taken for ours — standing, nothing new is adopted — the
-         * conclusion is only put off: it comes ninety seconds after a vehicle
-         * beside us last moved with us, unless we move at vehicle speed,
-         * which withdraws the one we followed.
+         * The automatic end is a safety net for the battery and nothing more:
+         * it never changes which vehicle is followed or which stop is said.
+         * (It replaced a set of rules — a separate one at the chosen stop,
+         * a wait counted from a first and a confirming reading, holding off
+         * while a vehicle beside us moved with us — that grew one case at a
+         * time and pulled the identification and the stop announcements in.)
          */
-        private const val ALIGHT_SETTLE_MS = 90_000L
+        private const val ALIGHT_WAIT_MS = 120_000L
 
-        /**
-         * How far a vehicle beside us, and we with it, must have moved to
-         * count as moving together. Above the scatter of a standing vehicle's
-         * or phone's position (5–15 m); a jam crawl covers it in a minute or two.
-         */
-        private const val TOGETHER_MIN_MOVE_M = 40.0
-
-        /**
-         * The least time left after the confirming reading, however early the
-         * first one was: enough for one more reading (every 30 s while
-         * pending, plus the fetch and a timer tick), at which a vehicle still
-         * with us, or one moving with us, can show itself.
-         */
-        private const val ALIGHT_MIN_AFTER_CONFIRM_MS = 50_000L
-
-        /**
-         * A vehicle other than ours beside us at every reading since it was
-         * first seen there: [anchorLat]/[anchorLon], its reported position,
-         * and [ourLat]/[ourLon], ours, when it last moved with us (or when
-         * first seen); [movedAtMs], when that was; 0 if it has not yet.
-         * [ourAnchored]: ours was taken from an accurate fix — until then it
-         * is taken again at the next accurate one, and no move is counted.
-         */
-        internal data class BesideTrack(
-            val anchorLat: Double, val anchorLon: Double,
-            val ourLat: Double, val ourLon: Double,
-            val movedAtMs: Long,
-            val ourAnchored: Boolean = true
-        )
-
-        /**
-         * The vehicles other than [ours] beside us at this reading (fresh
-         * reports with a position only), each carried on from [before] if it
-         * was beside us at the previous reading too, or starting afresh. A
-         * vehicle not beside us now is dropped: the chain is broken. When both
-         * its report and our own position ([ourLat]/[ourLon], counted only if
-         * [ourAccurate]) are [minMoveM] or more from their anchors, it has
-         * moved with us at [nowMs], and both are anchored afresh there.
-         */
-        internal fun updateBeside(
-            before: Map<String, BesideTrack>,
-            inRange: List<VehicleMatcher.Sighting>,
-            ours: String,
-            maxAgeSec: Long,
-            ourLat: Double, ourLon: Double, ourAccurate: Boolean,
-            minMoveM: Double,
-            nowMs: Long,
-            distance: (Double, Double, Double, Double) -> Double
-        ): Map<String, BesideTrack> =
-            inRange.filter {
-                it.tripId != ours && it.timestamp > 0 && it.ageSec in 0..maxAgeSec &&
-                    (it.lat != 0.0 || it.lon != 0.0)
-            }.associate { s ->
-                val prev = before[s.tripId]
-                s.tripId to when {
-                    prev == null -> BesideTrack(s.lat, s.lon, ourLat, ourLon, 0L, ourAccurate)
-                    !prev.ourAnchored -> if (ourAccurate)
-                        BesideTrack(s.lat, s.lon, ourLat, ourLon, prev.movedAtMs, true) else prev
-                    ourAccurate &&
-                        distance(prev.anchorLat, prev.anchorLon, s.lat, s.lon) >= minMoveM &&
-                        distance(prev.ourLat, prev.ourLon, ourLat, ourLon) >= minMoveM ->
-                        BesideTrack(s.lat, s.lon, ourLat, ourLon, nowMs)
-                    else -> prev
-                }
-            }
+        /** The getting-off rule (see ALIGHT_WAIT_MS) on its own, for testing. */
+        internal fun gotOff(
+            nowMs: Long, withUsAtMs: Long, farNow: Boolean,
+            peakSinceWithUsKmh: Double, waitMs: Long, vehicleKmh: Double
+        ): Boolean = withUsAtMs != 0L && farNow && nowMs - withUsAtMs >= waitMs &&
+            peakSinceWithUsKmh < vehicleKmh
 
         /**
          * Off its route, how long the identified vehicle may go unseen beside
@@ -1076,26 +1007,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     /** Report time of the first reading that put our vehicle beyond reach. */
     private var partingFirstStamp = 0L
-    /**
-     * When that first reading was taken (clock time). ALIGHT_SETTLE_MS is
-     * counted from here, not from the confirming reading: our speed is
-     * watched from this reading on (partingPeakKmh), so the wait for a
-     * vehicle held at a red light already runs while the parting is being
-     * confirmed.
-     */
-    @Volatile private var partingFirstAtMs = 0L
-    /**
-     * Vehicles other than ours beside us at the last reading, with when each
-     * last moved with us. See [updateBeside].
-     */
-    @Volatile private var besideTracks: Map<String, BesideTrack> = emptyMap()
-    @Volatile private var besideReadingMs = 0L
-    /**
-     * While getting off is being concluded: the last time a vehicle beside
-     * us moved with us; 0 if none has. The conclusion waits ALIGHT_SETTLE_MS
-     * from this too — see checkJourneyTimers.
-     */
-    @Volatile private var alightHoldMs = 0L
     /** Highest short-average speed since that reading, km/h. */
     private var partingPeakKmh = 0.0
 
@@ -1150,6 +1061,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     /** Last time the vehicle being followed was seen within riding range. */
     private var trackedWithUsMs = 0L
+    /**
+     * For the getting-off rule (ALIGHT_WAIT_MS): our highest speed since
+     * then (short average, accurate fixes), and whether the vehicle's latest
+     * fresh report put it beyond PARTED_RADIUS — and how far.
+     */
+    private var peakSinceWithUsKmh = 0.0
+    private var vehicleFarNow = false
+    private var vehicleFarDistance = 0.0
 
     /**
      * The last stop announcement made — its kind and stop — and whether the
@@ -1163,16 +1082,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var lastStopAnnouncement: String? = null
     private var repeatGuardArmed = false
 
-    /**
-     * Since when getting off is being concluded — the first reading that
-     * showed the vehicle gone on without us while we stood or walked; 0 when
-     * no such conclusion is pending. See ALIGHT_SETTLE_MS.
-     */
-    private var alightPendingSinceMs = 0L
-    /** Whether that happened at the chosen stop, after "Слизате тук". */
-    private var alightPendingAtChosenStop = false
-    /** How far the vehicle was then, for the log and the withdrawal. */
-    private var alightPendingDistance = 0.0
     private var lastDwellHoldLogMs = 0L
 
     /** Last fix within SNAP_ACCURACY_LOOSE. */
@@ -1810,17 +1719,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             boardingRefLon = loc.longitude
         }
 
-        // Getting off pending: moving at vehicle speed now means we are in
-        // another vehicle, not on the pavement. See ALIGHT_SETTLE_MS.
-        if (alightPendingSinceMs != 0L && accurateFix) {
-            val kmh = shortSpeedKmh() ?: 0.0
-            if (kmh >= MIN_SPEED_FOR_IDENTIFY) {
-                alightPendingSinceMs = 0L
-                FileLogger.i(TAG, "Vehicle speed (${kmh.toInt()} km/h) while getting off " +
-                    "was pending — we were not in the vehicle we followed")
-                revokeIdentification("Vehicle left ${alightPendingDistance.toInt()} m " +
-                    "while we stood; now moving at ${kmh.toInt()} km/h")
-            }
+        // For the getting-off rule: how fast we have gone since the vehicle
+        // we follow was last beside us. See ALIGHT_WAIT_MS.
+        if (accurateFix && trackedWithUsMs != 0L) {
+            peakSinceWithUsKmh = maxOf(peakSinceWithUsKmh, shortSpeedKmh() ?: 0.0)
         }
         if (!loc.hasAccuracy() || loc.accuracy <= SNAP_ACCURACY_LOOSE) {
             lastUsableFixMs = System.currentTimeMillis()
@@ -2207,14 +2109,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 }
             }
 
-            // ── We were at a stop and have now clearly left it ────────────
-            // Leaving the stop at walking pace: not the vehicle departing, but
-            // very probably the passenger walking away from it. Nothing is
-            // announced — "Следваща спирка" and "Спирката за слизане е
-            // подмината" were both said to a passenger already on the
-            // pavement — and what it was is settled on the fixes that follow.
-            // See handleLeftOnFoot.
-            atStop && distTo(loc, currentIdx) > DEPART_RADIUS &&
+            // ── We were at the chosen stop and have now clearly left it ──
+            // After "Слизате тук", leaving at walking pace is the passenger
+            // walking away: nothing is announced — "Следваща спирка" and
+            // "Спирката за слизане е подмината" were both said to a passenger
+            // already on the pavement — unless vehicle speed follows (see
+            // handleLeftOnFoot). Only there: at any other stop a slow
+            // departure is announced as usual, since a guess about getting
+            // off must not silence the stops — it did so in a jam once.
+            atStop && currentIdx == destinationIdx && destinationArrivedMs != 0L &&
+                    distTo(loc, currentIdx) > DEPART_RADIUS &&
                     leavingPeakKmh < MIN_SPEED_FOR_IDENTIFY -> {
                 atStop = false
                 approachAnnounced = false
@@ -2492,20 +2396,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // inactivity timer finally stopped it. Walking is exactly when this
         // test matters most.
         if (partingJudgeable) {
-            when (checkParted(mps, underWay)) {
+            when (checkParted(mps)) {
                 PartingOutcome.REVOKED -> return DEFERRED_CHECK_RETRY_MS
                 PartingOutcome.PENDING -> { /* carry on, but come back soon */ }
                 PartingOutcome.NONE    -> { }
             }
         }
-        // While getting off is pending, readings come at least every half
-        // minute, so that a vehicle moving with us, or ours back beside us,
-        // shows itself within ALIGHT_SETTLE_MS (see updateBeside below).
-        val partingSooner = when {
-            partingFirstStamp != 0L   -> PARTING_RECHECK_MS
-            alightPendingSinceMs != 0L -> EARLY_CHECK_INTERVAL_MS
-            else                      -> null
-        }
+        // A parting awaiting its confirming reading is looked at again soon.
+        val partingSooner = if (partingFirstStamp != 0L) PARTING_RECHECK_MS else null
 
         if (unreliable) {
             FileLogger.d(TAG, "Degraded positioning — no vehicle decisions" +
@@ -2588,35 +2486,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         val seen = vehicleMatcher.findRidingVehicle(
             lastLat, lastLon, mps, watchTripIds = previous.keys)
-
-        // Which vehicles other than ours are beside us, and when each last
-        // moved with us — kept up at every reading, so that moving together
-        // just before the vehicle we followed left counts too. Getting off
-        // being concluded, the wait runs from the last time a vehicle beside
-        // us moved with us: we may be riding it, crawling below vehicle
-        // speed. It is not adopted. See ALIGHT_SETTLE_MS.
-        val besideBefore = if (nowMs - besideReadingMs <= READING_MEMORY_MS) besideTracks
-            else emptyMap()
-        // The time of this reading's data, after the fetch above.
-        val readAtMs = System.currentTimeMillis()
-        val ourAccurate = lastAccuracy?.let { it <= DEPARTURE_MAX_ACCURACY } == true
-        val besideNow = if (seen == null) emptyMap() else updateBeside(
-            besideBefore, seen.inRange, tripId, PARTING_MAX_REPORT_AGE_SEC,
-            lastLat, lastLon, ourAccurate,
-            TOGETHER_MIN_MOVE_M, readAtMs, LocationHelper::distanceMetres)
-        besideTracks = besideNow
-        besideReadingMs = nowMs
-        if (partingFirstStamp != 0L || alightPendingSinceMs != 0L) {
-            besideNow.entries.maxByOrNull { it.value.movedAtMs }
-                ?.takeIf { it.value.movedAtMs > alightHoldMs }
-                ?.let { (id, t) ->
-                    alightHoldMs = t.movedAtMs
-                    val d = seen?.inRange?.firstOrNull { it.tripId == id }?.distanceMetres?.toInt()
-                    FileLogger.i(TAG, "Vehicle $id beside us (${d ?: "?"} m) moved with us " +
-                        "${(readAtMs - t.movedAtMs) / 1000} s ago — getting off waits " +
-                        "${ALIGHT_SETTLE_MS / 1000} s from then")
-                }
-        }
 
         if (seen == null) {
             // Nobody beside us. Whatever was in range before is no longer, so
@@ -3070,7 +2939,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         partingFirstStamp = 0L
         partingPeakKmh    = 0.0
         trackedWithUsMs   = 0L
-        alightPendingSinceMs = 0L
+        peakSinceWithUsKmh = 0.0
+        vehicleFarNow     = false
         remapDestination(destinationStopId,
             clear = !followedLineChanges && differentDirection)
 
@@ -3167,40 +3037,25 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private enum class PartingOutcome { NONE, PENDING, REVOKED }
 
     /**
-     * Has the vehicle gone on without us? The one place where the vehicle's
-     * own position decides that the passenger is no longer in it.
+     * Where the vehicle we follow is relative to us. Two uses, kept apart:
      *
-     * Two standards, by what we already know:
+     *  - Identification: two readings beyond [PARTED_RADIUS], from two
+     *    different reports each at most [PARTING_MAX_REPORT_AGE_SEC] old,
+     *    while we kept moving at vehicle speed: we were never in that
+     *    vehicle, and the identification is withdrawn — see
+     *    [revokeIdentification] (or a sibling of the same line takes over,
+     *    see swapToSibling). One reading used to be enough, uncorrected for
+     *    the report's age, and a single stale position of the very bus we
+     *    were sitting in could end the journey. A report too old neither
+     *    confirms a parting nor cancels one; a reading showing the vehicle
+     *    close again cancels it.
      *
-     *  - At the chosen stop, after "Слизате тук", standing or walking: the
-     *    vehicle freshly reported outside riding range is enough, on one
-     *    reading, to begin concluding that we got off. The passenger has just been told to get off, and a fresh
-     *    report, corrected for its age, of the very bus we are in cannot put
-     *    it outside riding range while we stand or crawl along with it. On
-     *    the ride that prompted this, the bus had left the walking
-     *    passenger's side by 18:10:18, yet tracking ran on until stopped by
-     *    hand at 18:19.
-     *
-     *  - Anywhere else: two readings beyond [PARTED_RADIUS], from two
-     *    different reports each at most [PARTING_MAX_REPORT_AGE_SEC] old. One
-     *    used to be enough, uncorrected for the report's age, and a single
-     *    stale position of the very bus we were sitting in could end the
-     *    journey. A report too old neither confirms a parting nor cancels
-     *    one; a reading showing the vehicle close again cancels it. What the
-     *    parting means then depends on what we did meanwhile: still at
-     *    vehicle speed, we were never in that vehicle, and only the
-     *    identification is withdrawn — see [revokeIdentification]; standing
-     *    or walking, we probably got off.
-     *
-     * "Probably", in both cases: standing still is also what a passenger
-     * does in another vehicle held at a red light just as the one we took
-     * for theirs turns away. So getting off is not concluded at once but
-     * after ALIGHT_SETTLE_MS — see [beginAlightPending].
-     *
-     * Every sighting within riding range is also remembered, for the limit
-     * at the chosen stop in checkJourneyTimers.
+     *  - Getting off: only notes when the vehicle was last within riding
+     *    range and whether it is far now; the rule itself is in
+     *    checkJourneyTimers (see ALIGHT_WAIT_MS). It decides nothing about
+     *    the vehicle or the stops.
      */
-    private suspend fun checkParted(mps: Double, underWay: Boolean): PartingOutcome {
+    private suspend fun checkParted(mps: Double): PartingOutcome {
         if (!identified || tripId.isBlank()) {
             partingFirstStamp = 0L
             return PartingOutcome.NONE
@@ -3210,27 +3065,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             ?: return pending
         val fresh = s.timestamp > 0 && s.ageSec in 0..PARTING_MAX_REPORT_AGE_SEC
 
+        // For the getting-off rule (ALIGHT_WAIT_MS): when the vehicle was
+        // last with us, and whether it is far now. A report too old to judge
+        // by changes neither.
         if (s.distanceMetres <= VehicleMatcher.RIDING_WITH_RADIUS) {
             trackedWithUsMs = System.currentTimeMillis()
-            if (alightPendingSinceMs != 0L) {
-                alightPendingSinceMs = 0L
-                FileLogger.i(TAG, "Tracked vehicle with us again " +
-                    "(${s.distanceMetres.toInt()} m) — getting off no longer pending")
-            }
+            peakSinceWithUsKmh = 0.0
         }
-        // Already concluded, awaiting only ALIGHT_SETTLE_MS: nothing to add.
-        if (alightPendingSinceMs != 0L) return PartingOutcome.NONE
-
-        val atChosenStop = destinationIdx != null && destinationArrivedMs != 0L
-        val ownFixAccurate = lastAccuracy?.let { it <= DEPARTURE_MAX_ACCURACY } == true
-        if (atChosenStop && !underWay && fresh && ownFixAccurate &&
-            s.distanceMetres > VehicleMatcher.RIDING_WITH_RADIUS) {
-            FileLogger.i(TAG, "At the chosen stop; our vehicle is now " +
-                "${s.distanceMetres.toInt()} m away (report ${s.ageSec}s old) " +
-                "and we are not riding")
-            if (swapToSibling("Our vehicle has left")) return PartingOutcome.NONE
-            beginAlightPending(s.distanceMetres, atChosenStop = true)
-            return PartingOutcome.NONE
+        if (s.distanceMetres <= PARTED_RADIUS) {
+            vehicleFarNow = false
+        } else if (fresh) {
+            vehicleFarNow = true
+            vehicleFarDistance = s.distanceMetres
         }
 
         if (s.distanceMetres <= PARTED_RADIUS) {
@@ -3251,9 +3097,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         if (partingFirstStamp == 0L) {
             partingFirstStamp = s.timestamp
-            partingFirstAtMs = System.currentTimeMillis()
-            // A new parting: nothing from an earlier one holds it up.
-            alightHoldMs = 0L
             partingPeakKmh = shortSpeedKmh() ?: 0.0
             FileLogger.i(TAG, "Tracked vehicle ${s.distanceMetres.toInt()} m away — " +
                 "awaiting a fresh report to confirm")
@@ -3262,9 +3105,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (s.timestamp == partingFirstStamp) return PartingOutcome.PENDING
 
         // Confirmed on a second, newer report.
-        val firstAtMs = partingFirstAtMs
         partingFirstStamp = 0L
-        partingFirstAtMs = 0L
         val peak = maxOf(partingPeakKmh, shortSpeedKmh() ?: 0.0)
         partingPeakKmh = 0.0
 
@@ -3277,36 +3118,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return PartingOutcome.REVOKED
         }
 
+        // Standing or walking while it left: probably got off. Nothing is
+        // decided here — the getting-off rule in checkJourneyTimers does.
         FileLogger.i(TAG, "Vehicle left without us (${s.distanceMetres.toInt()} m, " +
-            "our peak ${peak.toInt()} km/h)")
-        // Counted from the first reading — see ALIGHT_SETTLE_MS — but always
-        // leaving time for one more reading after this one: if the confirming
-        // report came late, a vehicle still with us, or one staying beside
-        // us, can still show itself before the end.
-        val nowAt = System.currentTimeMillis()
-        val since = if (firstAtMs != 0L) firstAtMs else nowAt
-        beginAlightPending(s.distanceMetres, atChosenStop,
-            sinceMs = maxOf(since, nowAt - (ALIGHT_SETTLE_MS - ALIGHT_MIN_AFTER_CONFIRM_MS)))
+            "our peak ${peak.toInt()} km/h) — getting off once " +
+            "${ALIGHT_WAIT_MS / 1000} s have passed since it was with us, " +
+            "unless we move at vehicle speed")
         return PartingOutcome.NONE
-    }
-
-    /**
-     * The vehicle has gone on without us while we were not moving. Getting
-     * off is concluded only after ALIGHT_SETTLE_MS without vehicle speed —
-     * in checkJourneyTimers — and withdrawn meanwhile if we move at vehicle
-     * speed (onFix) or the vehicle is found with us again (checkParted).
-     */
-    private fun beginAlightPending(
-        distance: Double, atChosenStop: Boolean,
-        sinceMs: Long = System.currentTimeMillis()
-    ) {
-        alightPendingSinceMs = sinceMs
-        alightPendingAtChosenStop = atChosenStop
-        alightPendingDistance = distance
-        val leftSec = ((ALIGHT_SETTLE_MS - (System.currentTimeMillis() - sinceMs)) / 1000)
-            .coerceAtLeast(0L)
-        FileLogger.i(TAG, "Getting off concluded unless we move at vehicle speed " +
-            "within $leftSec s")
     }
 
     /**
@@ -3336,7 +3154,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         identified = false
         candidateVote = null
         trackedWithUsMs = 0L
-        alightPendingSinceMs = 0L
+        peakSinceWithUsKmh = 0.0
+        vehicleFarNow = false
         detourSinceMs = 0L
         lastInRange = emptyMap()
         presence = emptyMap()
@@ -3732,15 +3551,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        // Getting off pending, and no vehicle speed since: we got off.
-        // Waited out from the later of: the first reading that showed the
-        // vehicle gone, and the last time a vehicle beside us moved with us.
-        if (alightPendingSinceMs != 0L &&
-            now - alightPendingSinceMs >= ALIGHT_SETTLE_MS &&
-            now - alightHoldMs >= ALIGHT_SETTLE_MS) {
-            val atChosen = alightPendingAtChosenStop
-            FileLogger.i(TAG, "No vehicle speed for ${(now - alightPendingSinceMs) / 1000} s " +
-                "since the vehicle was seen gone (${alightPendingDistance.toInt()} m) — got off")
+        // Getting off: the vehicle is far, it was last with us ALIGHT_WAIT_MS
+        // ago or more, and we have not moved at vehicle speed since.
+        if (identified && gotOff(now, trackedWithUsMs, vehicleFarNow, peakSinceWithUsKmh,
+                ALIGHT_WAIT_MS, MIN_SPEED_FOR_IDENTIFY)) {
+            val atChosen = destinationIdx != null && destinationArrivedMs != 0L
+            FileLogger.i(TAG, "Vehicle ${vehicleFarDistance.toInt()} m away, last with us " +
+                "${(now - trackedWithUsMs) / 1000} s ago, no vehicle speed since " +
+                "(peak ${peakSinceWithUsKmh.toInt()} km/h) — got off")
             if (atChosen) {
                 // "Слизате тук" has been said; only the end itself is told,
                 // briefly — tracking must never stop unnoticed, least of all
@@ -4099,7 +3917,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         partingPeakKmh = 0.0
         // With us as of that reading — not claimed for now.
         trackedWithUsMs = lastReadingMs
-        alightPendingSinceMs = 0L
+        vehicleFarNow = false
         restartEtaPolling()
         publishLastKnown()
         return true
@@ -4115,11 +3933,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastReadingMs = 0L
         deferLogged = false
         partingFirstStamp = 0L
-        partingFirstAtMs = 0L
         partingPeakKmh = 0.0
-        besideTracks = emptyMap()
-        besideReadingMs = 0L
-        alightHoldMs = 0L
         wrongLineNoticeGiven = false
         offRoute = false
         lostSinceMs = 0L
@@ -4132,8 +3946,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         leftOnFoot = false
         footStopIdx = 0
         trackedWithUsMs = 0L
+        peakSinceWithUsKmh = 0.0
+        vehicleFarNow = false
         lastDwellHoldLogMs = 0L
-        alightPendingSinceMs = 0L
         lastStopAnnouncement = null
         repeatGuardArmed = false
         lastStandingReadingMs = 0L

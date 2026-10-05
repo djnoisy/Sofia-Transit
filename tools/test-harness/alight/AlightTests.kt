@@ -1,78 +1,79 @@
-// Getting-off logic in JourneyService: the moved-together tracking
-// (updateBeside / BesideTrack) and the end rule of checkJourneyTimers.
-// run_alight_tests.sh copies the REAL updateBeside, BesideTrack and
-// LocationHelper.distanceMetres into the marked places below; the rest is
-// the test. The end rule `concluded` is a hand copy of the condition in
-// checkJourneyTimers — keep it in step if that condition changes.
-import kotlin.math.*
-
-object VehicleMatcher {
-    data class Sighting(val tripId: String, val routeId: String, val distanceMetres: Double,
-                        val timestamp: Long, val ageSec: Long, val lat: Double = 0.0, val lon: Double = 0.0)
-}
-object LocationHelper {
-    private const val EARTH_RADIUS_M = 6_371_000.0
-// @@DISTANCE@@
-}
+// The getting-off rule of JourneyService (gotOff, see ALIGHT_WAIT_MS).
+// run_alight_tests.sh copies the REAL gotOff into the marked place below;
+// the rest is the test, with the rule's constants as JourneyService has them.
 object J {
-// @@BESIDE@@
+// @@GOTOFF@@
 }
+
+const val WAIT = 120_000L        // JourneyService.ALIGHT_WAIT_MS
+const val VEHICLE_KMH = 10.0     // JourneyService.MIN_SPEED_FOR_IDENTIFY
 
 var fails = 0
 fun eq(n: String, e: Any?, a: Any?) { if (e != a) { fails++; println("FAIL $n: expected $e got $a") } else println("PASS $n") }
-fun lat(m: Double) = 42.65 + m / 111_320.0                 // metres north of a base point
-fun sg(id: String, ts: Long, m: Double, age: Long = 5) = VehicleMatcher.Sighting(id, "R", 5.0, ts, age, lat(m), 23.37)
-// Vehicle reports at the given metres, we at `um` metres, reading at `now`.
-internal fun up(b: Map<String, J.BesideTrack>, l: List<VehicleMatcher.Sighting>, um: Double, now: Long, acc: Boolean = true) =
-    J.updateBeside(b, l, "OURS", 30, lat(um), 23.37, acc, 40.0, now, LocationHelper::distanceMetres)
-// Hand copy of the end condition in checkJourneyTimers (ALIGHT_SETTLE_MS = 90 s).
-fun concluded(now: Long, pending: Long, hold: Long) = pending != 0L && now - pending >= 90_000 && now - hold >= 90_000
+fun off(now: Long, withUs: Long, far: Boolean, peak: Double) = J.gotOff(now, withUs, far, peak, WAIT, VEHICLE_KMH)
+fun s(h: Int, m: Int, sec: Int) = ((h * 60 + m) * 60 + sec) * 1000L
+
+/**
+ * A ride replayed reading by reading: the vehicle's distance at each reading
+ * and our short-average speed in between, as checkParted and onFix see them.
+ * Returns when the rule fires (checked every 5 s, as the timer does), or null.
+ */
+fun replay(readings: List<Pair<Long, Double>>, speedAt: (Long) -> Double, until: Long): Long? {
+    var withUs = 0L; var far = false; var peak = 0.0
+    var r = 0
+    var now = readings.first().first
+    while (now <= until) {
+        while (r < readings.size && readings[r].first <= now) {
+            val d = readings[r].second
+            if (d <= 30.0) { withUs = readings[r].first; peak = 0.0 }
+            far = d > 250.0
+            r++
+        }
+        if (withUs != 0L) peak = maxOf(peak, speedAt(now))
+        if (off(now, withUs, far, peak)) return now
+        now += 5_000L
+    }
+    return null
+}
 
 fun main() {
-    val t = up(emptyMap(), listOf(sg("OURS", 1, 0.0), sg("B", 1, 0.0), sg("OLD", 1, 0.0, 60),
-        sg("NOPOS", 1, 0.0).copy(lat = 0.0, lon = 0.0)), 0.0, 1000)
-    eq("only fresh other vehicles with a position", setOf("B"), t.keys)
+    eq("never with us → never", false, off(10 * WAIT, 0L, true, 0.0))
+    eq("far, 2 min since with us, standing → got off", true, off(WAIT + 1, 1, true, 0.0))
+    eq("not yet 2 min", false, off(WAIT, 1, true, 0.0))
+    eq("vehicle not far (within 250 m) → no", false, off(10 * WAIT, 1, false, 0.0))
+    eq("vehicle speed since it was with us → no (we are in another vehicle)", false, off(10 * WAIT, 1, true, 12.0))
+    eq("walking pace is fine", true, off(10 * WAIT, 1, true, 6.0))
 
-    // Terminus: both stand, the bus's position jitters.
-    var b = up(emptyMap(), listOf(sg("B", 1, 0.0)), 0.0, 0)
-    for (k in 1..10) b = up(b, listOf(sg("B", 1L + k, if (k % 2 == 0) 10.0 else -8.0)), if (k % 2 == 0) 5.0 else -5.0, k * 30_000L)
-    eq("terminus: never moved", 0L, b["B"]!!.movedAtMs)
+    // 5 Oct 2026, ПЛ. ОРЛОВ МОСТ: "Слизате тук" 09:06:54; bus with us 09:07:03
+    // (0 m) and 09:08:03 (21 m); 558 m at 09:09:04; we stood or walked
+    // (≤ 5 km/h). The old rules ended at 09:10:35.
+    val orlov = listOf(s(9,7,3) to 0.0, s(9,8,3) to 21.0, s(9,9,4) to 558.0, s(9,9,34) to 900.0, s(9,10,4) to 1200.0)
+    val end = replay(orlov, { 5.0 }, s(9, 20, 0))
+    eq("Орлов мост: ends 2 min after the bus was last with us (09:10:03 → first tick)", true,
+        end != null && end >= s(9,10,3) && end < s(9,10,10))
 
-    // Bus queue creeps past a standing passenger.
-    b = up(emptyMap(), listOf(sg("B", 1, -25.0)), 0.0, 0)
-    b = up(b, listOf(sg("B", 2, 20.0)), 3.0, 30_000)
-    eq("bus creeping past a standing passenger: no", 0L, b["B"]!!.movedAtMs)
+    // Stayed aboard at a terminus: the bus stands with us for 10 min.
+    val terminus = (0..20).map { s(10,0,0) + it * 30_000L to 5.0 }
+    eq("aboard a standing bus: never", null, replay(terminus, { 0.0 }, s(10, 12, 0)))
 
-    // Jam crawl with stops: both move 0, 15, 15, 30, 45 m.
-    b = up(emptyMap(), listOf(sg("B", 1, 0.0)), 2.0, 0)
-    b = up(b, listOf(sg("B", 2, 15.0)), 17.0, 30_000); eq("15 m: not yet", 0L, b["B"]!!.movedAtMs)
-    b = up(b, listOf(sg("B", 3, 15.0)), 16.0, 60_000); eq("standstill: not yet", 0L, b["B"]!!.movedAtMs)
-    b = up(b, listOf(sg("B", 4, 30.0)), 31.0, 90_000); eq("30 m: not yet", 0L, b["B"]!!.movedAtMs)
-    b = up(b, listOf(sg("B", 5, 45.0)), 47.0, 120_000); eq("45 m together: moved", 120_000L, b["B"]!!.movedAtMs)
-    b = up(b, listOf(sg("B", 6, 60.0)), 62.0, 150_000); eq("re-anchored: +15 m is no new move", 120_000L, b["B"]!!.movedAtMs)
-    b = up(b, listOf(sg("B", 7, 90.0)), 92.0, 180_000); eq("+45 m together: moved again", 180_000L, b["B"]!!.movedAtMs)
+    // Stayed aboard past the chosen stop: carried off at vehicle speed.
+    val carried = listOf(s(11,0,0) to 0.0, s(11,1,0) to 5.0, s(11,2,0) to 0.0, s(11,3,0) to 3.0)
+    eq("aboard, moving on: never", null, replay(carried, { if (it < s(11,0,30)) 0.0 else 40.0 }, s(11, 4, 0)))
 
-    // Our own fix inaccurate: no move counted, anchors kept.
-    var c = up(emptyMap(), listOf(sg("B", 1, 0.0)), 0.0, 0)
-    c = up(c, listOf(sg("B", 2, 50.0)), 50.0, 30_000, acc = false); eq("inaccurate own fix: no", 0L, c["B"]!!.movedAtMs)
-    c = up(c, listOf(sg("B", 3, 55.0)), 55.0, 60_000, acc = true); eq("then accurate: counted from the first anchor", 60_000L, c["B"]!!.movedAtMs)
+    // Wrongly identified bus leaves while our own bus waits at a red light
+    // for 60 s, then we move off at vehicle speed: never ends.
+    val wrong = listOf(s(12,0,0) to 0.0, s(12,0,30) to 400.0, s(12,1,0) to 700.0, s(12,1,30) to 1000.0, s(12,2,30) to 1500.0)
+    eq("in another vehicle, red light 70 s: never", null,
+        replay(wrong, { if (it < s(12,1,10)) 0.0 else 30.0 }, s(12, 5, 0)))
 
-    // First sighting on an inaccurate fix: our anchor is taken at the next accurate one.
-    var e = up(emptyMap(), listOf(sg("B", 1, 0.0)), 80.0, 0, acc = false)
-    e = up(e, listOf(sg("B", 2, 45.0)), 5.0, 30_000, acc = true); eq("bad first anchor gives no false move", 0L, e["B"]!!.movedAtMs)
-    e = up(e, listOf(sg("B", 3, 95.0)), 50.0, 60_000, acc = true); eq("then a real joint move counts", 60_000L, e["B"]!!.movedAtMs)
+    // One stale/outlying far report while aboard and standing, then close again.
+    val blip = listOf(s(13,0,0) to 0.0, s(13,1,0) to 600.0, s(13,2,0) to 4.0, s(13,3,0) to 2.0, s(13,4,0) to 3.0)
+    eq("aboard, one outlying report: never", null, replay(blip, { 0.0 }, s(13, 6, 0)))
 
-    // Chain broken; same report twice.
-    b = up(b, emptyList(), 92.0, 210_000); eq("not beside: dropped", emptyMap<String, J.BesideTrack>(), b)
-    b = up(emptyMap(), listOf(sg("B", 1, 0.0)), 0.0, 0); b = up(b, listOf(sg("B", 1, 0.0)), 45.0, 30_000)
-    eq("same bus report while we moved: no", 0L, b["B"]!!.movedAtMs)
+    // The bus stops reporting after we got off: the last report was close.
+    val silent = listOf(s(14,0,0) to 0.0, s(14,1,0) to 10.0)
+    eq("bus silent after we got off: left to the backstop timers", null, replay(silent, { 4.0 }, s(14, 10, 0)))
 
-    // End rule (times from the first parting reading).
-    eq("normal: ends at 90 s", true, concluded(90_001, 1, 0))
-    eq("normal: not before", false, concluded(89_000, 1, 0))
-    eq("moved with us at 60 s: not at 120 s", false, concluded(120_000, 1, 60_000))
-    eq("moved with us at 60 s: ends at 150 s", true, concluded(150_001, 1, 60_000))
-
-    println(if (fails == 0) "ALL PASS" else "$fails FAILED")
+    if (fails == 0) println("ALL PASS") else println("$fails FAILED")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)
 }
