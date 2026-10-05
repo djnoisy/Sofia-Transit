@@ -58,13 +58,7 @@ data class VehicleInfo(
     val bearing: Float?,
     val currentStopSequence: Int?,
     val currentStopId: String?,
-    val timestamp: Long,
-    /**
-     * The feed's current_status (STOPPED_AT, INCOMING_AT, IN_TRANSIT_TO), or
-     * null when not sent. Diagnostic only for now: logged to find out whether
-     * the feed says which stop a vehicle is standing at.
-     */
-    val currentStatus: String? = null
+    val timestamp: Long
 )
 
 /**
@@ -361,21 +355,6 @@ class RealtimeRepository @Inject constructor() {
      * Reads the same cached feed as the other calls, so it costs no extra
      * request.
      */
-    /**
-     * Diagnostic only: how many vehicles in the feed say which stop they are
-     * at, and in what state. Tells whether "the vehicle stands at our stop"
-     * could serve as evidence of boarding. Never affects any decision.
-     */
-    private fun logStopFields(vehicles: List<VehicleInfo>) {
-        try {
-            val withStop = vehicles.count { it.currentStopId != null }
-            val withSeq = vehicles.count { it.currentStopSequence != null }
-            val byStatus = vehicles.groupingBy { it.currentStatus ?: "none" }.eachCount()
-            FileLogger.d(TAG, "Vehicle stop fields: stop_id $withStop/${vehicles.size}, " +
-                "stop_sequence $withSeq/${vehicles.size}, status $byStatus")
-        } catch (e: Exception) { /* logging only */ }
-    }
-
     suspend fun getAllVehicles(maxAgeSec: Long = 90): List<VehicleInfo> =
         withContext(Dispatchers.IO) {
             try {
@@ -399,10 +378,9 @@ class RealtimeRepository @Inject constructor() {
                         currentStopSequence =
                             if (v.hasCurrentStopSequence()) v.currentStopSequence else null,
                         currentStopId = if (v.hasStopId()) v.stopId else null,
-                        timestamp = v.timestamp,
-                        currentStatus = if (v.hasCurrentStatus()) v.currentStatus.name else null
+                        timestamp = v.timestamp
                     )
-                }.also { logStopFields(it) }
+                }
             } catch (e: Exception) {
                 FileLogger.w(TAG, "getAllVehicles failed: ${e.message}")
                 emptyList()
