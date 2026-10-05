@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The getting-off rule of JourneyService (see alight/AlightTests.kt). The real
-# function is copied out of the source, since JourneyService itself cannot be
+# The getting-off rule and the no-progress limit of JourneyService (see
+# alight/AlightTests.kt). The real functions are copied out of the source, since JourneyService itself cannot be
 # compiled without the Android SDK.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -13,9 +13,12 @@ python3 - "$SRC" "$HERE/alight/AlightTests.kt" "$OUT/AlightTests.kt" <<'PY'
 import sys
 src, tmpl, out = sys.argv[1:]
 js = open(f"{src}/service/JourneyService.kt").read()
-i = js.index("        internal fun gotOff(")
-fn = js[i:js.index("\n\n", i)]
-open(out, "w").write(open(tmpl).read().replace("// @@GOTOFF@@", fn))
+def grab(sig):
+    i = js.index("        internal fun " + sig)
+    return js[i:js.index("\n\n", i)]
+open(out, "w").write(open(tmpl).read()
+    .replace("// @@GOTOFF@@", grab("gotOff("))
+    .replace("// @@ATSPEED@@", grab("atVehicleSpeed(")))
 PY
 "$KOTLINC" "$OUT/AlightTests.kt" -d "$OUT/c" 2>&1 | grep -A3 "error:" || true
 java -cp "$OUT/c:$KLIB/kotlin-stdlib.jar" AlightTestsKt | grep -v "^PASS"

@@ -210,9 +210,22 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          */
         const val ALIGHT_ANNOUNCE_RADIUS = ARRIVAL_RADIUS
 
-        /** If the vehicle makes no forward progress for this long, the
-         *  journey is assumed over (user forgot to stop tracking). */
+        /**
+         * If there is no progress for this long, the journey is assumed over
+         * (the passenger forgot to stop tracking).
+         *
+         * Progress is a new stop reached, or any moment of travel at vehicle
+         * speed on an accurate fix (see atVehicleSpeed). A ride held up in a
+         * jam still moves now and then, so it is not cut short, while a
+         * passenger who got off unnoticed and walks never reaches that speed.
+         * Travel at vehicle speed somewhere else is not this limit's case:
+         * the off-route watches deal with it.
+         */
         private const val INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000L
+
+        /** Whether a fix shows travel at vehicle speed — progress, for INACTIVITY_TIMEOUT_MS. */
+        internal fun atVehicleSpeed(accurateFix: Boolean, kmh: Double?, vehicleKmh: Double): Boolean =
+            accurateFix && (kmh ?: 0.0) >= vehicleKmh
 
         /**
          * The same idea before the journey has begun, with a longer allowance.
@@ -788,6 +801,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var roadPosAtMs = 0L
     /** This fix's place on the road (null: not placed), and the one before it. */
     private var fixRoadPos: Double? = null
+    /** How far this fix is from the road, however far (null: no road searched). */
+    private var fixRoadOffset: Double? = null
+    /** Travel along another road than the line's. See OffRoadWatch. */
+    private val offRoadWatch = OffRoadWatch()
     private var prevFixRoadPos: Double? = null
     /** Stop whose straight-line nearness the road contradicted, logged once. */
     private var roadNoteIdx = -1
@@ -1724,6 +1741,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (accurateFix && trackedWithUsMs != 0L) {
             peakSinceWithUsKmh = maxOf(peakSinceWithUsKmh, shortSpeedKmh() ?: 0.0)
         }
+        // Moving at vehicle speed is progress for the no-progress limit,
+        // between stops too. See INACTIVITY_TIMEOUT_MS.
+        if (movingSinceMs != 0L && atVehicleSpeed(accurateFix, shortSpeedKmh(), MIN_SPEED_FOR_IDENTIFY)) {
+            lastProgressMs = System.currentTimeMillis()
+        }
         if (!loc.hasAccuracy() || loc.accuracy <= SNAP_ACCURACY_LOOSE) {
             lastUsableFixMs = System.currentTimeMillis()
         }
@@ -1776,6 +1798,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (orderedStops.isEmpty()) return
 
         locateOnRoad(loc)
+        if (watchOffRoad(loc, accurateFix)) {
+            publish(distance = null)
+            return
+        }
 
         val idxBefore = currentIdx
 
@@ -1800,6 +1826,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // "the nearest" becomes arbitrary — so the requirement is
             // relaxed in steps rather than accepting whatever arrives first.
             if (!accuracyGoodEnoughToSnap()) {
+                publish(distance = null)
+                return
+            }
+            // Off the route, back on it only on its road: attached to a stop
+            // of the line from a parallel street, the stops of the line would
+            // be said while we travel another road. See OffRoadWatch.
+            if (offRoute && geometry != null && fixRoadPos == null) {
                 publish(distance = null)
                 return
             }
@@ -3320,6 +3353,26 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     /**
+     * The off-route watch by the road (see OffRoadWatch): travel along
+     * another road than the line's, while attached and on the route. Returns
+     * true when that has just happened, having switched tracking into the
+     * off-route state. Added to the watches by the stops, not instead of
+     * them: those still work where the line has no road shape.
+     */
+    private fun watchOffRoad(loc: Location, accurateFix: Boolean): Boolean {
+        if (offRoute || awaitingFirstFix || geometry == null) {
+            offRoadWatch.reset()
+            return false
+        }
+        val kmh = shortSpeedKmh() ?: 0.0
+        if (!offRoadWatch.update(fixRoadOffset, loc.latitude, loc.longitude,
+                accurateFix, kmh >= MIN_SPEED_FOR_IDENTIFY)) return false
+        enterOffRoute("over ${OffRoadWatch.OFFSET.toInt()} m from the line's road for " +
+            "${OffRoadWatch.TRAVEL.toInt()} m, ${fixRoadOffset?.toInt()} m now, at ${kmh.toInt()} km/h")
+        return true
+    }
+
+    /**
      * The off-route watch for while we are not yet attached to any stop.
      *
      * Attaching needs us to be closing on the nearest stop ahead, so travel
@@ -3619,7 +3672,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        // No progress along the route. Counted from the first movement
+        // No progress: no new stop and no travel at vehicle speed (see
+        // INACTIVITY_TIMEOUT_MS). Counted from the first movement
         // rather than from the first stop reached: tied to reaching a stop,
         // the timer never started for a journey that made no progress from
         // the outset. Not applied off the route, which has its own limit
@@ -4456,7 +4510,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * line ([distTo]). Never less than the straight line.
      *
      * Only the announcements use this — "Наближава", "Спирка", the first
-     * placing and the alighting stop. The off-route watches keep the
+     * placing and the alighting stop. The off-route watches by the stops keep the
      * straight line: they compare distances taken at different moments, and
      * mixing the two kinds would read as a jump — 355 m at ДЪРЖАВНА
      * ПЕЧАТНИЦА, over their 300 m threshold.
@@ -4481,13 +4535,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val last = roadPos?.takeIf { now - roadPosAtMs <= ROAD_TRACK_MAX_AGE_MS }
         prevFixRoadPos = last
         fixRoadPos = null
+        fixRoadOffset = null
         if (g == null || g.stopAlong.isEmpty()) return
         val lastIdx = g.stopAlong.lastIndex
         val from = g.stopAlong[(currentIdx - 1).coerceIn(0, lastIdx)] - RouteGeometry.BACK_MARGIN
         val to = if (awaitingFirstFix) g.length
                  else g.stopAlong[(currentIdx + LOOKAHEAD).coerceIn(0, lastIdx)] + RouteGeometry.BACK_MARGIN
-        val along = g.place(loc.latitude, loc.longitude,
+        val near = g.nearest(loc.latitude, loc.longitude,
             last, (now - roadPosAtMs) / 1000.0, from, to)
+        fixRoadOffset = near?.offset
+        val along = near?.takeIf { it.offset <= RouteGeometry.MAX_OFFSET }?.along
         logRoadPlacement(loc, g, along, now)
         roadPos = along
         if (along == null) return

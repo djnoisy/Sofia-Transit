@@ -66,12 +66,20 @@ class RouteGeometry private constructor(
         lat: Double, lon: Double,
         last: Double?, secsSinceLast: Double,
         from: Double, to: Double
-    ): Double? {
-        val p = if (last != null)
-            locate(lat, lon, last - BACK_MARGIN, last + BACK_MARGIN + MAX_SPEED_MPS * secsSinceLast)
-        else locate(lat, lon, from, to)
-        return p?.takeIf { it.offset <= MAX_OFFSET }?.along
-    }
+    ): Double? = nearest(lat, lon, last, secsSinceLast, from, to)
+        ?.takeIf { it.offset <= MAX_OFFSET }?.along
+
+    /**
+     * The nearest point of the stretch [place] searches, however far off the
+     * fix is — how far from the road we are, for [OffRoadWatch].
+     */
+    fun nearest(
+        lat: Double, lon: Double,
+        last: Double?, secsSinceLast: Double,
+        from: Double, to: Double
+    ): Position? = if (last != null)
+        locate(lat, lon, last - BACK_MARGIN, last + BACK_MARGIN + MAX_SPEED_MPS * secsSinceLast)
+    else locate(lat, lon, from, to)
 
     /**
      * The distance to stop [idx] for announcing it, from [pos] on the road
@@ -181,5 +189,77 @@ class RouteGeometry private constructor(
             }
             return g
         }
+    }
+}
+
+/**
+ * Notices travel along a different road from the one the followed line takes:
+ * accurate fixes, at vehicle speed, more than [OFFSET] from its road, until we
+ * are [TRAVEL] from where that began.
+ *
+ * Lines often share a road and part where one turns into a parallel street.
+ * Measured against the stops ahead, that shows only once every one of them is
+ * 300 m further than it was — which may not happen at all before the roads
+ * meet again. Towards ЦЕНТРАЛНА ГАРА, 213 and 305 part 1.3 km after ХОТЕЛ
+ * ПЛИСКА and meet again at УЛ. БЯЛО МОРЕ: by the stops, riding one while
+ * following the other went unnoticed all the way; by the road it is noticed
+ * 160–170 m after the parting (feed of 5 Oct 2026, tools/test-harness).
+ *
+ * A moment of poor GPS is not enough, nor is a short loop: before ХОТЕЛ
+ * ПЛИСКА 305 turns 80 m aside to ПЛОЩАД НА АВИАЦИЯТА and back, at the limit
+ * of [TRAVEL] — counted in some rides, rightly then, as it is not 213's road.
+ * Being back within [OFFSET] starts the count afresh. Slow or inaccurate
+ * fixes neither count nor reset it.
+ *
+ * Pure Kotlin, so it can be tested on its own.
+ */
+class OffRoadWatch {
+    private var fromLat = 0.0
+    private var fromLon = 0.0
+    private var counting = false
+
+    /** How far from the road the count began, in metres; 0 when not counting. */
+    var gone = 0.0
+        private set
+
+    /**
+     * One fix: [offset] from the road (null: no road to measure against),
+     * whether it is [accurate], and whether we are [moving] at vehicle speed.
+     * True when the off-road travel has just reached [TRAVEL]; the count then
+     * starts afresh.
+     */
+    fun update(offset: Double?, lat: Double, lon: Double, accurate: Boolean, moving: Boolean): Boolean {
+        if (offset == null) { reset(); return false }
+        if (!accurate) return false
+        if (offset <= OFFSET) { reset(); return false }
+        if (!moving) return false
+        if (!counting) {
+            counting = true
+            fromLat = lat
+            fromLon = lon
+            gone = 0.0
+            return false
+        }
+        val kx = KY * cos(Math.toRadians(lat))
+        gone = hypot((lat - fromLat) * KY, (lon - fromLon) * kx)
+        if (gone < TRAVEL) return false
+        reset()
+        return true
+    }
+
+    fun reset() {
+        counting = false
+        gone = 0.0
+    }
+
+    companion object {
+        private const val KY = 6_371_000.0 * Math.PI / 180.0
+        /**
+         * Further than this from the road is off it: beyond GPS scatter on an
+         * accurate fix (≤ 30 m), and beyond the width of a wide boulevard.
+         */
+        const val OFFSET = 50.0
+        /** How far we must have gone off the road before it counts. */
+        const val TRAVEL = 150.0
     }
 }
