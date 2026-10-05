@@ -6,8 +6,11 @@ import bg.sofia.transit.data.db.dao.*
 import bg.sofia.transit.data.db.entity.*
 
 @Database(
-    entities = [Stop::class, Route::class, Trip::class, StopTime::class, CalendarDate::class],
-    version = 5,
+    entities = [Stop::class, Route::class, Trip::class, StopTime::class, CalendarDate::class,
+                Shape::class],
+    // 6: shapes. The destructive migration below empties the database, and
+    // the next start installs the data afresh — shapes included.
+    version = 6,
     exportSchema = false
 )
 abstract class TransitDatabase : RoomDatabase() {
@@ -16,6 +19,7 @@ abstract class TransitDatabase : RoomDatabase() {
     abstract fun tripDao(): TripDao
     abstract fun stopTimeDao(): StopTimeDao
     abstract fun calendarDateDao(): CalendarDateDao
+    abstract fun shapeDao(): ShapeDao
 
     companion object {
         @Volatile private var INSTANCE: TransitDatabase? = null

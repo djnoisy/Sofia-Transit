@@ -137,6 +137,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         const val PASSED_STOP_MARGIN = 30.0
 
         /**
+         * Road geometry (see [RouteGeometry]): a place on the road older than
+         * this is not built on; the next fix is searched for afresh.
+         */
+        private const val ROAD_TRACK_MAX_AGE_MS = 20_000L
+        /**
+         * Placing on the stops waits this long at most for the road of a new
+         * stop order to load, so a stop is never first placed by a straight
+         * line the road would have contradicted a moment later.
+         */
+        private const val GEOMETRY_WAIT_MS = 3_000L
+
+        /**
          * How much closer to the stop one fix must bring us before we accept
          * that we are heading for it. Wide enough not to be read out of
          * ordinary scatter between two consecutive fixes.
@@ -829,6 +841,25 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var routeLabel = ""
     private var orderedStops: List<StopWithSequence> = emptyList()
     private var stopLatLon: List<Pair<Double, Double>> = emptyList()
+        set(value) {
+            field = value
+            onStopOrderChanged(value)
+        }
+
+    /** The road of the current stop order, or null: straight lines then. */
+    private var geometry: RouteGeometry? = null
+    /** True while the road of a new stop order is being loaded. */
+    private var geometryPending = false
+    private var geometryRequestedMs = 0L
+    private var geometryJob: Job? = null
+    /** Where on the road the last placed fix was, and when. */
+    private var roadPos: Double? = null
+    private var roadPosAtMs = 0L
+    /** This fix's place on the road (null: not placed), and the one before it. */
+    private var fixRoadPos: Double? = null
+    private var prevFixRoadPos: Double? = null
+    /** Stop whose straight-line nearness the road contradicted, logged once. */
+    private var roadNoteIdx = -1
     private var currentIdx = 0
     private var atStop = false
     private var approachAnnounced = false
@@ -1837,6 +1868,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         if (orderedStops.isEmpty()) return
 
+        locateOnRoad(loc)
+
         val idxBefore = currentIdx
 
         // On the very first fix, snap to the route: among ALL stops from the
@@ -1845,6 +1878,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // after boarding, we land on the right stop immediately instead of
         // announcing ancient history.
         if (awaitingFirstFix) {
+            // The road of a new stop order is still loading: wait for it
+            // rather than place by a straight line it may contradict (see
+            // GEOMETRY_WAIT_MS) — a second or so, never more than the limit.
+            if (geometryPending &&
+                System.currentTimeMillis() - geometryRequestedMs < GEOMETRY_WAIT_MS) {
+                publish(distance = null)
+                return
+            }
             // Attaching to the wrong stop is not self-correcting: the choice
             // is locked in and the first thing the passenger hears may name a
             // stop they have long passed. With an accuracy of, say, 500 m,
@@ -1859,9 +1900,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             snapWaitStartedMs = 0L
             var best = currentIdx
             var bestDist = Double.MAX_VALUE
-            for (i in currentIdx..orderedStops.lastIndex) {
-                val d = distTo(loc, i)
-                if (d < bestDist) { bestDist = d; best = i }
+            val road = geometry
+            val roadAt = fixRoadPos
+            if (road != null && roadAt != null) {
+                // On the road, the stop we are at or heading for is simply
+                // the first one not behind us; the margin keeps a rider
+                // standing at a stop on that stop. The straight-line search
+                // below took the stop nearest in a straight line — after ХМС
+                // that was ДЪРЖАВНА ПЕЧАТНИЦА, 41 m off across a block, and it
+                // was announced as reached with 360 m of road still to go.
+                best = (road.nextStop(roadAt, currentIdx, PASSED_STOP_MARGIN)
+                    ?: orderedStops.lastIndex).coerceAtMost(orderedStops.lastIndex)
+                bestDist = stopDist(loc, best)
+                noteRoadDetour(loc, best)
+            } else {
+                for (i in currentIdx..orderedStops.lastIndex) {
+                    val d = distTo(loc, i)
+                    if (d < bestDist) { bestDist = d; best = i }
+                }
             }
 
             // The nearest stop may already be behind us. Starting tracking
@@ -1874,7 +1930,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // have passed it. The margin keeps a rider standing AT the stop,
             // where the two distances are nearly equal, from being pushed
             // forward by GPS scatter.
-            if (best < orderedStops.lastIndex) {
+            if (roadAt == null && best < orderedStops.lastIndex) {
                 val toNext = distTo(loc, best + 1)
                 val (bLat, bLon) = stopLatLon.getOrNull(best) ?: Pair(0.0, 0.0)
                 val (nLat, nLon) = stopLatLon.getOrNull(best + 1) ?: Pair(0.0, 0.0)
@@ -1895,7 +1951,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // announcing a route we are not on. Being within catch-up range
             // of one of its stops is evidence of being back; approaching one
             // from afar is not.
-            if (offRoute && bestDist > CATCHUP_MAX_DISTANCE) {
+            // In a straight line, as before road geometry: off the route the
+            // fix is not on the road anyway, and the test is whether we are
+            // back near the line at all.
+            if (offRoute && distTo(loc, best) > CATCHUP_MAX_DISTANCE) {
                 awaitingFirstFix = true
                 val now = System.currentTimeMillis()
                 if (now - lastOffRouteLogMs >= OFF_ROUTE_LOG_INTERVAL_MS) {
@@ -1928,9 +1987,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     publish(distance = null)
                     return
                 }
-                val before = LocationHelper.distanceMetres(
+                val prevStraight = LocationHelper.distanceMetres(
                     prevLat, prevLon,
                     stopLatLon[best].first, stopLatLon[best].second)
+                // Measured the same way as bestDist: by road needs the fix
+                // before this one placed on the road too.
+                val prevRoad = prevFixRoadPos
+                if (road != null && roadAt != null && prevRoad == null) {
+                    awaitingFirstFix = true
+                    publish(distance = null)
+                    return
+                }
+                val before = if (road != null && roadAt != null)
+                    road.distanceToStop(prevRoad, best, prevStraight) else prevStraight
                 if (before - bestDist < APPROACHING_MARGIN) {
                     val now = System.currentTimeMillis()
                     val allowed = movingSinceMs != 0L && candidates.isEmpty() && !offRoute &&
@@ -2065,12 +2134,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         // Look-ahead window: nearest stop among current..current+LOOKAHEAD.
         val end = (currentIdx + LOOKAHEAD).coerceAtMost(orderedStops.lastIndex)
+        // By road where the fix is placed on it (see stopDist): a stop the
+        // road has not reached yet is not "at" however near it lies.
         var nearest = currentIdx
-        var nearestDist = distTo(loc, currentIdx)
+        var nearestDist = stopDist(loc, currentIdx)
         for (i in (currentIdx + 1)..end) {
-            val d = distTo(loc, i)
+            val d = stopDist(loc, i)
             if (d < nearestDist) { nearestDist = d; nearest = i }
         }
+        noteRoadDetour(loc, currentIdx)
 
         // ── Off-route watch ──────────────────────────────────────────────
         if (watchOffRoute(loc, end)) {
@@ -2168,7 +2240,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // kilometres short of it.
             !atStop && nearest > currentIdx
                     && nearestDist <= CATCHUP_MAX_DISTANCE
-                    && nearestDist < distTo(loc, currentIdx) - 30.0 -> {
+                    && nearestDist < stopDist(loc, currentIdx) - 30.0 -> {
                 // The gap in positioning swallowed the stop entirely. The
                 // tracker moves on to where we actually are; the stops behind
                 // us are not recited, for the reasons above.
@@ -2182,11 +2254,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // ── Approaching warning ───────────────────────────────────────
             !atStop && !approachAnnounced
                     && approachRadiusFor(currentIdx)
-                        ?.let { distTo(loc, currentIdx) <= it } == true -> {
+                        ?.let { stopDist(loc, currentIdx) <= it } == true -> {
                 approachAnnounced = true
                 // Logged with speed and distance so the warning's lead time
                 // can be worked out afterwards from the log alone.
-                FileLogger.i(TAG, "APPROACH at ${distTo(loc, currentIdx).toInt()} m, " +
+                FileLogger.i(TAG, "APPROACH at ${stopDist(loc, currentIdx).toInt()} m, " +
                     "speed ${recentSpeedKmh()?.toInt() ?: -1} km/h → " +
                     orderedStops[currentIdx].stopName)
                 announceStop("approach", currentIdx, "Наближава спирка, ${orderedStops[currentIdx].stopName}.")
@@ -2197,7 +2269,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val dest = destinationIdx
         if (dest != null) {
 
-            val destDist = distTo(loc, dest)
+            val destDist = stopDist(loc, dest)
 
             // 1a) Announce at 60 m — early enough to signal the driver and
             //     reach the door.
@@ -2248,7 +2320,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             lastProgressMs = System.currentTimeMillis()
         }
 
-        publish(distance = distTo(loc, currentIdx).toInt())
+        publish(distance = stopDist(loc, currentIdx).toInt())
     }
 
     /**
@@ -4478,7 +4550,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (prev < 0) return APPROACH_RADIUS
         val (pLat, pLon) = stopLatLon.getOrNull(prev) ?: return APPROACH_RADIUS
         val (cLat, cLon) = stopLatLon.getOrNull(idx) ?: return APPROACH_RADIUS
-        val spacing = LocationHelper.distanceMetres(pLat, pLon, cLat, cLon)
+        // By road when its shape is known: ХМС to ДЪРЖАВНА ПЕЧАТНИЦА is 279 m
+        // in a straight line but 634 m of road.
+        val roadSpacing = geometry?.let { g ->
+            val a = g.stopAlong.getOrNull(prev); val b = g.stopAlong.getOrNull(idx)
+            if (a != null && b != null && b > a) b - a else null
+        }
+        val spacing = roadSpacing ?: LocationHelper.distanceMetres(pLat, pLon, cLat, cLon)
         if (spacing <= 0.0) return APPROACH_RADIUS
 
         // Sparse mode drops the warning where it would arrive seconds after
@@ -4516,7 +4594,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private fun announceNextStop(idx: Int, loc: Location) {
         val name = orderedStops[idx].stopName
         val radius = approachRadiusFor(idx)
-        val dist = distTo(loc, idx)
+        val dist = stopDist(loc, idx)
         if (radius != null && dist <= radius) {
             approachAnnounced = true
             FileLogger.i(TAG, "APPROACH at ${dist.toInt()} m, " +
@@ -4538,7 +4616,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     private fun suppressRedundantApproach(loc: Location) {
         val radius = approachRadiusFor(currentIdx)
-        if (radius == null || distTo(loc, currentIdx) <= radius) {
+        if (radius == null || stopDist(loc, currentIdx) <= radius) {
             approachAnnounced = true
         }
     }
@@ -4546,6 +4624,126 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private fun distTo(loc: Location, idx: Int): Double {
         val (lat, lon) = stopLatLon.getOrNull(idx) ?: return Double.MAX_VALUE
         return LocationHelper.distanceMetres(loc.latitude, loc.longitude, lat, lon)
+    }
+
+    // ── Road geometry ─────────────────────────────────────────────────────
+
+    /**
+     * How far stop [idx] is for announcing it: by road when this fix is
+     * placed on the road and the stop lies ahead on it, else in a straight
+     * line ([distTo]). Never less than the straight line.
+     *
+     * Only the announcements use this — "Наближава", "Спирка", the first
+     * placing and the alighting stop. The off-route watches keep the
+     * straight line: they compare distances taken at different moments, and
+     * mixing the two kinds would read as a jump — 355 m at ДЪРЖАВНА
+     * ПЕЧАТНИЦА, over their 300 m threshold.
+     */
+    private fun stopDist(loc: Location, idx: Int): Double {
+        val straight = distTo(loc, idx)
+        return geometry?.distanceToStop(fixRoadPos, idx, straight) ?: straight
+    }
+
+    /**
+     * Places this fix on the road, into [fixRoadPos]; null when there is no
+     * road or the fix is too far off it.
+     *
+     * Searched near the last placed position — no further back than GPS
+     * scatter, no further ahead than a vehicle could have gone — so a fix
+     * stays on its own stretch where the road passes close to itself. With
+     * no recent position, from the stop before the one we head for onwards.
+     */
+    private fun locateOnRoad(loc: Location) {
+        val g = geometry
+        val now = System.currentTimeMillis()
+        val last = roadPos?.takeIf { now - roadPosAtMs <= ROAD_TRACK_MAX_AGE_MS }
+        prevFixRoadPos = last
+        fixRoadPos = null
+        if (g == null || g.stopAlong.isEmpty()) return
+        val lastIdx = g.stopAlong.lastIndex
+        val from = g.stopAlong[(currentIdx - 1).coerceIn(0, lastIdx)] - RouteGeometry.BACK_MARGIN
+        val to = if (awaitingFirstFix) g.length
+                 else g.stopAlong[(currentIdx + LOOKAHEAD).coerceIn(0, lastIdx)] + RouteGeometry.BACK_MARGIN
+        val along = g.place(loc.latitude, loc.longitude,
+            last, (now - roadPosAtMs) / 1000.0, from, to)
+        roadPos = along
+        if (along == null) return
+        roadPosAtMs = now
+        fixRoadPos = along
+    }
+
+    /**
+     * Logs, once per stop, when the straight line puts us at a stop the road
+     * says is still ahead — the case road geometry is here for.
+     */
+    private fun noteRoadDetour(loc: Location, idx: Int) {
+        if (idx == roadNoteIdx || idx !in orderedStops.indices) return
+        val straight = distTo(loc, idx)
+        val byRoad = stopDist(loc, idx)
+        if (straight <= ARRIVAL_RADIUS && byRoad > ARRIVAL_RADIUS) {
+            roadNoteIdx = idx
+            FileLogger.i(TAG, "${orderedStops[idx].stopName} ${straight.toInt()} m away in a " +
+                "straight line but ${byRoad.toInt()} m by road — not there yet")
+        }
+    }
+
+    /**
+     * A new stop order: its road is looked up and fitted in the background.
+     * Until it is ready, distances are straight lines; placing on the stops
+     * waits for it (see GEOMETRY_WAIT_MS).
+     */
+    private fun onStopOrderChanged(order: List<Pair<Double, Double>>) {
+        geometryJob?.cancel()
+        geometryJob = null
+        geometry = null
+        roadPos = null
+        fixRoadPos = null
+        prevFixRoadPos = null
+        roadNoteIdx = -1
+        if (order.isEmpty()) {
+            geometryPending = false
+            return
+        }
+        geometryPending = true
+        geometryRequestedMs = System.currentTimeMillis()
+        val route = routeId
+        val trip = tripId
+        geometryJob = serviceScope.launch {
+            val g = try {
+                loadGeometry(route, trip, order)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "Road geometry not loaded: ${e.message}")
+                null
+            }
+            withContext(Dispatchers.Main) {
+                // Only if the stop order is still the one it was loaded for.
+                if (stopLatLon === order) {
+                    geometry = g
+                    geometryPending = false
+                }
+            }
+        }
+    }
+
+    private suspend fun loadGeometry(
+        route: String, trip: String, order: List<Pair<Double, Double>>
+    ): RouteGeometry? {
+        val shapes = gtfsRepo.getShapesForRoute(route, trip)
+        if (shapes.isEmpty()) {
+            FileLogger.i(TAG, "No road shapes for route $route — straight lines")
+            return null
+        }
+        for ((id, blob) in shapes) {
+            val g = RouteGeometry.fit(
+                bg.sofia.transit.data.db.entity.ShapePoints.decode(blob), order) ?: continue
+            FileLogger.i(TAG, "Road geometry: shape $id, ${g.length.toInt()} m, " +
+                "${order.size} stops placed")
+            return g
+        }
+        FileLogger.i(TAG, "No shape of route $route fits its ${order.size} stops — straight lines")
+        return null
     }
 
     private fun publish(distance: Int?) {

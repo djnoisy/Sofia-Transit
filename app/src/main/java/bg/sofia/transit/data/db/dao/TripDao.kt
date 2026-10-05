@@ -95,6 +95,10 @@ interface TripDao {
     @Query("SELECT * FROM trips WHERE tripId = :id")
     suspend fun getById(id: String): Trip?
 
+    /** The road shapes the trips of a route follow, for placing its stops on the road. */
+    @Query("SELECT DISTINCT shapeId FROM trips WHERE routeId = :routeId AND shapeId IS NOT NULL")
+    suspend fun getShapeIdsForRoute(routeId: String): List<String>
+
     /**
      * Fetches multiple trips by ID in a single query — used to resolve
      * realtime trip_updates against the static schedule (so we can show

@@ -109,3 +109,34 @@ data class CalendarDate(
     val date: String,
     val exceptionType: Int
 )
+
+/**
+ * The road one trip shape follows (shapes.txt), as given by the feed: every
+ * point, in order, packed as lat/lon float pairs (see [ShapePoints]).
+ * One row per shape rather than per point — about 2 MB for the whole
+ * network instead of 10–15 MB — since a shape is only ever read whole.
+ */
+@Entity(tableName = "shapes")
+class Shape(
+    @PrimaryKey val shapeId: String,
+    val points: ByteArray
+)
+
+/**
+ * Packing of [Shape.points]: lat, lon, lat, lon… as little-endian floats.
+ * Floats lose nothing — the feed's coordinates are floats already
+ * (42.65686798095703 is exactly the float nearest 42.656868).
+ */
+object ShapePoints {
+    fun encode(latLon: FloatArray): ByteArray {
+        val buf = java.nio.ByteBuffer.allocate(latLon.size * 4)
+            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        latLon.forEach { buf.putFloat(it) }
+        return buf.array()
+    }
+
+    fun decode(blob: ByteArray): FloatArray {
+        val buf = java.nio.ByteBuffer.wrap(blob).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        return FloatArray(blob.size / 4) { buf.getFloat() }
+    }
+}

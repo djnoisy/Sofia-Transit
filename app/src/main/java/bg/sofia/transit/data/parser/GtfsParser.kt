@@ -224,6 +224,67 @@ object GtfsParser {
         entries
     }
 
+    // ── Shapes ───────────────────────────────────────────────────────────────
+    /**
+     * The road shapes of [wanted] (the shapes the trips use; the feed holds
+     * three to four times as many), every point kept, in sequence order.
+     *
+     * Only from a downloaded set: the data bundled in the app has no
+     * shapes.txt. Without it the list is empty and journeys measure the way
+     * to a stop in a straight line, as before shapes were used.
+     */
+    suspend fun parseShapes(
+        dataDir: File?,
+        wanted: Set<String>
+    ): List<Shape> = withContext(Dispatchers.IO) {
+        val file = dataDir?.let { File(it, "shapes.txt") }?.takeIf { it.exists() && it.length() > 0 }
+        if (file == null) {
+            FileLogger.i(TAG, "No shapes.txt — stops will be measured in straight lines")
+            return@withContext emptyList<Shape>()
+        }
+        class Points {
+            var seq = IntArray(256); var lat = FloatArray(256); var lon = FloatArray(256); var n = 0
+            fun add(s: Int, la: Float, lo: Float) {
+                if (n == seq.size) {
+                    seq = seq.copyOf(n * 2); lat = lat.copyOf(n * 2); lon = lon.copyOf(n * 2)
+                }
+                seq[n] = s; lat[n] = la; lon[n] = lo; n++
+            }
+        }
+        val byShape = HashMap<String, Points>()
+        var skipped = 0
+        file.inputStream().use { input ->
+            val reader = BufferedReader(InputStreamReader(input, "UTF-8"), 1024 * 64)
+            val header = reader.readLine()?.split(",") ?: return@withContext emptyList<Shape>()
+            val idx = header.mapIndexed { i, col -> col.trim().removeSurrounding("\"").removePrefix("\uFEFF") to i }.toMap()
+            val iId = idx["shape_id"] ?: return@withContext emptyList<Shape>()
+            val iLat = idx["shape_pt_lat"] ?: return@withContext emptyList<Shape>()
+            val iLon = idx["shape_pt_lon"] ?: return@withContext emptyList<Shape>()
+            val iSeq = idx["shape_pt_sequence"] ?: return@withContext emptyList<Shape>()
+            reader.forEachLine { line ->
+                if (line.isBlank()) return@forEachLine
+                val cols = parseCsvLine(line)
+                val id = cols.getOrNull(iId)?.trim() ?: return@forEachLine
+                if (id !in wanted) return@forEachLine
+                val la = cols.getOrNull(iLat)?.toFloatOrNull()
+                val lo = cols.getOrNull(iLon)?.toFloatOrNull()
+                val s = cols.getOrNull(iSeq)?.trim()?.toIntOrNull()
+                if (la == null || lo == null || s == null) { skipped++; return@forEachLine }
+                byShape.getOrPut(id) { Points() }.add(s, la, lo)
+            }
+        }
+        val shapes = byShape.map { (id, p) ->
+            val order = (0 until p.n).sortedBy { p.seq[it] }
+            val latLon = FloatArray(p.n * 2)
+            order.forEachIndexed { k, i -> latLon[2 * k] = p.lat[i]; latLon[2 * k + 1] = p.lon[i] }
+            Shape(id, ShapePoints.encode(latLon))
+        }
+        FileLogger.i(TAG, "Parsed ${shapes.size} shapes " +
+            "(${byShape.values.sumOf { it.n }} points" +
+            (if (skipped > 0) ", $skipped malformed lines skipped" else "") + ")")
+        shapes
+    }
+
     // ── CSV line parser (handles quoted fields with commas) ──────────────────
     private fun parseCsvLine(line: String): List<String> {
         val result = mutableListOf<String>()

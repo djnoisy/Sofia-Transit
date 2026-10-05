@@ -34,6 +34,7 @@ class GtfsRepository @Inject constructor(
     private val tripDao         = db.tripDao()
     private val stopTimeDao     = db.stopTimeDao()
     private val calendarDateDao = db.calendarDateDao()
+    private val shapeDao        = db.shapeDao()
 
     companion object {
         private const val TAG = "GtfsRepository"
@@ -265,6 +266,23 @@ class GtfsRepository @Inject constructor(
                 tripDao.deleteAll()
                 tripDao.insertAll(trips)
 
+                // Road shapes, for measuring the way to a stop by road. Never
+                // allowed to fail the import: without them journeys measure
+                // in straight lines, as they did before shapes were used.
+                // Cleared even when there are none, so no stale shapes outlive
+                // the trips they belonged to.
+                onProgress("Зареждане на маршрутите…")
+                try {
+                    shapeDao.deleteAll()
+                    val shapes = GtfsParser.parseShapes(dataDir,
+                        trips.mapNotNullTo(HashSet()) { it.shapeId })
+                    shapes.chunked(100).forEach { shapeDao.insertAll(it) }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    FileLogger.w(TAG, "Shapes not loaded: ${e.message}")
+                }
+
                 onProgress("Зареждане на разписания…")
                 stopTimeDao.deleteAll()
                 GtfsParser.parseStopTimes(context, dataDir) { batch ->
@@ -309,6 +327,20 @@ class GtfsRepository @Inject constructor(
             throw e
         }
     }
+
+    /**
+     * The road shapes a trip of [routeId] may follow, as packed points (see
+     * ShapePoints): [tripId]'s own first when it is known, then the other
+     * shapes of the route — a stop order taken from one trip of a direction
+     * fits that direction's shape, whichever trip it came from.
+     */
+    suspend fun getShapesForRoute(routeId: String, tripId: String?): List<Pair<String, ByteArray>> =
+        withContext(Dispatchers.IO) {
+            val ids = LinkedHashSet<String>()
+            if (!tripId.isNullOrBlank()) tripDao.getById(tripId)?.shapeId?.let { ids += it }
+            ids += tripDao.getShapeIdsForRoute(routeId)
+            ids.mapNotNull { id -> shapeDao.getById(id)?.let { id to it.points } }
+        }
 
     /** Backward-compatible alias for code that still calls the old name. */
     suspend fun initialiseFromAssets(onProgress: (String) -> Unit = {}) =

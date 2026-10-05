@@ -172,7 +172,7 @@ fun main() {
         val (r, w) = f.run(true); val o = out(r)
         eq("result", "installed_new", o["result"]); eq("db", "downloaded:stops-NEW", f.repo.db)
         eq("imports", 1, f.repo.loadCount)
-        eq("only used files kept", listOf("calendar_dates.txt","routes.txt","stop_times.txt","stops.txt","trips.txt"), f.gtfsFiles())
+        eq("only used files kept (shapes.txt too)", listOf("calendar_dates.txt","routes.txt","shapes.txt","stop_times.txt","stops.txt","trips.txt"), f.gtfsFiles())
         eq("LM stored", NEW / 1000 * 1000, f.p("last_modified_ms")); eq("etag stored", "\"e1\"", f.p("etag"))
         yes("hash stored", f.p("feed_hash") != null); yes("download day stored", f.p("last_download_ms") != null)
         eq("phases", listOf("download", "import"), phases(w)); eq("no tmp left", 0, f.tmpDirs().size)
@@ -299,6 +299,14 @@ fun main() {
         val (r, _) = f.run(false); val o = out(r)
         eq("result", "unchanged", o["result"]); eq("visible", false, o["visible"]); eq("imports", 0, f.repo.loadCount)
         eq("unreliable", true, f.p("markers_unreliable")); yes("download day stored", f.p("last_download_ms") != null)
+    }
+    test("U6b update: only shapes.txt differs → same data as far as the fingerprint goes → silent, no import") {
+        // shapes.txt is kept but not fingerprinted: data installed before
+        // shapes were used must not count as different because of them.
+        val f = Fx(); f.installedDownloaded("A", NEW); f.repo.loadCount = 0
+        Srv.body = zipOf(feed("A") + ("shapes.txt" to "shapes-CHANGED")); Srv.lastModified = NEW + DAY
+        val (r, _) = f.run(false); val o = out(r)
+        eq("result", "unchanged", o["result"]); eq("imports", 0, f.repo.loadCount)
     }
     test("U7 update: download breaks off → silent failure, markers untouched, next opening may try (after an hour)") {
         val f = Fx(); f.installedDownloaded("A", NEW); f.set("last_download_ms", 0L); f.repo.loadCount = 0
@@ -469,7 +477,7 @@ fun main() {
         JourneyService._trackingState.value = JourneyService.TrackingState.Tracking()
         val (r, _) = f.run(true, replace = true); val o = out(r)
         eq("result", "skipped", o["result"]); eq("visible", false, o["visible"]); eq("imports", 0, f.repo.loadCount)
-        eq("download kept", 5, f.gtfsFiles().size); eq("requests", 0, Srv.requests.size)
+        eq("download kept", 6, f.gtfsFiles().size); eq("requests", 0, Srv.requests.size)
     }
     test("R4 reinstall offline → bundle installed, shown") {
         val f = Fx(); f.olderDownloadThenNewApk(); Srv.stop()
@@ -517,7 +525,7 @@ fun main() {
         val f = Fx(); f.olderDownloadThenNewApk(); (f.prefs as android.content.MemPrefs).map.remove("data_date_ms"); Srv.stop()
         try { val (r, _) = f.run(true, replace = true); val o = out(r)
             eq("result", "deferred", o["result"]); eq("visible", false, o["visible"]); eq("imports", 0, f.repo.loadCount)
-            eq("download kept", 5, f.gtfsFiles().size); eq("db", "downloaded:stops-OLDDL", f.repo.db)
+            eq("download kept", 6, f.gtfsFiles().size); eq("db", "downloaded:stops-OLDDL", f.repo.db)
         } finally { Srv.start() }
     }
     test("R13 old install (date unknown), server has nothing newer than the bundle → bundle installed") {
@@ -535,7 +543,7 @@ fun main() {
     test("R15 reinstall: newer server feed fails to parse → previous download restored, not the bundle") {
         val f = Fx(); f.olderDownloadThenNewApk(); Srv.body = zipOf(feed("BRK", broken = true)); Srv.lastModified = NB + 3 * DAY
         val (r, _) = f.run(true, replace = true)
-        eq("db", "downloaded:stops-OLDDL", f.repo.db); eq("files kept", 5, f.gtfsFiles().size)
+        eq("db", "downloaded:stops-OLDDL", f.repo.db); eq("files kept", 6, f.gtfsFiles().size)
     }
     test("P1 result to be shown is kept by the app: visible runs yes, silent runs no, cleared on close") {
         val f = Fx(); f.installedDownloaded("A", NEW)

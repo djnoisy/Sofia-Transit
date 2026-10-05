@@ -182,17 +182,27 @@ class GtfsUpdateWorker @AssistedInject constructor(
         )
 
         /**
-         * Files we actually parse. After extraction we delete everything else
-         * (shapes.txt, transfers.txt, translations.txt, pathways.txt, ...)
-         * to save tens of MB of disk space.
+         * The files whose content decides whether a feed is new (see
+         * fingerprintOf). shapes.txt is not among them: the road a line takes
+         * changes together with its timetable, and leaving it out keeps the
+         * fingerprint of data installed before shapes were used — and of the
+         * bundled data, which has none — what it always was.
          */
-        private val FILES_TO_KEEP = setOf(
+        private val FINGERPRINT_FILES = setOf(
             "stops.txt",
             "routes.txt",
             "trips.txt",
             "stop_times.txt",
             "calendar_dates.txt"
         )
+
+        /**
+         * Files we actually parse. After extraction we delete everything else
+         * (transfers.txt, translations.txt, pathways.txt, ...) to save disk
+         * space. shapes.txt is optional: without it stops are measured in
+         * straight lines.
+         */
+        private val FILES_TO_KEEP = FINGERPRINT_FILES + "shapes.txt"
 
         private fun prefs(context: Context) =
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -446,7 +456,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
         private fun fingerprintOfFiles(open: (String) -> java.io.InputStream): String? = try {
             val hashes = HashMap<String, String>()
             val buf = ByteArray(64 * 1024)
-            for (name in FILES_TO_KEEP) {
+            for (name in FINGERPRINT_FILES) {
                 val d = java.security.MessageDigest.getInstance("SHA-256")
                 val ok = try {
                     open(name).use { inp ->
@@ -1125,7 +1135,7 @@ class GtfsUpdateWorker @AssistedInject constructor(
                         // Avoid path traversal — strip any leading dirs
                         val safeName = File(entry.name).name
                         val outFile  = File(target, safeName)
-                        val fingerprint = safeName in FILES_TO_KEEP
+                        val fingerprint = safeName in FINGERPRINT_FILES
                         val digest = java.security.MessageDigest.getInstance("SHA-256")
                         outFile.outputStream().buffered().use { out ->
                             while (true) {
