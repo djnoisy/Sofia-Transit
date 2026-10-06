@@ -62,6 +62,22 @@ data class VehicleInfo(
 )
 
 /**
+ * One reading of the vehicle feed as it was received, for the journey trace
+ * (see JourneyTrace): when it arrived by the phone's clock, the server's own
+ * time from the response header and the feed's, so that the two clocks can
+ * be compared, and every vehicle in it with its report time.
+ */
+data class VehicleSnapshot(
+    /** Phone time when the response arrived, epoch ms. */
+    val fetchedAtMs: Long,
+    /** Server time from the HTTP Date header, epoch ms; 0 if absent. */
+    val serverDateMs: Long,
+    /** Feed header timestamp, epoch seconds; 0 if absent. */
+    val headerTimestamp: Long,
+    val vehicles: List<VehicleInfo>
+)
+
+/**
  * Raw upcoming-trip data straight from GTFS-RT, before headsign lookup.
  * The repository layer resolves these against the static Trips table to
  * produce user-facing data with real direction names.
@@ -86,6 +102,7 @@ class RealtimeRepository @Inject constructor() {
         private const val TAG = "RealtimeRepo"
         private const val BASE_URL = "https://gtfs.sofiatraffic.bg/api/v1"
         private const val CACHE_TTL_MS = 20_000L      // 20 seconds
+        private const val VEHICLE_POSITIONS_URL = "$BASE_URL/vehicle-positions"
         private val SOFIA_ZONE = ZoneId.of("Europe/Sofia")
     }
 
@@ -361,31 +378,73 @@ class RealtimeRepository @Inject constructor() {
                 val feed = fetchVehiclePositions() ?: return@withContext emptyList()
                 val nowSec = System.currentTimeMillis() / 1000
                 feed.entityList.mapNotNull { entity ->
-                    if (!entity.hasVehicle()) return@mapNotNull null
-                    val v = entity.vehicle
-                    if (!v.hasPosition()) return@mapNotNull null
-                    if (v.position.latitude == 0f && v.position.longitude == 0f)
-                        return@mapNotNull null
-                    if (v.timestamp > 0 && nowSec - v.timestamp > maxAgeSec)
-                        return@mapNotNull null
-                    VehicleInfo(
-                        vehicleId = v.vehicle.id,
-                        tripId    = v.trip.tripId,
-                        routeId   = v.trip.routeId,
-                        lat       = v.position.latitude.toDouble(),
-                        lon       = v.position.longitude.toDouble(),
-                        bearing   = if (v.position.hasBearing()) v.position.bearing else null,
-                        currentStopSequence =
-                            if (v.hasCurrentStopSequence()) v.currentStopSequence else null,
-                        currentStopId = if (v.hasStopId()) v.stopId else null,
-                        timestamp = v.timestamp
-                    )
+                    positionedVehicle(entity)?.takeIf { v ->
+                        v.timestamp <= 0 || nowSec - v.timestamp <= maxAgeSec
+                    }
                 }
             } catch (e: Exception) {
                 FileLogger.w(TAG, "getAllVehicles failed: ${e.message}")
                 emptyList()
             }
         }
+
+    /**
+     * The vehicle feed for the journey trace, every vehicle included whatever
+     * the age of its report. Fetched if the cached reading has expired.
+     */
+    suspend fun getVehicleSnapshot(): VehicleSnapshot? =
+        withContext(Dispatchers.IO) {
+            try {
+                fetchVehiclePositions()
+                cachedVehicleSnapshot()
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "getVehicleSnapshot failed: ${e.message}")
+                null
+            }
+        }
+
+    /** When the cached vehicle feed arrived, epoch ms; 0 if none yet. */
+    fun vehicleFeedFetchedAtMs(): Long =
+        feedCache[VEHICLE_POSITIONS_URL]?.fetchedAtMs ?: 0L
+
+    /**
+     * The last vehicle feed received, if any, without fetching. A reading
+     * made for the vehicle check is recorded this way at no extra cost.
+     */
+    fun cachedVehicleSnapshot(): VehicleSnapshot? {
+        val c = feedCache[VEHICLE_POSITIONS_URL] ?: return null
+        return try {
+            VehicleSnapshot(
+                fetchedAtMs = c.fetchedAtMs,
+                serverDateMs = c.serverDateMs,
+                headerTimestamp = if (c.feed.hasHeader()) c.feed.header.timestamp else 0L,
+                vehicles = c.feed.entityList.mapNotNull { positionedVehicle(it) }
+            )
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "cachedVehicleSnapshot failed: ${e.message}")
+            null
+        }
+    }
+
+    /** A feed entity as a vehicle, or null when it carries no usable position. */
+    private fun positionedVehicle(entity: GtfsRealtime.FeedEntity): VehicleInfo? {
+        if (!entity.hasVehicle()) return null
+        val v = entity.vehicle
+        if (!v.hasPosition()) return null
+        if (v.position.latitude == 0f && v.position.longitude == 0f) return null
+        return VehicleInfo(
+            vehicleId = v.vehicle.id,
+            tripId    = v.trip.tripId,
+            routeId   = v.trip.routeId,
+            lat       = v.position.latitude.toDouble(),
+            lon       = v.position.longitude.toDouble(),
+            bearing   = if (v.position.hasBearing()) v.position.bearing else null,
+            currentStopSequence =
+                if (v.hasCurrentStopSequence()) v.currentStopSequence else null,
+            currentStopId = if (v.hasStopId()) v.stopId else null,
+            timestamp = v.timestamp
+        )
+    }
 
     suspend fun getVehiclesForRoute(routeId: String): List<VehicleInfo> =
         withContext(Dispatchers.IO) {
@@ -449,7 +508,12 @@ class RealtimeRepository @Inject constructor() {
      * pointless duplicate network calls when the user opens/closes panels
      * quickly or when location updates fire rapidly.
      */
-    private data class CachedFeed(val feed: GtfsRealtime.FeedMessage, val fetchedAtMs: Long)
+    private data class CachedFeed(
+        val feed: GtfsRealtime.FeedMessage,
+        val fetchedAtMs: Long,
+        /** Server time from the response's Date header, epoch ms; 0 if absent. */
+        val serverDateMs: Long = 0L
+    )
 
     private val feedCache = java.util.concurrent.ConcurrentHashMap<String, CachedFeed>()
 
@@ -457,7 +521,7 @@ class RealtimeRepository @Inject constructor() {
         fetchProtoCached("$BASE_URL/trip-updates")
 
     private fun fetchVehiclePositions(): GtfsRealtime.FeedMessage? =
-        fetchProtoCached("$BASE_URL/vehicle-positions")
+        fetchProtoCached(VEHICLE_POSITIONS_URL)
 
     private fun fetchProtoCached(url: String): GtfsRealtime.FeedMessage? {
         val now    = System.currentTimeMillis()
@@ -466,11 +530,14 @@ class RealtimeRepository @Inject constructor() {
             return cached.feed
         }
         val fresh = fetchProto(url) ?: return cached?.feed   // serve stale on error
-        feedCache[url] = CachedFeed(fresh, now)
-        return fresh
+        // Timed when the response arrived, not when it was asked for: the
+        // journey trace compares this moment with the server's clock.
+        feedCache[url] = CachedFeed(fresh.first, System.currentTimeMillis(), fresh.second)
+        return fresh.first
     }
 
-    private fun fetchProto(url: String): GtfsRealtime.FeedMessage? {
+    /** The parsed feed and the server time from the Date header (0 if absent). */
+    private fun fetchProto(url: String): Pair<GtfsRealtime.FeedMessage, Long>? {
         return try {
             FileLogger.i(TAG, "Fetching $url")
             val req = Request.Builder().url(url).build()
@@ -485,9 +552,12 @@ class RealtimeRepository @Inject constructor() {
                         null
                     } else {
                         FileLogger.i(TAG, "  ↳ received ${bytes.size} bytes")
+                        val serverDateMs = try {
+                            resp.headers.getDate("Date")?.time ?: 0L
+                        } catch (_: Exception) { 0L }
                         GtfsRealtime.FeedMessage.parseFrom(bytes).also {
                             FileLogger.i(TAG, "  ↳ parsed feed: ${it.entityCount} entities")
-                        }
+                        } to serverDateMs
                     }
                 }
             }

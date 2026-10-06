@@ -19,6 +19,7 @@ import bg.sofia.transit.R
 import bg.sofia.transit.data.db.dao.StopWithSequence
 import bg.sofia.transit.util.AppSettings
 import bg.sofia.transit.util.FileLogger
+import bg.sofia.transit.util.JourneyTrace
 import bg.sofia.transit.util.LocationHelper
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -238,8 +239,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          */
         private const val WAITING_TIMEOUT_MS = 15 * 60 * 1000L
 
-        /** How often we confirm which vehicle we are in. */
-        private const val VEHICLE_CHECK_INTERVAL_MS = 60_000L
+        /**
+         * How often we confirm which vehicle we are in — throughout the
+         * journey. It used to slow to a minute after the first four minutes,
+         * and a reading a minute apart missed the moments that decide: on
+         * 6 Oct 2026 the last one with the vehicle beside us came while still
+         * riding towards the stop. Also the pace of the journey trace.
+         */
+        private const val VEHICLE_CHECK_INTERVAL_MS = 30_000L
 
         /**
          * How often the arrival prediction at the alighting stop is refreshed.
@@ -295,6 +302,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         /** A parting reading counts only from a report at most this old. */
         private const val PARTING_MAX_REPORT_AGE_SEC = 30L
+
+        /**
+         * Vehicle speed this shortly before a parting's first reading still
+         * counts as moving while it was confirmed (see movedSince): the speed
+         * at that reading was a short average of about this span.
+         */
+        private const val PARTING_SPEED_LEAD_MS = 5_000L
 
         /**
          * Memory of the vehicles seen at the previous reading. Older than
@@ -404,11 +418,21 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * Getting off — the one rule for it, in checkJourneyTimers: the
          * vehicle we follow is beyond PARTED_RADIUS on its latest fresh
          * report, it was last within riding range at least this long ago, and
-         * we have not moved at vehicle speed since then.
+         * we have not moved at vehicle speed for at least this long either.
          *
          * A passenger aboard moves with the vehicle: while it is beside them
          * the clock starts again, and once it pulls away they are carried off
          * at vehicle speed. One who got off stands or walks while it leaves.
+         *
+         * The two clocks run separately. Our speed used to be counted from
+         * the last reading with the vehicle beside us — and that reading,
+         * taken every half minute or minute, was often made while we were
+         * still riding towards the stop. That speed then stood in the way
+         * for good: on 6 Oct 2026 the vehicle was last beside us at 08:56:51,
+         * we rode on at 30-38 km/h to ПЛ. ОРЛОВ МОСТ, and getting off was
+         * never concluded although the passenger stood at the stop for
+         * minutes and the vehicle was 400-900 m away.
+         *
          * The wait is long enough for a passenger held up in another vehicle
          * — one wrongly taken for theirs left them at a red light, or in a
          * jam — to show it by moving off: ending late costs a little battery,
@@ -423,12 +447,25 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          */
         private const val ALIGHT_WAIT_MS = 120_000L
 
-        /** The getting-off rule (see ALIGHT_WAIT_MS) on its own, for testing. */
+        /**
+         * The getting-off rule (see ALIGHT_WAIT_MS) on its own, for testing.
+         * [vehicleSpeedAtMs] is the last moment at vehicle speed, 0 if none.
+         */
         internal fun gotOff(
             nowMs: Long, withUsAtMs: Long, farNow: Boolean,
-            peakSinceWithUsKmh: Double, waitMs: Long, vehicleKmh: Double
+            vehicleSpeedAtMs: Long, waitMs: Long
         ): Boolean = withUsAtMs != 0L && farNow && nowMs - withUsAtMs >= waitMs &&
-            peakSinceWithUsKmh < vehicleKmh
+            nowMs - vehicleSpeedAtMs >= waitMs
+
+        /**
+         * Whether we moved at vehicle speed while a parting was being
+         * confirmed: since its first reading at [firstAtMs], or within
+         * [leadMs] before it — the speed we had at that reading counts, as it
+         * always has. [vehicleSpeedAtMs] is the last moment at vehicle
+         * speed, 0 if none.
+         */
+        internal fun movedSince(vehicleSpeedAtMs: Long, firstAtMs: Long, leadMs: Long): Boolean =
+            vehicleSpeedAtMs != 0L && vehicleSpeedAtMs >= firstAtMs - leadMs
 
         /**
          * Off its route, how long the identified vehicle may go unseen beside
@@ -526,10 +563,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /** Spacing of the "still off the route" diagnostic. */
         private const val OFF_ROUTE_LOG_INTERVAL_MS = 30_000L
 
-        /** How long the faster early checking lasts. */
-        private const val EARLY_PHASE_MS = 4 * 60 * 1000L
-        /** Interval during that early phase. */
-        private const val EARLY_CHECK_INTERVAL_MS = 30_000L
         /** Within this, we and the vehicle count as travelling together. */
         private const val SAME_VEHICLE_RADIUS = 150.0
 
@@ -1024,8 +1057,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     /** Report time of the first reading that put our vehicle beyond reach. */
     private var partingFirstStamp = 0L
-    /** Highest short-average speed since that reading, km/h. */
-    private var partingPeakKmh = 0.0
+    /** When that reading was taken, by our clock. */
+    private var partingFirstAtMs = 0L
 
     /**
      * The line as the passenger chose it, kept so that tracking can return
@@ -1079,13 +1112,38 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     /** Last time the vehicle being followed was seen within riding range. */
     private var trackedWithUsMs = 0L
     /**
-     * For the getting-off rule (ALIGHT_WAIT_MS): our highest speed since
-     * then (short average, accurate fixes), and whether the vehicle's latest
+     * For the getting-off rule (ALIGHT_WAIT_MS): whether the vehicle's latest
      * fresh report put it beyond PARTED_RADIUS — and how far.
      */
-    private var peakSinceWithUsKmh = 0.0
     private var vehicleFarNow = false
     private var vehicleFarDistance = 0.0
+    /**
+     * The last moment we travelled at vehicle speed (see atVehicleSpeed);
+     * 0 when not yet. The one measure of "we are riding" for getting off and
+     * for a parting: both ask whether we have moved at vehicle speed since a
+     * given moment, and get the same answer. Written on the main thread,
+     * read by the vehicle check.
+     */
+    @Volatile private var lastVehicleSpeedMs = 0L
+
+    /**
+     * Between a journey's start and its end. Nothing may report the journey
+     * as running outside it: when tracking ended for want of an accurate fix
+     * the screen was at once told "tracking" again, the service then took
+     * that for a new journey and stayed, with no GPS and no timers left to
+     * end it (6 Oct 2026). See publish.
+     */
+    @Volatile private var journeyActive = false
+    /**
+     * Guards journeyActive against publish: the vehicle check publishes from
+     * its own thread, and a check of the flag followed by a write of the
+     * state must not straddle the journey's end.
+     */
+    private val journeyLock = Any()
+
+    /** The journey trace (see recordVehicleTrace): last attempt, last feed recorded. */
+    @Volatile private var lastTraceAttemptMs = 0L
+    @Volatile private var lastTraceFeedMs = 0L
 
     /**
      * The last stop announcement made — its kind and stop — and whether the
@@ -1211,7 +1269,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         snapWaitStartedMs = 0L
         lastWeakSignalNoticeMs = 0L
         lastAccuracy = null
+        lastVehicleSpeedMs = 0L
+        lastTraceAttemptMs = 0L
+        lastTraceFeedMs = 0L
 
+        // A journey started over one still running closes its trace first.
+        if (journeyActive) JourneyTrace.end()
+        synchronized(journeyLock) { journeyActive = true }
+        JourneyTrace.start("$label (route $routeId, trip $tripId)")
         publish(distance = null)
         acquireWakeLock()
         startLocUpdates()
@@ -1273,7 +1338,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         lastFixMs = 0L; fixCount = 0; maxGapMs = 0L; lastCadenceLogMs = 0L
         speedSamples.clear()
+        lastVehicleSpeedMs = 0L
+        lastTraceAttemptMs = 0L
+        lastTraceFeedMs = 0L
 
+        // A journey started over one still running closes its trace first.
+        if (journeyActive) JourneyTrace.end()
+        synchronized(journeyLock) { journeyActive = true }
+        JourneyTrace.start("$label (route $routeId, direction to be determined)")
         publish(distance = null)
         acquireWakeLock()
         startLocUpdates()
@@ -1630,6 +1702,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     fun endJourney() {
+        // First: from here on nothing reports the journey as running — not
+        // even the caller that ended it, which may go on to publish (see
+        // journeyActive).
+        val wasActive = synchronized(journeyLock) {
+            journeyActive.also { journeyActive = false }
+        }
+        if (wasActive) JourneyTrace.end()
         stopLocUpdates()
         releaseWakeLock()
 
@@ -1694,6 +1773,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     // ── Progress engine ───────────────────────────────────────────────────
     private fun onFix(loc: Location) {
+        // A fix delivered after the journey ended belongs to no journey.
+        if (!journeyActive) return
+        JourneyTrace.fix(loc)
         val prevLat = lastLat
         val prevLon = lastLon
         val gapMs = if (lastFixMs == 0L) 0L else System.currentTimeMillis() - lastFixMs
@@ -1702,13 +1784,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         logFixCadence()
         recordSpeed(loc, prevLat, prevLon, gapMs)
-
-        // While a parting awaits confirmation, note whether we keep moving
-        // at vehicle speed: that is what separates getting off from having
-        // followed the wrong vehicle. See checkParted.
-        if (partingFirstStamp != 0L) {
-            partingPeakKmh = maxOf(partingPeakKmh, shortSpeedKmh() ?: 0.0)
-        }
 
         // Only fixes this good count as evidence of how we are moving: a
         // phone indoors, placed by the mobile network to within a hundred
@@ -1736,15 +1811,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             boardingRefLon = loc.longitude
         }
 
-        // For the getting-off rule: how fast we have gone since the vehicle
-        // we follow was last beside us. See ALIGHT_WAIT_MS.
-        if (accurateFix && trackedWithUsMs != 0L) {
-            peakSinceWithUsKmh = maxOf(peakSinceWithUsKmh, shortSpeedKmh() ?: 0.0)
-        }
-        // Moving at vehicle speed is progress for the no-progress limit,
-        // between stops too. See INACTIVITY_TIMEOUT_MS.
-        if (movingSinceMs != 0L && atVehicleSpeed(accurateFix, shortSpeedKmh(), MIN_SPEED_FOR_IDENTIFY)) {
-            lastProgressMs = System.currentTimeMillis()
+        // The last moment at vehicle speed: whether we are riding, for getting
+        // off and for a parting (see lastVehicleSpeedMs); and progress for
+        // the no-progress limit, between stops too (see INACTIVITY_TIMEOUT_MS).
+        if (atVehicleSpeed(accurateFix, shortSpeedKmh(), MIN_SPEED_FOR_IDENTIFY)) {
+            val now = System.currentTimeMillis()
+            lastVehicleSpeedMs = now
+            if (movingSinceMs != 0L) lastProgressMs = now
         }
         if (!loc.hasAccuracy() || loc.accuracy <= SNAP_ACCURACY_LOOSE) {
             lastUsableFixMs = System.currentTimeMillis()
@@ -2341,23 +2414,39 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 } catch (e: Exception) {
                     FileLogger.w(TAG, "Vehicle check failed: ${e.message}")
                 }
-                // Faster early on. Boarding the wrong line is only worth
-                // catching while few stops have passed, so the first minutes
-                // are checked twice as often; afterwards the slower rate is
-                // enough for noticing that the rider has got off.
-                //
-                // Timed from DEPARTURE, not from the journey being started.
-                // Waiting four minutes at the stop used to consume the whole
-                // fast period before the bus had even arrived, so the checks
-                // that mattered ran at the slow rate. Departure itself must
-                // therefore be real, not GPS scatter — see recordSpeed.
-                val since = if (movingSinceMs == 0L) 0L
-                            else System.currentTimeMillis() - movingSinceMs
-                val early = movingSinceMs == 0L || since < EARLY_PHASE_MS
-                val regular = if (early) EARLY_CHECK_INTERVAL_MS else VEHICLE_CHECK_INTERVAL_MS
+                try {
+                    recordVehicleTrace()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) { }
+                val regular = VEHICLE_CHECK_INTERVAL_MS
                 delay(sooner?.let { minOf(it, regular) } ?: regular)
             }
         }
+    }
+
+    /**
+     * The vehicles around us, for the journey trace (see JourneyTrace): every
+     * reading of the feed after departure, and at least one every
+     * VEHICLE_CHECK_INTERVAL_MS even while standing, when the vehicle check
+     * itself makes none. Recording only: nothing is decided from it, and a
+     * failure here changes nothing.
+     */
+    private suspend fun recordVehicleTrace() {
+        if (!journeyActive || movingSinceMs == 0L) return
+        val now = System.currentTimeMillis()
+        val feedAt = realtimeRepo.vehicleFeedFetchedAtMs()
+        val snap = if (now - lastTraceAttemptMs >= VEHICLE_CHECK_INTERVAL_MS &&
+            now - feedAt >= VEHICLE_CHECK_INTERVAL_MS) {
+            lastTraceAttemptMs = now
+            realtimeRepo.getVehicleSnapshot()
+        } else if (feedAt != 0L && feedAt != lastTraceFeedMs) {
+            realtimeRepo.cachedVehicleSnapshot()
+        } else null
+        // The fetch may have outlasted the journey.
+        if (snap == null || snap.fetchedAtMs == lastTraceFeedMs || !journeyActive) return
+        lastTraceFeedMs = snap.fetchedAtMs
+        JourneyTrace.vehicles(snap, lastLat, lastLon, tripId)
     }
 
     /**
@@ -2497,9 +2586,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val previousEarlier = if (nowMs - lastReadingMs <= READING_MEMORY_MS) earlierInRange else emptySet()
         val confirmOnly = !identified && !underWay
         if (confirmOnly) {
-            val regular = if (movingSinceMs == 0L || nowMs - movingSinceMs < EARLY_PHASE_MS)
-                EARLY_CHECK_INTERVAL_MS else VEHICLE_CHECK_INTERVAL_MS
-            val spaced = nowMs - maxOf(lastReadingMs, lastStandingReadingMs) >= regular
+            val spaced = nowMs - maxOf(lastReadingMs, lastStandingReadingMs) >=
+                VEHICLE_CHECK_INTERVAL_MS
             if (previous.isEmpty() || !spaced) {
                 if (!deferLogged) {
                     deferLogged = true
@@ -2836,6 +2924,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         adoptVehicle(candidate)
 
         partingFirstStamp = 0L
+        partingFirstAtMs = 0L
         return null
     }
 
@@ -2970,9 +3059,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         leavingPeakKmh    = 0.0
         wrongLineNoticeGiven = false
         partingFirstStamp = 0L
-        partingPeakKmh    = 0.0
+        partingFirstAtMs  = 0L
         trackedWithUsMs   = 0L
-        peakSinceWithUsKmh = 0.0
         vehicleFarNow     = false
         remapDestination(destinationStopId,
             clear = !followedLineChanges && differentDirection)
@@ -3091,6 +3179,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private suspend fun checkParted(mps: Double): PartingOutcome {
         if (!identified || tripId.isBlank()) {
             partingFirstStamp = 0L
+            partingFirstAtMs = 0L
             return PartingOutcome.NONE
         }
         val pending = if (partingFirstStamp != 0L) PartingOutcome.PENDING else PartingOutcome.NONE
@@ -3103,7 +3192,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // by changes neither.
         if (s.distanceMetres <= VehicleMatcher.RIDING_WITH_RADIUS) {
             trackedWithUsMs = System.currentTimeMillis()
-            peakSinceWithUsKmh = 0.0
         }
         if (s.distanceMetres <= PARTED_RADIUS) {
             vehicleFarNow = false
@@ -3118,7 +3206,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     "parting cancelled")
             }
             partingFirstStamp = 0L
-            partingPeakKmh = 0.0
+            partingFirstAtMs = 0L
             return PartingOutcome.NONE
         }
 
@@ -3130,33 +3218,38 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         if (partingFirstStamp == 0L) {
             partingFirstStamp = s.timestamp
-            partingPeakKmh = shortSpeedKmh() ?: 0.0
+            partingFirstAtMs = System.currentTimeMillis()
             FileLogger.i(TAG, "Tracked vehicle ${s.distanceMetres.toInt()} m away — " +
                 "awaiting a fresh report to confirm")
             return PartingOutcome.PENDING
         }
         if (s.timestamp == partingFirstStamp) return PartingOutcome.PENDING
 
-        // Confirmed on a second, newer report.
+        // Confirmed on a second, newer report. Whether we kept moving is
+        // judged by accurate fixes only (atVehicleSpeed), as everywhere else:
+        // walking through underpasses, fixes 56-300 m out read as 14 km/h
+        // and withdrew the vehicle from a passenger who had got off (6 Oct
+        // 2026).
+        val moved = movedSince(lastVehicleSpeedMs, partingFirstAtMs, PARTING_SPEED_LEAD_MS)
         partingFirstStamp = 0L
-        val peak = maxOf(partingPeakKmh, shortSpeedKmh() ?: 0.0)
-        partingPeakKmh = 0.0
+        partingFirstAtMs = 0L
+        val speedNote = if (lastVehicleSpeedMs == 0L) "no vehicle speed yet"
+            else "vehicle speed ${(System.currentTimeMillis() - lastVehicleSpeedMs) / 1000} s ago"
 
         if (swapToSibling("Tracked vehicle ${s.distanceMetres.toInt()} m away")) {
             return PartingOutcome.NONE
         }
-        if (peak >= MIN_SPEED_FOR_IDENTIFY) {
+        if (moved) {
             revokeIdentification("Tracked vehicle left while we kept moving " +
-                "(${s.distanceMetres.toInt()} m, our peak ${peak.toInt()} km/h)")
+                "(${s.distanceMetres.toInt()} m, $speedNote)")
             return PartingOutcome.REVOKED
         }
 
         // Standing or walking while it left: probably got off. Nothing is
         // decided here — the getting-off rule in checkJourneyTimers does.
         FileLogger.i(TAG, "Vehicle left without us (${s.distanceMetres.toInt()} m, " +
-            "our peak ${peak.toInt()} km/h) — getting off once " +
-            "${ALIGHT_WAIT_MS / 1000} s have passed since it was with us, " +
-            "unless we move at vehicle speed")
+            "$speedNote) — getting off once ${ALIGHT_WAIT_MS / 1000} s have passed " +
+            "since it was with us and since we last moved at vehicle speed")
         return PartingOutcome.NONE
     }
 
@@ -3187,7 +3280,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         identified = false
         candidateVote = null
         trackedWithUsMs = 0L
-        peakSinceWithUsKmh = 0.0
         vehicleFarNow = false
         detourSinceMs = 0L
         lastInRange = emptyMap()
@@ -3605,13 +3697,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
 
         // Getting off: the vehicle is far, it was last with us ALIGHT_WAIT_MS
-        // ago or more, and we have not moved at vehicle speed since.
-        if (identified && gotOff(now, trackedWithUsMs, vehicleFarNow, peakSinceWithUsKmh,
-                ALIGHT_WAIT_MS, MIN_SPEED_FOR_IDENTIFY)) {
+        // ago or more, and we have not moved at vehicle speed for as long.
+        if (identified && gotOff(now, trackedWithUsMs, vehicleFarNow, lastVehicleSpeedMs,
+                ALIGHT_WAIT_MS)) {
             val atChosen = destinationIdx != null && destinationArrivedMs != 0L
             FileLogger.i(TAG, "Vehicle ${vehicleFarDistance.toInt()} m away, last with us " +
-                "${(now - trackedWithUsMs) / 1000} s ago, no vehicle speed since " +
-                "(peak ${peakSinceWithUsKmh.toInt()} km/h) — got off")
+                "${(now - trackedWithUsMs) / 1000} s ago, " +
+                (if (lastVehicleSpeedMs == 0L) "no vehicle speed at all"
+                 else "no vehicle speed for ${(now - lastVehicleSpeedMs) / 1000} s") +
+                " — got off")
             if (atChosen) {
                 // "Слизате тук" has been said; only the end itself is told,
                 // briefly — tracking must never stop unnoticed, least of all
@@ -3968,7 +4062,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         tripId = sibling.tripId
         lastAnnouncedTripId = sibling.tripId
         partingFirstStamp = 0L
-        partingPeakKmh = 0.0
+        partingFirstAtMs = 0L
         // With us as of that reading — not claimed for now.
         trackedWithUsMs = lastReadingMs
         vehicleFarNow = false
@@ -3987,7 +4081,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastReadingMs = 0L
         deferLogged = false
         partingFirstStamp = 0L
-        partingPeakKmh = 0.0
+        partingFirstAtMs = 0L
         wrongLineNoticeGiven = false
         offRoute = false
         lostSinceMs = 0L
@@ -4000,7 +4094,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         leftOnFoot = false
         footStopIdx = 0
         trackedWithUsMs = 0L
-        peakSinceWithUsKmh = 0.0
         vehicleFarNow = false
         lastDwellHoldLogMs = 0L
         lastStopAnnouncement = null
@@ -4695,20 +4788,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun publish(distance: Int?) {
-        _trackingState.value = TrackingState.Tracking(
-            determiningDirection  = candidates.isNotEmpty(),
-            routeLabel            = routeLabel,
-            stops                 = orderedStops,
-            currentIdx            = currentIdx,
-            atStop                = atStop,
-            distanceToNextMetres  = distance,
-            fixAccuracyMetres     = lastAccuracy?.toInt(),
-            speedKmh              = recentSpeedKmh()?.toInt(),
-            awaitingAccurateFix   = awaitingFirstFix && orderedStops.isNotEmpty(),
-            destinationIdx        = destinationIdx,
-            destinationEtaEpoch   = destinationEtaEpoch,
-            etaSource             = etaSource
-        )
+        // Never after the journey has ended. See journeyActive.
+        synchronized(journeyLock) {
+            if (!journeyActive) return
+            _trackingState.value = TrackingState.Tracking(
+                determiningDirection  = candidates.isNotEmpty(),
+                routeLabel            = routeLabel,
+                stops                 = orderedStops,
+                currentIdx            = currentIdx,
+                atStop                = atStop,
+                distanceToNextMetres  = distance,
+                fixAccuracyMetres     = lastAccuracy?.toInt(),
+                speedKmh              = recentSpeedKmh()?.toInt(),
+                awaitingAccurateFix   = awaitingFirstFix && orderedStops.isNotEmpty(),
+                destinationIdx        = destinationIdx,
+                destinationEtaEpoch   = destinationEtaEpoch,
+                etaSource             = etaSource
+            )
+        }
     }
 
     // ── Location plumbing ─────────────────────────────────────────────────
@@ -4792,6 +4889,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
+        val wasActive = synchronized(journeyLock) {
+            journeyActive.also { journeyActive = false }
+        }
+        if (wasActive) JourneyTrace.end()
         stopLocUpdates()
         releaseWakeLock()
         etaJob?.cancel()

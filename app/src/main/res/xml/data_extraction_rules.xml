@@ -2,5 +2,7 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="database" path="sofia_transit.db"/>
+        <!-- Positions of every journey (JourneyTrace): stays on the phone. -->
+        <exclude domain="file" path="journey_trace.txt"/>
     </cloud-backup>
 </data-extraction-rules>
