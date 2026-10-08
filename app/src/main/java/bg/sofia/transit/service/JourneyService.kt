@@ -2234,15 +2234,40 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     "(peak ${leavingPeakKmh.toInt()} km/h) — taken as alighted; announcements paused")
             }
 
+            // Left the stop — the way the line goes, by its road. A vehicle
+            // leaves ahead; 90 m back along the road is someone on foot, and
+            // was announced as a departure: "Следваща спирка, Младежки
+            // театър" to a passenger walking back from ЦЕНТРАЛНИ ХАЛИ (7 Oct
+            // 2026). That is taken as at the chosen stop above — the stops
+            // fall silent unless vehicle speed follows. Off the road it
+            // cannot be told, and the stop is kept until a fix on it says;
+            // so too behind it on an inaccurate fix, which must not silence
+            // the stops of a vehicle crawling on in a jam.
+            // Without a road shape, as before: any way out of the radius.
             atStop && distTo(loc, currentIdx) > DEPART_RADIUS -> {
-                atStop = false
-                approachAnnounced = false
-                if (currentIdx < orderedStops.lastIndex) {
-                    currentIdx += 1
-                    announceNextStop(currentIdx, loc)
+                val g = geometry
+                val past = if (g == null) true else g.pastStop(fixRoadPos, currentIdx)
+                when (if (past == false && !accurateFix) null else past) {
+                    true -> {
+                        atStop = false
+                        approachAnnounced = false
+                        if (currentIdx < orderedStops.lastIndex) {
+                            currentIdx += 1
+                            announceNextStop(currentIdx, loc)
+                        }
+                        // No terminus case here any more — arriving at the final
+                        // stop already ended the journey above.
+                    }
+                    false -> {
+                        atStop = false
+                        approachAnnounced = false
+                        leftOnFoot = true
+                        footStopIdx = currentIdx
+                        FileLogger.i(TAG, "Left ${orderedStops[currentIdx].stopName} back " +
+                            "along the road — on foot; announcements paused")
+                    }
+                    null -> {}
                 }
-                // No terminus case here any more — arriving at the final stop
-                // already ended the journey above.
             }
 
             // ── Moving; did we silently pass the current stop? ────────────
