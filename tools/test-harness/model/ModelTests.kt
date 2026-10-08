@@ -642,7 +642,7 @@ fun main(args: Array<String>) {
     // 35 s, of reports 2 s old. The early rule by the boarding stop is judged
     // after the first reading, as the app does once the stop is known.
     fun shadowRide(others: List<SimVehicle>, due: Set<String>, readings: Int = 1,
-                   until: Double = 40.0): Pair<RideShadow, List<String>> {
+                   until: Double = 40.0, judge: Boolean = true): Pair<RideShadow, List<String>> {
         val lines = ArrayList<String>()
         val shadow = RideShadow("A85", { lines += it }, { lines += "D $it" })
         val p = Feed.path("A4508")
@@ -660,13 +660,14 @@ fun main(args: Array<String>) {
                 shadow.onReading(ms + 300, ms, all.mapNotNull { v ->
                     v.pos(t - 2)?.let { RideShadow.Seen(v.key, v.tripId, v.routeId, (T0 / 1000) + (t - 2).toLong(), it.lat, it.lon) }
                 })
-                if (read == 1) shadow.judgeBoarding("БУЛ. ЦАРИГРАДСКО ШОСЕ") { trip -> if (trip in due) T0 / 1000 else null }
+                if (read == 1 && judge) shadow.judgeBoarding("БУЛ. ЦАРИГРАДСКО ШОСЕ") { trip -> if (trip in due) T0 / 1000 else null }
             }
             t += 1.0
         }
         return shadow to lines
     }
-    // Beside us 12 m to one side, as the tram 18 on 7 Oct (it went the other way).
+    // Beside us 12 m to one side at the reading, as the tram 18 was on 7 Oct;
+    // that one went the other way, which a single reading does not see.
     val opposite = SimVehicle("VOPP", "TOPP", "A99", { t -> Feed.path("A4508").let { p ->
         p.at(p.along(Feed.stop("A1196")) + 10.0 * maxOf(0.0, t - 10)).shift(0.0, 12.0) } })
     run {
@@ -709,7 +710,10 @@ fun main(args: Array<String>) {
             id != null && Regex("""^Model @\d\d:\d\d:\d\d: identified A85 T213 \(\d+ m together\)$""").matches(id)) {
             lines.joinToString(" | ") }
         check("stage 2: once the model has taken a vehicle the early rule is no longer judged",
-            !shadow.wantsBoarding()) { "" }
+            !shadow.wantsBoarding() && shadowRide(emptyList(), due = emptySet(), readings = 3, until = 100.0,
+                judge = false).first.wantsBoarding().not() &&
+                shadowRide(emptyList(), due = emptySet(), readings = 1, judge = false).first.wantsBoarding()) {
+            "still open before the model takes a vehicle, closed after" }
         check("stage 2: the summary names ours", shadow.summary().startsWith("Model at the end: ours A85/V213 T213")) {
             shadow.summary() }
         check("stage 2: metres together logged as detail", lines.any { it.startsWith("D Model @") && "A85/V213" in it }) {

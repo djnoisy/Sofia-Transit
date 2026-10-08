@@ -1087,6 +1087,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * journeys. Nothing in the app reads what it concludes.
      */
     @Volatile private var rideShadow: RideShadow? = null
+    /**
+     * Held while a fix or a reading is written to the trace and given to the
+     * model, so that both see them in the same order: fixes come on the main
+     * thread and readings on a background one. Each hold is a moment's work —
+     * a line queued, the model's arithmetic for one reading.
+     */
+    private val traceFeedLock = Any()
 
     /** True once "Изглежда не пътувате с линия X" has been said. */
     private var wrongLineNoticeGiven = false
@@ -1787,8 +1794,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // A fix delivered after the journey ended belongs to no journey.
         if (!journeyActive) return
         val receivedMs = System.currentTimeMillis()
-        JourneyTrace.fix(loc, receivedMs)
-        shadowFix(loc, receivedMs)
+        synchronized(traceFeedLock) {
+            JourneyTrace.fix(loc, receivedMs)
+            shadowFix(loc, receivedMs)
+        }
         val prevLat = lastLat
         val prevLon = lastLon
         val gapMs = if (lastFixMs == 0L) 0L else System.currentTimeMillis() - lastFixMs
@@ -2478,9 +2487,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastTraceFeedMs = snap.fetchedAtMs
         val lat = lastLat
         val lon = lastLon
-        val listed = JourneyTrace.listed(snap, lat, lon, tripId)
-        JourneyTrace.vehicles(snap, lat, lon, listed)
-        shadowReading(snap, listed)
+        val listed = try {
+            JourneyTrace.listed(snap, lat, lon, tripId)
+        } catch (_: Throwable) { return }
+        synchronized(traceFeedLock) {
+            JourneyTrace.vehicles(snap, lat, lon, listed)
+            shadowReading(snap, listed)
+        }
+        shadowBoarding()
     }
 
     // ── Stage 2: the new model beside the rules, logging only ─────────────
@@ -2509,7 +2523,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         } catch (_: Throwable) { }
     }
 
-    private suspend fun shadowReading(
+    private fun shadowReading(
         snap: bg.sofia.transit.data.repository.VehicleSnapshot,
         listed: List<bg.sofia.transit.data.repository.VehicleInfo>
     ) {
@@ -2518,9 +2532,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             shadow.onReading(snap.fetchedAtMs, snap.serverDateMs, listed.map { v ->
                 RideShadow.Seen(v.vehicleId, v.tripId, v.routeId, v.timestamp, v.lat, v.lon)
             })
-            // The proposed early rule, judged once the boarding stop is
-            // known. Looked up without being remembered: the rules here
-            // work it out at moments of their own (boardingStops).
+        } catch (_: Throwable) { }
+    }
+
+    /**
+     * The proposed early rule by the boarding stop, after a reading, judged
+     * once the boarding stop is known. Looked up without being remembered:
+     * the rules here work it out at moments of their own (boardingStops).
+     */
+    private suspend fun shadowBoarding() {
+        val shadow = rideShadow ?: return
+        try {
             if (shadow.wantsBoarding()) {
                 val stop = findBoardingStop()
                 when {
