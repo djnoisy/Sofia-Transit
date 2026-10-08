@@ -20,6 +20,7 @@ fun near(w: String, expected: Double, actual: Double?, tol: Double) {
 const val ARRIVAL_RADIUS = 45.0          // JourneyService.ARRIVAL_RADIUS
 const val PASSED_STOP_MARGIN = 30.0      // JourneyService.PASSED_STOP_MARGIN
 const val DEPART_RADIUS = 90.0           // JourneyService.DEPART_RADIUS
+const val MIN_SPEED_FOR_IDENTIFY = 10.0  // JourneyService.MIN_SPEED_FOR_IDENTIFY
 
 fun straight(aLat: Double, aLon: Double, bLat: Double, bLon: Double): Double {
     val r = 6_371_000.0
@@ -212,47 +213,50 @@ fun main() {
             yes("a stop between $midOff m off: refused", RouteGeometry.fit(Data213.shape, mid) == null)
     }
 
-    // Leaving a stop (JourneyService, "Left the stop"): over DEPART_RADIUS
-    // from it in a straight line, the fix placed as there — near the last
-    // place on the road — and pastStop says which way; behind it on an
-    // inaccurate fix counts as not told. true: departed, the next stop is
-    // announced; false: on foot, the stops fall silent; null: not told yet.
-    // Walking 90 m back along the road from ЦЕНТРАЛНИ ХАЛИ was announced as
-    // a departure (7 Oct 2026); here at ХЕРМЕС ПАРК on 213's road.
+    // Leaving a stop (JourneyService, "Left the stop"): at the first fix
+    // over DEPART_RADIUS from it in a straight line, placed as there — near
+    // the last place on the road, or, with that lost, from the stop before
+    // on — it is on foot when placed behind the stop (pastStop false), on an
+    // accurate fix, without vehicle speed since leaving; anything else is a
+    // departure. Walking 90 m back along the road from ЦЕНТРАЛНИ ХАЛИ was
+    // announced as a departure (7 Oct 2026); here at ХЕРМЕС ПАРК on 213's road.
     val hp = dp + 1
-    fun leave(fixes: List<Pair<Double, Double>>, accurate: Boolean = true): Boolean? {
-        var last: Double? = g.stopAlong[hp]
+    /** True: departed, the next stop is said; false: on foot, the stops fall silent. */
+    fun departs(fixes: List<Pair<Double, Double>>, accurate: Boolean = true,
+                peakKmh: Double = 4.0, tracked: Boolean = true): Boolean {
+        var last: Double? = if (tracked) g.stopAlong[hp] else null
         for ((lat, lon) in fixes) {
-            val pos = g.place(lat, lon, last, 1.0, 0.0, g.length)
-            if (pos != null) last = pos
+            val pos = g.place(lat, lon, last, 1.0, g.stopAlong[hp - 1] - RouteGeometry.BACK_MARGIN, g.length)
+            last = if (tracked) pos ?: last else null
             if (straight(lat, lon, stops[hp].first, stops[hp].second) <= DEPART_RADIUS) continue
-            val past = g.pastStop(pos, hp)
-            val told = if (past == false && !accurate) null else past
-            if (told != null) return told
+            val backOnFoot = g.pastStop(pos, hp) == false && accurate && peakKmh < MIN_SPEED_FOR_IDENTIFY
+            return !backOnFoot
         }
-        return null
+        throw AssertionError("never left the stop")
     }
     val road = walk(Data213.shape, 1.0)
+    val sc = Scatter(7)
+    val back = road.filter { it.first in (g.stopAlong[hp] - 150)..g.stopAlong[hp] }.reversed()
+        .map { sc.around(it.second, it.third, 5.0) }
+    val ahead = road.filter { it.first in g.stopAlong[hp]..(g.stopAlong[hp] + 150) }
+        .map { sc.around(it.second, it.third, 8.0) }
 
     t("G13 walking 150 m back along the road from a stop, 5 m GPS scatter: on foot, no departure") {
-        val sc = Scatter(7)
-        val back = road.filter { it.first in (g.stopAlong[hp] - 150)..g.stopAlong[hp] }.reversed()
-            .map { sc.around(it.second, it.third, 5.0) }
-        yes("on foot", leave(back) == false)
+        yes("on foot", !departs(back))
+        yes("on foot, road tracking lost", !departs(back, tracked = false))
     }
 
-    t("G14 a vehicle crawling out of a stop at 2 m/s, 8 m GPS scatter: a departure") {
-        val sc = Scatter(11)
-        val ahead = road.filter { it.first in g.stopAlong[hp]..(g.stopAlong[hp] + 150) }
-            .filterIndexed { i, _ -> i % 2 == 0 }
-            .map { sc.around(it.second, it.third, 8.0) }
-        yes("departed", leave(ahead) == true)
+    t("G14 leaving ahead along the road, 8 m GPS scatter: a departure, at walking pace too") {
+        yes("departed", departs(ahead))
+        yes("departed, road tracking lost", departs(ahead, tracked = false))
     }
 
-    t("G15 behind the stop on inaccurate fixes, or off the road: not told") {
-        val back = road.filter { it.first in (g.stopAlong[hp] - 150)..g.stopAlong[hp] }.reversed()
-            .map { it.second to it.third }
-        yes("inaccurate behind → not told", leave(back, accurate = false) == null)
+    t("G15 behind the stop but an inaccurate fix, or vehicle speed since leaving: a departure, as before") {
+        yes("inaccurate", departs(back, accurate = false))
+        yes("vehicle speed seen", departs(back, peakKmh = 15.0))
+    }
+
+    t("G16 off the road, or unknown: a departure, as before; pastStop has no answer there") {
         // Straight off the road, across it, from the stop.
         val a = road.first { it.first >= g.stopAlong[hp] - 10 }
         val b = road.first { it.first >= g.stopAlong[hp] + 10 }
@@ -260,9 +264,9 @@ fun main() {
         val n = (b.second - a.second) * 110_540.0
         val len = hypot(e, n)
         val aside = (1..150).map { m -> shift(stops[hp].first, stops[hp].second, -n / len * m, e / len * m) }
-        val far = aside.last()
-        yes("150 m aside is off the road", g.locate(far.first, far.second, 0.0, g.length)!!.offset > RouteGeometry.MAX_OFFSET)
-        yes("off the road → not told", leave(aside) == null)
+        val at91 = aside[90]
+        yes("91 m aside is off the road", g.locate(at91.first, at91.second, 0.0, g.length)!!.offset > RouteGeometry.MAX_OFFSET)
+        yes("departed", departs(aside))
         yes("unplaced → null", g.pastStop(null, hp) == null)
         yes("unknown stop → null", g.pastStop(g.stopAlong[hp] + 100, 999) == null)
     }

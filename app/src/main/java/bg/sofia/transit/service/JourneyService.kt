@@ -2234,40 +2234,32 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     "(peak ${leavingPeakKmh.toInt()} km/h) — taken as alighted; announcements paused")
             }
 
-            // Left the stop — the way the line goes, by its road. A vehicle
-            // leaves ahead; 90 m back along the road is someone on foot, and
-            // was announced as a departure: "Следваща спирка, Младежки
-            // театър" to a passenger walking back from ЦЕНТРАЛНИ ХАЛИ (7 Oct
-            // 2026). That is taken as at the chosen stop above — the stops
-            // fall silent unless vehicle speed follows. Off the road it
-            // cannot be told, and the stop is kept until a fix on it says;
-            // so too behind it on an inaccurate fix, which must not silence
-            // the stops of a vehicle crawling on in a jam.
-            // Without a road shape, as before: any way out of the radius.
+            // Left the stop. Back along the line's road, on an accurate fix
+            // and without vehicle speed since leaving it, that is someone on
+            // foot: a vehicle leaves ahead. Walking 90 m back from ЦЕНТРАЛНИ
+            // ХАЛИ was announced as the tram departing — "Следваща спирка,
+            // Младежки театър" (7 Oct 2026). It is taken as at the chosen
+            // stop above: the stops fall silent unless vehicle speed follows.
+            // Anything else — ahead, off the road, an inaccurate fix, no road
+            // shape — is a departure, as before: holding the stop until a fix
+            // on the road said which way stopped the catch-up and the approach
+            // warning while the fixes stayed off the road.
             atStop && distTo(loc, currentIdx) > DEPART_RADIUS -> {
-                val g = geometry
-                val past = if (g == null) true else g.pastStop(fixRoadPos, currentIdx)
-                when (if (past == false && !accurateFix) null else past) {
-                    true -> {
-                        atStop = false
-                        approachAnnounced = false
-                        if (currentIdx < orderedStops.lastIndex) {
-                            currentIdx += 1
-                            announceNextStop(currentIdx, loc)
-                        }
-                        // No terminus case here any more — arriving at the final
-                        // stop already ended the journey above.
-                    }
-                    false -> {
-                        atStop = false
-                        approachAnnounced = false
-                        leftOnFoot = true
-                        footStopIdx = currentIdx
-                        FileLogger.i(TAG, "Left ${orderedStops[currentIdx].stopName} back " +
-                            "along the road — on foot; announcements paused")
-                    }
-                    null -> {}
+                atStop = false
+                approachAnnounced = false
+                val backOnFoot = geometry?.pastStop(fixRoadPos, currentIdx) == false &&
+                    accurateFix && leavingPeakKmh < MIN_SPEED_FOR_IDENTIFY
+                if (backOnFoot) {
+                    leftOnFoot = true
+                    footStopIdx = currentIdx
+                    FileLogger.i(TAG, "Left ${orderedStops[currentIdx].stopName} back " +
+                        "along the road at walking pace — on foot; announcements paused")
+                } else if (currentIdx < orderedStops.lastIndex) {
+                    currentIdx += 1
+                    announceNextStop(currentIdx, loc)
                 }
+                // No terminus case here any more — arriving at the final stop
+                // already ended the journey above.
             }
 
             // ── Moving; did we silently pass the current stop? ────────────
