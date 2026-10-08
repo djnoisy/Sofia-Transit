@@ -686,5 +686,21 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] != "TM22" }
         check("7.10 tram 22: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // 7 Oct 2026, evening: tram 12 (27 chosen, tracking started while waiting)
+    // from ЦЕНТРАЛНИ ХАЛИ to УАСГ, aboard at the back of a long tram: its
+    // reports were 13-30 m from us at the same moment throughout, at the
+    // edge of BESIDE_M. Off at УАСГ about 18:37; the tram was over 100 m away
+    // from 18:37:36. The trace ends at 18:38:47, when the app ended at the
+    // chosen stop, a reading before the model's 2 min without vehicle speed
+    // would be up — so no getting off here.
+    "2026-10-07_12.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("7.10 tram 12: 12 identified by 18:25:35", (id?.event as? Event.Identified)?.routeId == "TM33" &&
+            clock(id.atMs) <= "18:25:35") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        check("7.10 tram 12: nothing else", rp.events.size == 1) { rp.events.joinToString { describe(it.event) } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] != "TM33" }
+        check("7.10 tram 12: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     }
 )
