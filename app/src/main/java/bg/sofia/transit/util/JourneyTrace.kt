@@ -3,6 +3,7 @@ package bg.sofia.transit.util
 import android.content.Context
 import android.location.Location
 import android.util.Log
+import bg.sofia.transit.data.repository.VehicleInfo
 import bg.sofia.transit.data.repository.VehicleSnapshot
 import java.io.File
 import java.io.FileWriter
@@ -95,9 +96,10 @@ object JourneyTrace {
 
     fun end() = enqueueAll(listOf("# end ${System.currentTimeMillis()}"), now = true)
 
-    fun fix(loc: Location) {
+    /** One fix of ours, which arrived at [receivedMs] by the phone's clock. */
+    fun fix(loc: Location, receivedMs: Long = System.currentTimeMillis()) {
         try {
-            enqueue("F,${System.currentTimeMillis()},${loc.time}," +
+            enqueue("F,$receivedMs,${loc.time}," +
                 "${fmt6(loc.latitude)},${fmt6(loc.longitude)}," +
                 (if (loc.hasAccuracy()) fmt1(loc.accuracy.toDouble()) else "") + "," +
                 (if (loc.hasSpeed()) fmt1(loc.speed.toDouble()) else "") + "," +
@@ -106,15 +108,19 @@ object JourneyTrace {
     }
 
     /**
-     * One reading of the feed: the vehicles within [VEHICLE_RADIUS_M] of us
-     * ([lat], [lon]), and the one followed ([trackedTripId]) wherever it is.
+     * The vehicles of a reading that the trace lists: those within
+     * [VEHICLE_RADIUS_M] of us ([lat], [lon]), and the one followed
+     * ([trackedTripId]) wherever it is. The model in stage 2 is given the same.
      */
-    fun vehicles(s: VehicleSnapshot, lat: Double, lon: Double, trackedTripId: String) {
+    fun listed(s: VehicleSnapshot, lat: Double, lon: Double, trackedTripId: String): List<VehicleInfo> =
+        s.vehicles.filter { v ->
+            (trackedTripId.isNotBlank() && v.tripId == trackedTripId) ||
+                LocationHelper.distanceMetres(lat, lon, v.lat, v.lon) <= VEHICLE_RADIUS_M
+        }
+
+    /** One reading of the feed: the vehicles [near] of it (see [listed]), taken at [lat], [lon]. */
+    fun vehicles(s: VehicleSnapshot, lat: Double, lon: Double, near: List<VehicleInfo>) {
         try {
-            val near = s.vehicles.filter { v ->
-                (trackedTripId.isNotBlank() && v.tripId == trackedTripId) ||
-                    LocationHelper.distanceMetres(lat, lon, v.lat, v.lon) <= VEHICLE_RADIUS_M
-            }
             val lines = ArrayList<String>(near.size + 1)
             lines.add("V,${s.fetchedAtMs},${s.serverDateMs},${s.headerTimestamp},${near.size}," +
                 "${fmt6(lat)},${fmt6(lon)}")

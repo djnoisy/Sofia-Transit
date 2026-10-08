@@ -4,6 +4,7 @@
 // 6 Oct 2026 the app took 304 for the 213 the passenger was in, and on the
 // journey traces recorded on the phone (TRACE_DIR).
 import bg.sofia.transit.service.RideModel
+import bg.sofia.transit.service.RideShadow
 import bg.sofia.transit.service.RideModel.Event
 import java.io.File
 
@@ -633,6 +634,109 @@ fun main(args: Array<String>) {
         expectRideAndGetOff("phone clock 20 s fast, fixes on satellite time", j, r)
         check("phone clock 20 s fast, fixes on satellite time: nothing to correct",
             r.model.clockOffsetMs == 0L) { "${r.model.clockOffsetMs}" }
+    }
+
+    // ── Stage 2: the model beside the rules (service/RideShadow.kt) ──
+    // We pull out of A1196 on 213's road at 10 m/s with 213 (due at the stop
+    // we boarded at) and whatever [others] are; a reading every 30 s, from
+    // 35 s, of reports 2 s old. The early rule by the boarding stop is judged
+    // after the first reading, as the app does once the stop is known.
+    fun shadowRide(others: List<SimVehicle>, due: Set<String>, readings: Int = 1,
+                   until: Double = 40.0): Pair<RideShadow, List<String>> {
+        val lines = ArrayList<String>()
+        val shadow = RideShadow("A85", { lines += it }, { lines += "D $it" })
+        val p = Feed.path("A4508")
+        val s0 = p.along(Feed.stop("A1196"))
+        val ride = Mover(p, s0).stand(10.0).drive(s0 + 2000, 10.0)
+        val all = listOf(SimVehicle("V213", "T213", "A85", { ride.at(it) })) + others
+        var t = 0.0
+        var read = 0
+        while (t <= until) {
+            val ms = T0 + (t * 1000).toLong()
+            val q = ride.at(t)
+            shadow.onFix(ms, ms + 60, q.lat, q.lon, 5.0)
+            if (t >= 35 && (t - 35) % 30.0 == 0.0 && read < readings) {
+                read++
+                shadow.onReading(ms + 300, ms, all.mapNotNull { v ->
+                    v.pos(t - 2)?.let { RideShadow.Seen(v.key, v.tripId, v.routeId, (T0 / 1000) + (t - 2).toLong(), it.lat, it.lon) }
+                })
+                if (read == 1) shadow.judgeBoarding("БУЛ. ЦАРИГРАДСКО ШОСЕ") { trip -> if (trip in due) T0 / 1000 else null }
+            }
+            t += 1.0
+        }
+        return shadow to lines
+    }
+    // Beside us 12 m to one side, as the tram 18 on 7 Oct (it went the other way).
+    val opposite = SimVehicle("VOPP", "TOPP", "A99", { t -> Feed.path("A4508").let { p ->
+        p.at(p.along(Feed.stop("A1196")) + 10.0 * maxOf(0.0, t - 10)).shift(0.0, 12.0) } })
+    run {
+        val (_, lines) = shadowRide(listOf(opposite), due = setOf("T213"))
+        check("stage 2, early rule: of two beside us, the one due at the boarding stop is taken",
+            lines.any { it.startsWith("Model (boarding stop БУЛ. ЦАРИГРАДСКО ШОСЕ): would take A85 T213 at once") &&
+                "A99/VOPP" in it && "A85/V213 0 m (due there)" in it }) { lines.joinToString(" | ") }
+    }
+    run {
+        val (_, lines) = shadowRide(listOf(opposite), due = setOf("T213", "TOPP"))
+        check("stage 2, early rule: two beside us both due — no early pick",
+            lines.any { it.startsWith("Model (boarding stop") && "no early pick: 2 of the vehicles" in it }) {
+            lines.joinToString(" | ") }
+    }
+    run {
+        val far = SimVehicle("V213", "T213", "A85", { t -> Feed.path("A4508").let { p ->
+            p.at(p.along(Feed.stop("A1196")) + 10.0 * (t - 10) + 400) } })
+        val lines = ArrayList<String>()
+        val shadow = RideShadow("A85", { lines += it })
+        val p = Feed.path("A4508"); val s0 = p.along(Feed.stop("A1196"))
+        val ride = Mover(p, s0).stand(10.0).drive(s0 + 2000, 10.0)
+        for (t in 0..40) {
+            val ms = T0 + t * 1000L; val q = ride.at(t.toDouble())
+            shadow.onFix(ms, ms + 60, q.lat, q.lon, 5.0)
+        }
+        val r = far.pos(38.0)!!
+        shadow.onReading(T0 + 40_300, T0 + 40_000, listOf(RideShadow.Seen("V213", "T213", "A85", T0 / 1000 + 38, r.lat, r.lon)))
+        shadow.judgeBoarding("X") { T0 / 1000 }
+        check("stage 2, early rule: nothing beside us — no early pick",
+            lines.any { it == "Model (boarding stop X): nothing beside us — no early pick" }) { lines.joinToString(" | ") }
+        shadow.judgeBoarding("X") { T0 / 1000 }
+        shadow.boardingUntold()
+        check("stage 2, early rule: judged once a journey", lines.count { it.startsWith("Model (boarding stop") } == 1) {
+            lines.joinToString(" | ") }
+    }
+    run {
+        val (shadow, lines) = shadowRide(emptyList(), due = emptySet(), readings = 3, until = 100.0)
+        val id = lines.firstOrNull { "identified" in it }
+        check("stage 2: the model's conclusions logged in the replay's words, at the reading's time",
+            id != null && Regex("""^Model @\d\d:\d\d:\d\d: identified A85 T213 \(\d+ m together\)$""").matches(id)) {
+            lines.joinToString(" | ") }
+        check("stage 2: once the model has taken a vehicle the early rule is no longer judged",
+            !shadow.wantsBoarding()) { "" }
+        check("stage 2: the summary names ours", shadow.summary().startsWith("Model at the end: ours A85/V213 T213")) {
+            shadow.summary() }
+        check("stage 2: metres together logged as detail", lines.any { it.startsWith("D Model @") && "A85/V213" in it }) {
+            lines.joinToString(" | ") }
+    }
+    run {
+        // Values as the trace writes them: a replay of the trace sees what the app saw.
+        // An accuracy of 30.04 m is written 30.0 — inside the model's 30 m.
+        val a = ArrayList<String>(); val b = ArrayList<String>()
+        val exact = RideShadow("", { a += it }); val traced = RideShadow("", { b += it })
+        val p = Feed.path("A4508"); val s0 = p.along(Feed.stop("A1196"))
+        val ride = Mover(p, s0).drive(s0 + 2000, 12.0)
+        for (t in 0..100) {
+            val ms = T0 + t * 1000L; val q = ride.at(t.toDouble())
+            exact.onFix(ms, ms + 60, q.lat + 1.3e-7, q.lon - 2.7e-7, 30.04)
+            traced.onFix(ms, ms + 60, String.format(java.util.Locale.US, "%.6f", q.lat + 1.3e-7).toDouble(),
+                String.format(java.util.Locale.US, "%.6f", q.lon - 2.7e-7).toDouble(), 30.0)
+            if (t >= 35 && (t - 35) % 30 == 0) {
+                val r = ride.at(t - 2.0)
+                exact.onReading(ms + 300, ms, listOf(RideShadow.Seen("V,1", "T,1", "A85", T0 / 1000 + t - 2, r.lat, r.lon)))
+                traced.onReading(ms + 300, ms, listOf(RideShadow.Seen("V;1", "T;1", "A85", T0 / 1000 + t - 2,
+                    String.format(java.util.Locale.US, "%.6f", r.lat).toDouble(),
+                    String.format(java.util.Locale.US, "%.6f", r.lon).toDouble())))
+            }
+        }
+        check("stage 2: fed as the trace writes values, exact and traced input conclude alike",
+            a.isNotEmpty() && a == b) { "${a.joinToString(" | ")} vs ${b.joinToString(" | ")}" }
     }
 
     // ── Recorded journeys ──

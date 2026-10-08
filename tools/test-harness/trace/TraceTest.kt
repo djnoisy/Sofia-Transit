@@ -68,7 +68,7 @@ fun main() {
         veh("tracked", lat + 0.045, lon),          // ~5 km, but the one followed
         veh("odd,id", lat, lon + 0.001, id = "x,y") // ~80 m, commas in its ids
     ))
-    JourneyTrace.vehicles(snap, lat, lon, "tracked")
+    JourneyTrace.vehicles(snap, lat, lon, JourneyTrace.listed(snap, lat, lon, "tracked"))
     JourneyTrace.end()
     waitFor(f, "# end")
     val ls = lines(f)
@@ -102,8 +102,10 @@ fun main() {
         thread {
             repeat(3_000) { i ->
                 if (k == 1) JourneyTrace.fix(Location(lat, lon, 3f, 10f, 1f, i.toLong()))
-                else JourneyTrace.vehicles(VehicleSnapshot(i.toLong(), 0, 0,
-                    (0..k).map { veh("t$k-$it", lat + it * 0.0001, lon) }), lat, lon, "")
+                else VehicleSnapshot(i.toLong(), 0, 0,
+                    (0..k).map { veh("t$k-$it", lat + it * 0.0001, lon) }).let {
+                    JourneyTrace.vehicles(it, lat, lon, JourneyTrace.listed(it, lat, lon, ""))
+                }
             }
         }
     }

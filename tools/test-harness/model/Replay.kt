@@ -3,6 +3,7 @@
 // model concluded and when. Used by ModelTests and on its own:
 //   run_model_tests.sh --replay <journey_trace.txt>
 import bg.sofia.transit.service.RideModel
+import bg.sofia.transit.service.RideShadow
 import java.io.File
 
 data class Concluded(val atMs: Long, val event: RideModel.Event)
@@ -67,15 +68,11 @@ fun replay(start: String, lines: List<String>): Replayed {
     return Replayed(start, events, model, metresAt, routeOf)
 }
 
-fun clock(ms: Long): String = java.time.Instant.ofEpochMilli(ms)
-    .atZone(java.time.ZoneId.of("Europe/Sofia")).toLocalTime().withNano(0).toString()
+// The words and clock of the app's own "Model @" lines (service/RideShadow.kt),
+// so that a replay reads exactly as the log of the same journey.
+fun clock(ms: Long): String = RideShadow.clock(ms)
 
-fun describe(e: RideModel.Event): String = when (e) {
-    is RideModel.Event.Identified -> "identified ${e.routeId} ${e.tripId} (${e.metres.toInt()} m together)"
-    is RideModel.Event.Switched -> "switched ${e.fromKey} → ${e.toRouteId} ${e.toTripId} (${e.metres.toInt()} m): ${e.why}"
-    is RideModel.Event.Withdrawn -> "withdrawn ${e.key} (${e.metres.toInt()} m)"
-    is RideModel.Event.Alighted -> "got off ${e.tripId}, it left at ${clock(e.leftAtMs)}"
-}
+fun describe(e: RideModel.Event): String = RideShadow.describe(e)
 
 fun printReplay(r: Replayed) {
     println(r.journey)

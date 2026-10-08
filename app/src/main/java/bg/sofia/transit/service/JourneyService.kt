@@ -507,6 +507,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * the passenger was not waiting at a stop of this line.
          */
         private const val BOARDING_REF_MAX_DIST = 60.0
+        /** The log tag of the stage 2 model's lines. */
+        private const val MODEL_TAG = "RideModel"
         /** Stops around us whose arrivals are collected while waiting. */
         private const val BOARDING_STOPS_RADIUS = 150.0
         /** How often those arrivals are refreshed while waiting. */
@@ -1079,6 +1081,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
     private var chosen: ChosenLine? = null
 
+    /**
+     * Stage 2: the new model run beside the rules here, logging only (see
+     * RideShadow). Fed where the journey trace is written; null between
+     * journeys. Nothing in the app reads what it concludes.
+     */
+    @Volatile private var rideShadow: RideShadow? = null
+
     /** True once "Изглежда не пътувате с линия X" has been said. */
     private var wrongLineNoticeGiven = false
 
@@ -1274,9 +1283,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastTraceFeedMs = 0L
 
         // A journey started over one still running closes its trace first.
-        if (journeyActive) JourneyTrace.end()
+        if (journeyActive) { JourneyTrace.end(); endShadow() }
         synchronized(journeyLock) { journeyActive = true }
         JourneyTrace.start("$label (route $routeId, trip $tripId)")
+        startShadow(routeId)
         publish(distance = null)
         acquireWakeLock()
         startLocUpdates()
@@ -1343,9 +1353,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastTraceFeedMs = 0L
 
         // A journey started over one still running closes its trace first.
-        if (journeyActive) JourneyTrace.end()
+        if (journeyActive) { JourneyTrace.end(); endShadow() }
         synchronized(journeyLock) { journeyActive = true }
         JourneyTrace.start("$label (route $routeId, direction to be determined)")
+        startShadow(routeId)
         publish(distance = null)
         acquireWakeLock()
         startLocUpdates()
@@ -1708,7 +1719,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val wasActive = synchronized(journeyLock) {
             journeyActive.also { journeyActive = false }
         }
-        if (wasActive) JourneyTrace.end()
+        if (wasActive) { JourneyTrace.end(); endShadow() }
         stopLocUpdates()
         releaseWakeLock()
 
@@ -1775,7 +1786,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private fun onFix(loc: Location) {
         // A fix delivered after the journey ended belongs to no journey.
         if (!journeyActive) return
-        JourneyTrace.fix(loc)
+        val receivedMs = System.currentTimeMillis()
+        JourneyTrace.fix(loc, receivedMs)
+        shadowFix(loc, receivedMs)
         val prevLat = lastLat
         val prevLon = lastLon
         val gapMs = if (lastFixMs == 0L) 0L else System.currentTimeMillis() - lastFixMs
@@ -2463,7 +2476,62 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // The fetch may have outlasted the journey.
         if (snap == null || snap.fetchedAtMs == lastTraceFeedMs || !journeyActive) return
         lastTraceFeedMs = snap.fetchedAtMs
-        JourneyTrace.vehicles(snap, lastLat, lastLon, tripId)
+        val lat = lastLat
+        val lon = lastLon
+        val listed = JourneyTrace.listed(snap, lat, lon, tripId)
+        JourneyTrace.vehicles(snap, lat, lon, listed)
+        shadowReading(snap, listed)
+    }
+
+    // ── Stage 2: the new model beside the rules, logging only ─────────────
+    // Fed with what the trace records, so that replaying the trace gives the
+    // same "Model @" lines (see RideShadow). Whatever goes wrong in it stays
+    // there: a failure is caught and the journey goes on as before.
+
+    private fun startShadow(chosenRouteId: String) {
+        rideShadow = try {
+            RideShadow(chosenRouteId,
+                { FileLogger.i(MODEL_TAG, it) }, { FileLogger.d(MODEL_TAG, it) })
+        } catch (_: Throwable) { null }
+    }
+
+    private fun endShadow() {
+        val shadow = rideShadow ?: return
+        rideShadow = null
+        try { FileLogger.i(MODEL_TAG, shadow.summary()) } catch (_: Throwable) { }
+    }
+
+    private fun shadowFix(loc: Location, receivedMs: Long) {
+        val shadow = rideShadow ?: return
+        try {
+            shadow.onFix(loc.time, receivedMs, loc.latitude, loc.longitude,
+                if (loc.hasAccuracy()) loc.accuracy.toDouble() else null)
+        } catch (_: Throwable) { }
+    }
+
+    private suspend fun shadowReading(
+        snap: bg.sofia.transit.data.repository.VehicleSnapshot,
+        listed: List<bg.sofia.transit.data.repository.VehicleInfo>
+    ) {
+        val shadow = rideShadow ?: return
+        try {
+            shadow.onReading(snap.fetchedAtMs, snap.serverDateMs, listed.map { v ->
+                RideShadow.Seen(v.vehicleId, v.tripId, v.routeId, v.timestamp, v.lat, v.lon)
+            })
+            // The proposed early rule, judged once the boarding stop is
+            // known. Looked up without being remembered: the rules here
+            // work it out at moments of their own (boardingStops).
+            if (shadow.wantsBoarding()) {
+                val stop = findBoardingStop()
+                when {
+                    stop == null -> {}
+                    stop.ids.isEmpty() -> shadow.boardingUntold()
+                    else -> shadow.judgeBoarding(stop.name) { trip -> expectedAtBoarding(trip, stop.ids) }
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) { }
     }
 
     /**
@@ -3860,7 +3928,29 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     private suspend fun boardingStops(): Set<String>? {
         boardingStopIds?.let { return it.ifEmpty { null } }
+        val found = findBoardingStop() ?: return null
+        boardingStopIds = found.ids
+        if (found.ids.isEmpty()) {
+            FileLogger.d(TAG, "Boarding stop not told: nearest stop of the line " +
+                "${found.distance?.toInt()?.toString() ?: "-"} m from where we waited")
+            return null
+        }
+        FileLogger.i(TAG, "Boarding stop: ${found.name} " +
+            "(${found.distance?.toInt()} m, ${found.ids.joinToString()})")
+        return found.ids
+    }
+
+    /** The stop we boarded at: its name, how far from where we waited, and its ids. */
+    private class BoardingStop(val name: String, val distance: Double?, val ids: Set<String>)
+
+    /**
+     * Works out the boarding stop as [boardingStops] describes, remembering
+     * nothing: null while it cannot be worked out yet, and with no ids when
+     * it cannot be told at all.
+     */
+    private suspend fun findBoardingStop(): BoardingStop? {
         if (!boardingRefSet || orderedStops.isEmpty() || candidates.isNotEmpty()) return null
+        val stops = orderedStops
         var best = -1
         var bestD = Double.MAX_VALUE
         stopLatLon.forEachIndexed { i, (sLat, sLon) ->
@@ -3868,18 +3958,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             if (d < bestD) { bestD = d; best = i }
         }
         if (best < 0 || bestD > BOARDING_REF_MAX_DIST) {
-            boardingStopIds = emptySet()
-            FileLogger.d(TAG, "Boarding stop not told: nearest stop of the line " +
-                "${if (best < 0) "-" else bestD.toInt().toString()} m from where we waited")
-            return null
+            return BoardingStop("", if (best < 0) null else bestD, emptySet())
         }
+        // The two lists are replaced one after the other; caught between, ask again later.
+        if (best !in stops.indices) return null
         val ids = try {
-            gtfsRepo.stopIdsOfSamePlace(orderedStops[best].stopId).toSet()
-        } catch (e: Exception) { setOf(orderedStops[best].stopId) }
-        boardingStopIds = ids
-        FileLogger.i(TAG, "Boarding stop: ${orderedStops[best].stopName} " +
-            "(${bestD.toInt()} m, ${ids.joinToString()})")
-        return ids
+            gtfsRepo.stopIdsOfSamePlace(stops[best].stopId).toSet()
+        } catch (e: Exception) { setOf(stops[best].stopId) }
+        return BoardingStop(stops[best].stopName, bestD, ids)
     }
 
     /**
@@ -4909,7 +4995,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val wasActive = synchronized(journeyLock) {
             journeyActive.also { journeyActive = false }
         }
-        if (wasActive) JourneyTrace.end()
+        if (wasActive) { JourneyTrace.end(); endShadow() }
         stopLocUpdates()
         releaseWakeLock()
         etaJob?.cancel()

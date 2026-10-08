@@ -3,7 +3,8 @@
 # travelled together (model/ModelTests.kt): simulated journeys along the real
 # roads of 213 and 304 (model/Sim.kt), and, with TRACE_DIR set to a folder of
 # journey traces from the phone (journey_trace.txt), the recorded journeys.
-# Compiles the REAL service/RideModel.kt; needs kotlinc and a JDK.
+# Compiles the REAL service/RideModel.kt and service/RideShadow.kt (stage 2's
+# model beside the rules); needs kotlinc and a JDK.
 #
 #   run_model_tests.sh                       the tests
 #   run_model_tests.sh --replay <trace>      what the model concludes on a trace
@@ -18,7 +19,7 @@ KOTLINC="${KOTLINC:-kotlinc}"
 KLIB="${KOTLIN_LIB:-$(dirname "$(dirname "$(readlink -f "$(command -v "$KOTLINC")")")")/lib}"
 OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT
 
-"$KOTLINC" "$SRC/service/RideModel.kt" "$HERE/model/Replay.kt" "$HERE/model/Sim.kt" "$HERE/model/ModelTests.kt" \
+"$KOTLINC" "$SRC/service/RideModel.kt" "$SRC/service/RideShadow.kt" "$HERE/model/Replay.kt" "$HERE/model/Sim.kt" "$HERE/model/ModelTests.kt" \
     -d "$OUT/c" 2>&1 | grep -A3 "error:" || true
 
 if [ "${1:-}" = "--replay" ]; then

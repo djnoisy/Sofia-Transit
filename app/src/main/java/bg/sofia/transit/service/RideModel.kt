@@ -39,8 +39,8 @@ import kotlin.math.hypot
  * deciding anew.
  *
  * Pure Kotlin, no Android types, so it can be tested and replayed on its own
- * (tools/test-harness/run_model_tests.sh). Not called by the app yet: stage 2
- * runs it beside the current rules, logging only.
+ * (tools/test-harness/run_model_tests.sh). Stage 2 runs it beside the
+ * current rules through [RideShadow], logging only; nothing reads it yet.
  */
 class RideModel(
     /** The line the passenger chose; it wins a tie between vehicles. */
@@ -146,6 +146,8 @@ class RideModel(
     fun vehicle(key: String): Vehicle? = vehicles[key]
     /** Vehicles with any metres, furthest first. */
     fun leaders(): List<Vehicle> = vehicles.values.filter { it.metres > 0 }.sortedByDescending { it.metres }
+    /** Vehicles beside us at their latest report, if that is recent at the latest reading. */
+    fun besideUs(): List<Vehicle> = vehicles.values.filter { it.besideAt(readingNowMs) }
 
     /** One position of ours. Returns what that concluded, if anything. */
     fun onFix(f: Fix): List<Event> {
