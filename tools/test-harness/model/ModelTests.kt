@@ -677,6 +677,87 @@ fun main(args: Array<String>) {
         never304("$from, tracking begun ${after.toInt()} s after ХОТЕЛ ПЛИСКА",   // (18; 21)
             startAtPliska, mustTake = true) { dep -> listOf(-1.0..(dep + after - 0.5)) }
     }
+    // ── Others beside us for a moment, while two run abreast (review of 9 Oct 2026) ──
+    // Tracking begun mid-ride, 213 and 304 abreast; a third vehicle C beside
+    // us at one report — trailing 65 m behind otherwise, or passing the
+    // other way. Taking the latest beginning of all runs, C switched the fair
+    // comparison off and 304 was taken in up to 18 of 60 runs. 213 always.
+    for (after in listOf(30.0, 60.0)) for (oncoming in listOf(false, true)) for (cDelay in listOf(35.0, 45.0, 55.0)) {
+        val bad = ArrayList<String>()
+        for ((p213, p304) in phases) {
+            val dep = Journey(startAtPliska = true).tLeavePliska
+            val ts = dep + after; val tC = ts + cDelay
+            val j = Journey(startAtPliska = true, gps = Gps(gaps = listOf(-1.0..(ts - 0.5))), phase213 = p213, phase304 = p304)
+            val c = if (oncoming) { val sMeet = j.bus213.alongAt(tC)
+                SimVehicle("VC", "A99-x", "A99", { t -> j.p213.at(sMeet - 12.0 * (t - tC)).shift(6.0, 0.0) }, phase = tC % 30.0) }
+            else SimVehicle("VC", "A99-x", "A99", { t ->
+                j.p213.at(j.bus213.alongAt(t) - if (kotlin.math.abs(t - tC) < 0.5) 4.0 else 65.0) }, phase = tC % 30.0)
+            val r = j.sim(extra = listOf(c)).run()
+            val id = ident(r)
+            if (id.size != 1 || id[0].second.key != "V213" || switched(r).isNotEmpty()) bad += "213 at $p213, 304 at $p304: ${story(r)}"
+        }
+        check("tracking begun ${after.toInt()} s after ХОТЕЛ ПЛИСКА, a vehicle " + (if (oncoming) "passing the other way" else "trailing") +
+            " beside us once ${cDelay.toInt()} s after: 213 taken, nothing else", bad.isEmpty()) { bad.joinToString(" | ") }
+    }
+    // The chosen line X (not ours) beside us at exactly one report, 65 m
+    // behind otherwise, tracking begun mid-ride: compared over a few seconds
+    // X, with nothing, was within the tie of 213 and won it (6-11 of 900).
+    // A stretch in which the leader has not gone beyond the tie now waits:
+    // X never.
+    for (after in listOf(30.0, 60.0)) {
+        val bad = ArrayList<String>()
+        for (p213 in 0 until 30 step 6) for (p304 in 0 until 30 step 5) for (pX in 0 until 30 step 2) {
+            val dep = Journey(startAtPliska = true).tLeavePliska
+            val ts = dep + after
+            val j = Journey(startAtPliska = true, chosen = "A99", gps = Gps(gaps = listOf(-1.0..(ts - 0.5))),
+                phase213 = p213.toDouble(), phase304 = p304.toDouble())
+            fun firstAfter(ph: Double, t: Double): Double { var x = ph; while (x < t + 3.5) x += 30.0; return x }
+            val tX = firstAfter(pX.toDouble(), maxOf(firstAfter(p213.toDouble(), ts), firstAfter(p304.toDouble(), ts)))
+            val x = SimVehicle("VX", "A99-x", "A99", { t ->
+                j.p213.at(j.bus213.alongAt(t) - if (kotlin.math.abs(t - tX) < 0.5) 4.0 else 65.0) }, phase = pX.toDouble())
+            val r = j.sim(extra = listOf(x)).run()
+            if (ident(r).any { it.second.key == "VX" }) bad += "213 at $p213, 304 at $p304, X at $pX: ${story(r)}"
+        }
+        check("tracking begun ${after.toInt()} s after ХОТЕЛ ПЛИСКА, the chosen line beside us at one report: never taken",
+            bad.isEmpty()) { bad.joinToString(" | ") }
+    }
+    // A bus of the chosen line C comes beside us after we have left ХОТЕЛ
+    // ПЛИСКА in 213 (it drove 45 m behind until then) and stays: 213's run
+    // began over a report earlier, so the stretch compared is 213's, and 213
+    // is taken. Compared from the latest beginning of all runs, the two were
+    // level and C won on the tie. (Beside us within a report of 213's
+    // beginning — 25 s after leaving — C may be taken: that head start is no
+    // evidence, by design.)
+    for (cAfter in listOf(40.0, 60.0)) {
+        val bad = ArrayList<String>()
+        for (p213 in 0 until 30 step 3) for (pC in 0 until 30 step 5) {
+            val j = Journey(startAtPliska = true, chosen = "A99", phase213 = p213.toDouble())
+            val tC = j.tLeavePliska + cAfter
+            val c = SimVehicle("VC", "A99-c", "A99", { t -> j.p213.at(j.bus213.alongAt(t) - if (t < tC) 45.0 else 4.0) }, phase = pC.toDouble())
+            val r = Sim({ j.ours(it) }, j.vehicles(listOf(c)).filter { it.key != "V304" }, j.tLeaveOrlov + 420, j.gps, j.chosen).run()
+            if (ident(r).firstOrNull()?.second?.key != "V213") bad += "213 at $p213, C at $pC: ${story(r)}"
+        }
+        check("in 213 from ХОТЕЛ ПЛИСКА, a bus of the chosen line beside us from ${cAfter.toInt()} s after: 213 taken",
+            bad.isEmpty()) { bad.joinToString(" | ") }
+    }
+    // Waiting on foot at ХОТЕЛ ПЛИСКА: a bus S stands beside us, reports
+    // once and goes silent (its trip ended); 213 comes at 60 s and leaves
+    // with us at 80 s. S, its run begun long before 213's, was taken with
+    // "0 m together" when its line was chosen. Never now.
+    run {
+        val p213 = Feed.path("A4508")
+        val sPl = p213.along(Feed.stop("A2327"))
+        val bad = ArrayList<String>()
+        for (chosen in listOf("", "A99")) for (tS in listOf(10.0, 20.0, 25.0)) for (ph in 0 until 30 step 2) {
+            val bus = Mover(p213, sPl - 600).drive(sPl, 10.0).stand(20.0).drive(sPl + 5000, 11.0)
+            val stop = p213.at(sPl).shift(3.0, 3.0)
+            val s = SimVehicle("VS", "A99-s", "A99", { _ -> p213.at(sPl + 8) }, phase = tS, silent = listOf((tS + 1)..1e9))
+            val v213 = SimVehicle("V213", "A85-x", "A85", { t -> bus.at(t) }, phase = ph.toDouble())
+            val r = Sim({ t -> if (t < 70.0) stop else bus.at(t).shift(1.0, 1.0) }, listOf(s, v213), 600.0, Gps(), chosen).run()
+            if (ident(r).firstOrNull()?.second?.key != "V213") bad += "chosen '$chosen', S at $tS, 213 at $ph: ${story(r)}"
+        }
+        check("a bus beside us at the stop, then silent: 213 taken, not it", bad.isEmpty()) { bad.joinToString(" | ") }
+    }
     // A fix every second with one dropout of 9 or 12 s soon after leaving
     // ХОТЕЛ ПЛИСКА, 304 alongside: every report can still be placed — 213
     // taken, nothing else. (Ending runs on a long gap alone took 304 in 20-27

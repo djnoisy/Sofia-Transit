@@ -43,8 +43,9 @@ import kotlin.math.hypot
  * Fair between vehicles abreast (9 Oct 2026): each one's run begins at its
  * first report beside us, and two that run together from a moment mid-ride
  * — tracking begun aboard, fixes thickening again — begin up to a report
- * apart. That head start is no evidence: the first choice compares them
- * from the later beginning.
+ * apart. That head start is no evidence: the first choice compares all of
+ * them over one stretch, from the latest beginning among the runs begun
+ * within a report of the earliest.
  *
  * Pure Kotlin, no Android types, so it can be tested and replayed on its own
  * (tools/test-harness/run_model_tests.sh). Stage 2 runs it beside the
@@ -431,15 +432,25 @@ class RideModel(
                     readingNowMs - it.lastReportMs <= MAX_REPORT_AGE_MS
             }
             val common = contenders.minOf { it.lastReportMs }
-            // Runs begun within a report of one another are compared from the
-            // later beginning: which of two vehicles abreast reported first
-            // after a moment mid-ride is no evidence (see the class comment).
-            // A run of one report so far waits for its next.
-            val late = contenders.maxOf { it.runFromMs }
-            val abreast = late - contenders.minOf { it.runFromMs } <= HEAD_START_MS
-            if (abreast && late >= common) return
-            val fair = contenders.associateWith { metresAt(it, common) - if (abreast) metresAt(it, late) else 0.0 }
+            // Compared over one stretch: from the latest beginning among the
+            // runs begun within a report of the earliest, to the oldest last
+            // report. Which of vehicles abreast reported first after a moment
+            // mid-ride is no evidence (see the class comment); a run begun
+            // later — a vehicle just come beside us — is compared over the
+            // same stretch. (Taking the latest beginning of all runs instead,
+            // one vehicle beside us once switched the comparison off for the
+            // rest: review of 9 Oct 2026.)
+            val first = contenders.minOf { it.runFromMs }
+            val late = contenders.filter { it.runFromMs - first <= HEAD_START_MS }.maxOf { it.runFromMs }
+            val fair = contenders.associateWith { metresAt(it, common) - metresAt(it, late) }
             val top = fair.values.max()
+            // Until the leader has gone beyond the tie in the stretch, the
+            // choice waits for the next reports: one with nothing in it would
+            // win on the tie — the stretch may be a few seconds, or none yet,
+            // while a vehicle of those begun first has not reported since the
+            // latest beginning. (Waiting until the leader had twice the tie
+            // let 213's one poor report tip it to 304.)
+            if (top <= TIE_M) return
             val close = contenders.filter { top - fair.getValue(it) <= TIE_M }
             val pick = close.filter { it.routeId == chosenRouteId }.maxByOrNull { fair.getValue(it) }
                 ?: close.maxBy { fair.getValue(it) }
@@ -511,6 +522,8 @@ class RideModel(
             if (v.togetherSinceMs != 0L) v.togetherSinceMs += shift
             if (v.lastBesideMs != 0L) v.lastBesideMs += shift
             if (v.firstApartMs != 0L) v.firstApartMs += shift
+            if (v.runFromMs != 0L) v.runFromMs += shift
+            if (v.unplacedMs != 0L) v.unplacedMs += shift
             for (m in v.history) m.timeMs += shift
         }
     }
