@@ -668,7 +668,7 @@ class RideModel(
         const val SWITCH_M = 100.0
         /** Ours silent this long no longer holds its place by its last report beside us. */
         const val SILENT_HOLD_MS = 5 * 60_000L
-        /** Runs begun within this of one another are compared from the later beginning: one report. */
+        /** Runs begun within this of the earliest set where the compared stretch begins: one report. */
         const val HEAD_START_MS = 30_000L
 
         /**
