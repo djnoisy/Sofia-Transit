@@ -855,8 +855,9 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // 15:27:28 a fix every 5-6 s, standing at the stop. Departure 15:27:31.
     // The app's first check (15:27:36) was skipped for degraded positioning
     // and it took 314 at 15:28:07 by its boarding-stop check; the model too,
-    // at its second reading. Off at ОБЩИНА МЛАДОСТ about 15:29:50, walking
-    // from 15:30:04; 314 was over 100 m away from 15:30:34.
+    // at its second reading. 314 stood at ОБЩИНА МЛАДОСТ from 15:29:48; off
+    // and walking straight away at about 15:30:04 (the owner); 314 was 12 m
+    // off then and over 100 m away from 15:30:34.
     "2026-10-09_314.txt" to { rp ->
         val id = rp.events.firstOrNull()
         check("9.10 bus 314: 314 identified by 15:28:10", (id?.event as? Event.Identified)?.routeId == "A200" &&
