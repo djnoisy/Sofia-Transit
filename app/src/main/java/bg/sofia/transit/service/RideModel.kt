@@ -38,8 +38,7 @@ import kotlin.math.hypot
  * in a row. A report whose moment our fixes cannot yet place waits for the
  * fixes that follow it. With poor positions the model holds what it has
  * rather than deciding anew — and with fixes sparser than [SPARSE_GAP_MS]
- * no vehicle but ours earns metres or counts as beside us, so none is
- * taken in its place ([fixesSparse]).
+ * it takes no vehicle and switches by no metres ([fixesSparse]).
  *
  * Pure Kotlin, no Android types, so it can be tested and replayed on its own
  * (tools/test-harness/run_model_tests.sh). Stage 2 runs it beside the
@@ -283,15 +282,7 @@ class RideModel(
         v.lastReportMs = t
         val d = distance(us.lat, us.lon, r.lat, r.lon)
         v.lastDistance = d
-        // With our fixes sparse at the report, a vehicle other than ours earns
-        // nothing and is not beside us: its run ends here (see fixesSparse).
-        val counts = v === ours || !fixesSparse(t)
         when {
-            d <= BESIDE_M && !counts -> {
-                v.apartRun = 0
-                v.firstApartPlace = null
-                v.togetherSinceMs = 0L
-            }
             d <= BESIDE_M -> {
                 v.apartRun = 0
                 v.firstApartPlace = null
@@ -317,7 +308,7 @@ class RideModel(
             // Nor is it apart: "two in a row" means two in a row.
             else -> {
                 v.apartRun = 0
-                if (!counts || t - v.togetherSinceMs > BRIDGE_MS) v.togetherSinceMs = 0L
+                if (t - v.togetherSinceMs > BRIDGE_MS) v.togetherSinceMs = 0L
             }
         }
         v.history.addLast(Mark(t, v.metres, d <= BESIDE_M))
@@ -392,6 +383,7 @@ class RideModel(
     private fun choose(events: MutableList<Event>) {
         val o = ours
         if (o != null && o.apartRun >= 2) return   // being judged
+        if (fixesSparse()) return
         // Only vehicles still in a run beside us: metres earned earlier by one
         // that has since drifted off are no claim to be ours now.
         val pool = vehicles.values.filter {
@@ -440,34 +432,32 @@ class RideModel(
     }
 
     /**
-     * Whether our fixes about [at] are too sparse to tell which vehicle we
-     * are in: two accurate fixes in a row more than [SPARSE_GAP_MS] apart
-     * anywhere within the 10 s either side of it that a place is read from
-     * (SMOOTH_SPANS_MS), or fewer than two accurate fixes there. Then only a
-     * report within a second or so of a fix can be placed, and which ones
-     * are is chance: a vehicle whose reports fall in step with our fixes
-     * earns metres alone, and in simulations with a fix every 10 s the wrong
-     * one was taken about as often as ours (the review of 9 Oct 2026: 81
-     * times and 90 in 900 runs). So at such a moment a vehicle other than
-     * ours earns no metres and is not beside us (take): none is taken, none
-     * replaces ours, and nothing earned while the fixes are sparse is
-     * carried into the time they thicken again, when runs begin anew. Ours
-     * is judged as ever, and so is parting from it. Judged about the
-     * report's own moment, not when it is taken in, so that a sparse spell
-     * is seen from its first long gap, and a report from it taken in once
-     * the fixes have thickened counts for nothing either. A fix every 5-6 s,
-     * as on the phone in power saving (9 Oct 2026, gaps up to 6.7 s), is not
-     * sparse. The old rules decide nothing at ten fixes a minute either.
+     * Whether our fixes are too sparse for a vehicle to be taken: the median
+     * gap between the accurate ones of the last [SPARSE_WINDOW_MS] is over
+     * [SPARSE_GAP_MS], or there are not two of them. Over a minute, so that
+     * one dropout among fixes a second does not set it off — a stricter
+     * measure, about each report, did (review of 9 Oct 2026: the wrong
+     * vehicle in 20-27 of 60 runs, from 0). Then only a report within a
+     * second or so of a fix can be placed, and which ones are is chance: a
+     * vehicle whose reports fall
+     * in step with our fixes earns metres alone, and in simulations with a
+     * fix every 10 s the wrong one was taken about as often as ours (the
+     * review of 9 Oct 2026: 81 times and 90 in 900 runs). With a fix every
+     * 5-6 s, as on the phone in power saving (9 Oct 2026), every moment has
+     * three fixes within 10 s of it once those after it have come. The old
+     * rules decide nothing at ten fixes a minute either. Only the choice is
+     * held: metres are still earned, and parting — with the switch to a
+     * vehicle still beside us that it may make — is judged as ever
+     * (HANDOVER: "Пътуване от 9.10.2026", what is still open).
      */
-    private fun fixesSparse(at: Long): Boolean {
-        val span = SMOOTH_SPANS_MS.last()
-        val accurate = track.filter { (it.accuracy ?: 0.0) <= ACCURATE }
-        // From the last fix before the stretch to the first after it, so that
-        // a gap reaching into it from either side counts.
-        val from = maxOf(0, accurate.indexOfLast { it.timeMs <= at - span })
-        val to = accurate.indexOfFirst { it.timeMs >= at + span }.let { if (it < 0) accurate.lastIndex else it }
-        if (to - from < 1) return true
-        return (from until to).any { accurate[it + 1].timeMs - accurate[it].timeMs > SPARSE_GAP_MS }
+    private fun fixesSparse(): Boolean {
+        val newest = track.lastOrNull() ?: return true
+        val recent = track.filter {
+            newest.timeMs - it.timeMs <= SPARSE_WINDOW_MS && (it.accuracy ?: 0.0) <= ACCURATE
+        }
+        if (recent.size < 2) return true
+        val gaps = recent.zipWithNext { a, b -> (b.timeMs - a.timeMs).toDouble() }
+        return median(gaps) > SPARSE_GAP_MS
     }
 
     /**
@@ -660,8 +650,10 @@ class RideModel(
         const val SWITCH_M = 100.0
         /** Ours silent this long no longer holds its place by its last report beside us. */
         const val SILENT_HOLD_MS = 5 * 60_000L
-        /** Accurate fixes further apart than this, about a report, are sparse; see fixesSparse. */
+        /** Fixes further apart than this, by the median, and no vehicle is taken; see fixesSparse. */
         const val SPARSE_GAP_MS = 8_000L
+        /** …over the accurate fixes of this last stretch of our track. */
+        const val SPARSE_WINDOW_MS = 60_000L
 
         /**
          * Vehicle speed: travel over [SPEED_WINDOW_MS], on smoothed accurate
