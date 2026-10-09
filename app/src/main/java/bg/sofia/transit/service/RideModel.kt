@@ -36,9 +36,15 @@ import kotlin.math.hypot
  * worse than [ACCURATE] count for nothing either way; a report neither beside us nor clearly apart is
  * bridged over rather than breaking the run; and parting takes two reports
  * in a row. A report whose moment our fixes cannot yet place waits for the
- * fixes that follow it. With poor positions the model holds what it has
- * rather than deciding anew — and with fixes sparser than [SPARSE_GAP_MS]
- * it takes no vehicle and switches by no metres ([fixesSparse]).
+ * fixes that follow it; one that no fix can place ends every run but ours,
+ * since which reports our fixes can place is then chance. With poor
+ * positions the model holds what it has rather than deciding anew.
+ *
+ * Fair between vehicles abreast (9 Oct 2026): each one's run begins at its
+ * first report beside us, and two that run together from a moment mid-ride
+ * — tracking begun aboard, fixes thickening again — begin up to a report
+ * apart. That head start is no evidence: the first choice compares them
+ * from the later beginning.
  *
  * Pure Kotlin, no Android types, so it can be tested and replayed on its own
  * (tools/test-harness/run_model_tests.sh). Stage 2 runs it beside the
@@ -111,6 +117,10 @@ class RideModel(
         /** Where we were at that first report apart — kept, as our track is not kept for long. */
         internal var firstApartPlace: Place? = null
         internal var lastSeenMs = 0L
+        /** Time of the first report of its present run beside us. */
+        internal var runFromMs = 0L
+        /** Time of its latest report that no fix could place. */
+        internal var unplacedMs = 0L
         /** Its recent reports as judged: time, metres after it, and whether beside us. */
         internal val history = ArrayDeque<Mark>()
         /** Beside us at its latest report — however old that is; see [besideAt]. */
@@ -201,6 +211,15 @@ class RideModel(
      * Judges the reports that were waiting for our place at their moment,
      * now that this fix may give it; one that no fix to come can place any
      * more is dropped. True if any was judged.
+     *
+     * A dropped report ends the run of every vehicle but ours. Our fixes
+     * about it were too few to place its moment, and then which reports are
+     * placed is chance: a vehicle whose reports fall in step with our fixes
+     * earns metres while the others earn none. In simulations with a fix
+     * every 10 s, and after such a spell once the fixes had thickened, the
+     * wrong vehicle was taken about as often as ours (9 Oct 2026). With a
+     * fix every second a report is dropped only in a gap of some 15 s or
+     * more; then identification may come later, not wrong.
      */
     private fun judgeWaiting(nowFix: Long): Boolean {
         if (alighted) { waiting.clear(); return false }
@@ -212,7 +231,11 @@ class RideModel(
             when {
                 v == null -> waiting.remove(key)
                 positionAt(t) != null -> { waiting.remove(key); if (take(v, r, nowFix)) judged = true }
-                nowFix - t > SMOOTH_SPANS_MS.last() -> waiting.remove(key)
+                nowFix - t > SMOOTH_SPANS_MS.last() -> {
+                    waiting.remove(key)
+                    v.unplacedMs = t
+                    for (other in vehicles.values) if (other !== ours) other.togetherSinceMs = 0L
+                }
             }
         }
         return judged
@@ -263,7 +286,7 @@ class RideModel(
         v.tripId = r.tripId
         v.routeId = r.routeId
         val t = r.timeMs + clockOffsetMs
-        if (t <= v.lastReportMs) return false
+        if (t <= v.lastReportMs || t <= v.unplacedMs) return false
         if (nowFix - t > MAX_REPORT_AGE_MS) return false
         // Not yet judged while our own place then is unknown: it waits for the
         // fixes after it (judgeWaiting). Feed reports reach us 2-5 s old, and
@@ -275,6 +298,11 @@ class RideModel(
         val us = positionAt(t)
         val w = waiting[v.key]
         if (us == null) {
+            // From before our track begins: never placed, and it says nothing
+            // of our fixes. A vehicle gone silent repeats such a report at
+            // every reading (7 Oct 2026, evening 76: two of them did).
+            val first = track.firstOrNull { (it.accuracy ?: 0.0) <= ACCURATE } ?: return false
+            if (t < first.timeMs - EXTRAPOLATE_MS) return false
             if (w == null || r.timeMs > w.timeMs) waiting[v.key] = r
             return false
         }
@@ -293,7 +321,7 @@ class RideModel(
                         val moved = distance(then.lat, then.lon, us.lat, us.lon)
                         if (moved >= MIN_MOVE_M) v.metres += moved
                     }
-                }
+                } else v.runFromMs = t
                 v.togetherSinceMs = t
                 v.lastBesideMs = t
             }
@@ -383,7 +411,6 @@ class RideModel(
     private fun choose(events: MutableList<Event>) {
         val o = ours
         if (o != null && o.apartRun >= 2) return   // being judged
-        if (fixesSparse()) return
         // Only vehicles still in a run beside us: metres earned earlier by one
         // that has since drifted off are no claim to be ours now.
         val pool = vehicles.values.filter {
@@ -400,11 +427,18 @@ class RideModel(
             // Fresh reports only: one silent for minutes would set the moment
             // before the others' remembered reports.
             val contenders = vehicles.values.filter {
-                it.apartRun < 2 && it.togetherSinceMs != 0L && it.metres > 0 &&
+                it.apartRun < 2 && it.togetherSinceMs != 0L &&
                     readingNowMs - it.lastReportMs <= MAX_REPORT_AGE_MS
             }
             val common = contenders.minOf { it.lastReportMs }
-            val fair = contenders.associateWith { metresAt(it, common) }
+            // Runs begun within a report of one another are compared from the
+            // later beginning: which of two vehicles abreast reported first
+            // after a moment mid-ride is no evidence (see the class comment).
+            // A run of one report so far waits for its next.
+            val late = contenders.maxOf { it.runFromMs }
+            val abreast = late - contenders.minOf { it.runFromMs } <= HEAD_START_MS
+            if (abreast && late >= common) return
+            val fair = contenders.associateWith { metresAt(it, common) - if (abreast) metresAt(it, late) else 0.0 }
             val top = fair.values.max()
             val close = contenders.filter { top - fair.getValue(it) <= TIE_M }
             val pick = close.filter { it.routeId == chosenRouteId }.maxByOrNull { fair.getValue(it) }
@@ -429,35 +463,6 @@ class RideModel(
                 "travelled ${(rival.metres - o.metres).toInt()} m further with us")
             ours = rival
         }
-    }
-
-    /**
-     * Whether our fixes are too sparse for a vehicle to be taken: the median
-     * gap between the accurate ones of the last [SPARSE_WINDOW_MS] is over
-     * [SPARSE_GAP_MS], or there are not two of them. Over a minute, so that
-     * one dropout among fixes a second does not set it off — a stricter
-     * measure, about each report, did (review of 9 Oct 2026: the wrong
-     * vehicle in 20-27 of 60 runs, from 0). Then only a report within a
-     * second or so of a fix can be placed, and which ones are is chance: a
-     * vehicle whose reports fall
-     * in step with our fixes earns metres alone, and in simulations with a
-     * fix every 10 s the wrong one was taken about as often as ours (the
-     * review of 9 Oct 2026: 81 times and 90 in 900 runs). With a fix every
-     * 5-6 s, as on the phone in power saving (9 Oct 2026), every moment has
-     * three fixes within 10 s of it once those after it have come. The old
-     * rules decide nothing at ten fixes a minute either. Only the choice is
-     * held: metres are still earned, and parting — with the switch to a
-     * vehicle still beside us that it may make — is judged as ever
-     * (HANDOVER: "Пътуване от 9.10.2026", what is still open).
-     */
-    private fun fixesSparse(): Boolean {
-        val newest = track.lastOrNull() ?: return true
-        val recent = track.filter {
-            newest.timeMs - it.timeMs <= SPARSE_WINDOW_MS && (it.accuracy ?: 0.0) <= ACCURATE
-        }
-        if (recent.size < 2) return true
-        val gaps = recent.zipWithNext { a, b -> (b.timeMs - a.timeMs).toDouble() }
-        return median(gaps) > SPARSE_GAP_MS
     }
 
     /**
@@ -650,10 +655,8 @@ class RideModel(
         const val SWITCH_M = 100.0
         /** Ours silent this long no longer holds its place by its last report beside us. */
         const val SILENT_HOLD_MS = 5 * 60_000L
-        /** Fixes further apart than this, by the median, and no vehicle is taken; see fixesSparse. */
-        const val SPARSE_GAP_MS = 8_000L
-        /** …over the accurate fixes of this last stretch of our track. */
-        const val SPARSE_WINDOW_MS = 60_000L
+        /** Runs begun within this of one another are compared from the later beginning: one report. */
+        const val HEAD_START_MS = 30_000L
 
         /**
          * Vehicle speed: travel over [SPEED_WINDOW_MS], on smoothed accurate

@@ -159,6 +159,44 @@ fun main(args: Array<String>) {
             m.vehicle("V")?.history?.size == marks) { "${m.vehicle("V")?.history?.size} vs $marks" }
     }
 
+    // ── Reports that can never be placed hold nothing for long ──
+    // (7 Oct 2026, evening 76: two vehicles gone silent repeated reports
+    // from before tracking began at every reading.) A fix every second, V
+    // beside us; S repeats one old report at every reading — from before our
+    // first fix, or, once a 30 s gap in our fixes is over, from inside it
+    // (V beside us only after the gap). V is taken as without S: the one from
+    // before our track never holds the choice; the one in the gap ends the
+    // runs once, not at every reading.
+    run {
+        val p = Feed.path("A4508")
+        fun ride(stale: Long?, gap: IntRange?, besideFrom: Int = 0): Pair<Int, Event>? {
+            val m = RideModel()
+            var got: Pair<Int, Event>? = null
+            for (t in 0..400) {
+                val q = p.at(3000.0 + 11 * t)
+                if (gap == null || t !in gap)
+                    m.onFix(RideModel.Fix(T0 + t * 1000L, T0 + t * 1000L + 60, q.lat, q.lon, 6.0)).forEach { if (got == null) got = t to it }
+                if (t >= 5 && (t - 5) % 30 == 0) {
+                    val vq = p.at(3000.0 + 11 * (t - 3)).shift(if (t - 3 < besideFrom) 500.0 else 3.0, 0.0)
+                    val reports = listOf(RideModel.Report("V", "T-V", "A85", T0 + (t - 3) * 1000L, vq.lat, vq.lon)) +
+                        (stale?.takeIf { it < t * 1000L }?.let { listOf(RideModel.Report("S", "T-S", "A99", T0 + it, q.lat, q.lon)) }
+                            ?: emptyList())
+                    m.onReading(T0 + t * 1000L + 300, T0 + t * 1000L, reports).forEach { if (got == null) got = t to it }
+                }
+            }
+            return got
+        }
+        val plain = ride(null, null)
+        val before = ride(-20_000L, null)
+        check("an old report from before our track, repeated: the choice as without it",
+            plain != null && before?.first == plain.first && (before.second as? Event.Identified)?.key == "V") { "$plain vs $before" }
+        val inGap = ride(140_000L, 125..155, besideFrom = 160)
+        val gapOnly = ride(null, 125..155, besideFrom = 160)
+        check("an old report from a gap in our fixes, repeated: V taken, no later than a reading after it is without",
+            inGap != null && (inGap.second as? Event.Identified)?.key == "V" && gapOnly != null &&
+                inGap.first <= gapOnly.first + 30) { "$gapOnly vs $inGap" }
+    }
+
     // ── A fix every 6 s and fresh reports: the report waits for the fixes after it ──
     // (9 Oct 2026: power saving, a fix every 5-6 s; reports 2-5 s old.)
     run {
@@ -602,30 +640,47 @@ fun main(args: Array<String>) {
         check("every fix vaguer than 30 m: the model decides nothing", r.events.isEmpty()) { story(r) }
     }
 
-    // ── Fixes sparser than every 8 s: no vehicle taken ──
-    // At a fix every 9-10 s only a report within a second or so of a fix can
-    // be placed: with 213's and 304's reports at fixed phases to our fixes,
-    // one of them earns metres alone. Boarding at ХОТЕЛ ПЛИСКА with 304
-    // standing beside us (6 Oct 2026), 304 was taken in 72 and 83 of 180
-    // runs before the rule (review of 9 Oct 2026). Sparse from the start, at
-    // any phases: nothing is taken. (Still open: sparse only from departure,
-    // the rule lags; metres earned while sparse carry over once the fixes
-    // thicken — HANDOVER: "Пътуване от 9.10.2026".)
+    // ── Two vehicles abreast, and fixes that cannot place every report ──
+    // Boarding at ХОТЕЛ ПЛИСКА with 304 standing beside us (6 Oct 2026), 213
+    // chosen; 60 pairs of report phases of 213 and 304. Wherever the fixes
+    // can place only some reports, or begin mid-ride, 304 was taken (the
+    // simulations of 9 Oct 2026, in brackets: before the reports waiting for
+    // judgement held the choice, dropped ones ended the runs and runs abreast
+    // were compared from the later beginning). Never 304 now; where anything
+    // is taken, it is 213, and nothing replaces it.
     val phases = (0 until 30 step 3).flatMap { a -> (0 until 30 step 5).map { b -> a.toDouble() to b.toDouble() } }
-    for (step in listOf(9.0, 10.0)) {
+    fun never304(label: String, startAtPliska: Boolean = true, mustTake: Boolean, gaps: (Double) -> List<ClosedFloatingPointRange<Double>>) {
         val bad = ArrayList<String>()
         for ((p213, p304) in phases) {
-            val j = Journey(startAtPliska = true, gps = Gps(gaps = gapsEvery(step)), phase213 = p213, phase304 = p304)
+            val dep = Journey(startAtPliska = startAtPliska).tLeavePliska
+            val j = Journey(startAtPliska = startAtPliska, gps = Gps(gaps = gaps(dep)), phase213 = p213, phase304 = p304)
             val r = j.sim().run()
-            if (ident(r).isNotEmpty() || switched(r).isNotEmpty()) bad += "213 at $p213, 304 at $p304: ${story(r)}"
+            val id = ident(r)
+            if ((mustTake && id.isEmpty()) || id.any { it.second.key != "V213" } || switched(r).isNotEmpty())
+                bad += "213 at $p213, 304 at $p304: ${story(r)}"
         }
-        check("from ХОТЕЛ ПЛИСКА, a fix every ${step.toInt()} s, reports at any phase: no vehicle taken", bad.isEmpty()) {
+        check("$label: " + (if (mustTake) "213 taken" else "never 304") + ", nothing else", bad.isEmpty()) {
             bad.joinToString(" | ") }
     }
+    for ((step, must) in listOf(6.0 to true, 7.0 to true, 8.0 to false, 9.0 to false, 10.0 to false))   // (3, 6, 22, 0, 0)
+        never304("from ХОТЕЛ ПЛИСКА, a fix every ${step.toInt()} s", mustTake = must) { gapsEvery(step) }
+    for (lost in listOf(0.0, 12.0, 24.0))   // (11, 15, 11)
+        never304("from ХОТЕЛ ПЛИСКА, a fix every 6 s, one lost ${lost.toInt()} s after departure", mustTake = true) { dep ->
+            val k = Math.round((dep + lost) / 6.0) * 6.0
+            gapsEvery(6.0).filter { it.start < k - 1 || it.start > k + 1 } + listOf((k - 5.5)..(k + 5.5)) }
+    never304("from ХОТЕЛ ПЛИСКА, a fix a second at the stop, every 10 s from departure", mustTake = false) { dep ->   // (17)
+        gapsEvery(10.0).filter { it.start >= dep } }
+    for (startAtPliska in listOf(true, false)) for (after in listOf(30.0, 60.0, 120.0)) {
+        val from = if (startAtPliska) "from ХОТЕЛ ПЛИСКА" else "from УМБАЛ СВ. АННА"
+        never304("$from, a fix every 10 s until ${after.toInt()} s after ХОТЕЛ ПЛИСКА, then every second",   // (35-38; 18-37)
+            startAtPliska, mustTake = true) { dep -> gapsEvery(10.0).filter { it.endInclusive < dep + after } }
+        never304("$from, tracking begun ${after.toInt()} s after ХОТЕЛ ПЛИСКА",   // (18; 21)
+            startAtPliska, mustTake = true) { dep -> listOf(-1.0..(dep + after - 0.5)) }
+    }
     // A fix every second with one dropout of 9 or 12 s soon after leaving
-    // ХОТЕЛ ПЛИСКА, 304 alongside: fixes a second, not sparse — 213 taken,
-    // nothing else. (A measure of sparseness about each report took 304 in
-    // 20-27 of 60 runs here: review of 9 Oct 2026.)
+    // ХОТЕЛ ПЛИСКА, 304 alongside: every report can still be placed — 213
+    // taken, nothing else. (Ending runs on a long gap alone took 304 in 20-27
+    // of 60 runs here: review of 9 Oct 2026.)
     for (gap in listOf(9.0, 12.0)) for (at in listOf(0.0, 15.0, 45.0)) {
         val bad = ArrayList<String>()
         for ((p213, p304) in phases) {
@@ -1016,9 +1071,9 @@ val variants: Map<String, (String, List<String>) -> Unit> = mapOf(
     // at the reading) by the reading: the report waits for the fixes after
     // it, and 314 is taken a few seconds later than on the real trace. At 10
     // and 15 s only a report within about half a second of a fix can be
-    // placed, and on this trace none is; and fixes that sparse let no
-    // vehicle be taken anyway (RideModel.fixesSparse): nothing is decided.
-    // Whatever is decided here must not be another vehicle.
+    // placed, and on this trace none is; and a report no fix can place ends
+    // the runs of all but ours: nothing is decided. Whatever is decided here
+    // must not be another vehicle.
     "2026-10-09_314.txt" to { start, lines ->
         val six = replay(start, thinned(lines, 6))
         val id = six.events.firstOrNull()
