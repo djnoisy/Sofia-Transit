@@ -38,6 +38,12 @@ class RideShadow(
     private val model = RideModel(chosenRouteId)
     /** What became of the early rule by the boarding stop, for the summary; null while open. */
     private var boardingOutcome: String? = null
+    /**
+     * The model had taken no vehicle at the latest reading. The early rule is
+     * judged on that reading, after it — by when a fix may have let the model
+     * take one, a report having waited for the fixes after it.
+     */
+    private var noneAtReading = false
 
     @Synchronized
     fun onFix(timeMs: Long, receivedMs: Long, lat: Double, lon: Double, accuracy: Double?) {
@@ -53,6 +59,7 @@ class RideShadow(
                 v.timestampSec * 1000, traced6(v.lat), traced6(v.lon))
         }
         tell(receivedMs, model.onReading(receivedMs, serverDateMs, reports))
+        noneAtReading = model.ours == null && !model.alighted
         val top = model.leaders().take(3)
         if (top.isNotEmpty()) {
             debug("Model @${clock(receivedMs)}: metres together — " + top.joinToString(", ") { v ->
@@ -64,7 +71,7 @@ class RideShadow(
 
     /** Whether the early rule by the boarding stop is still to be judged. */
     @Synchronized
-    fun wantsBoarding(): Boolean = boardingOutcome == null && model.ours == null && !model.alighted
+    fun wantsBoarding(): Boolean = boardingOutcome == null && noneAtReading
 
     /**
      * The early rule by the boarding stop, at the latest reading: of the

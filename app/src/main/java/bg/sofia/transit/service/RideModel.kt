@@ -210,7 +210,7 @@ class RideModel(
             val t = r.timeMs + clockOffsetMs
             when {
                 v == null -> waiting.remove(key)
-                positionAt(t) != null -> { take(v, r, nowFix); judged = true }
+                positionAt(t) != null -> { waiting.remove(key); if (take(v, r, nowFix)) judged = true }
                 nowFix - t > SMOOTH_SPANS_MS.last() -> waiting.remove(key)
             }
         }
@@ -256,21 +256,28 @@ class RideModel(
         return events
     }
 
-    private fun take(v: Vehicle, r: Report, nowFix: Long) {
+    /** Takes in a report of [v]; true if it was judged. */
+    private fun take(v: Vehicle, r: Report, nowFix: Long): Boolean {
         v.lastSeenMs = nowFix
         v.tripId = r.tripId
         v.routeId = r.routeId
         val t = r.timeMs + clockOffsetMs
-        if (t <= v.lastReportMs) return
-        if (nowFix - t > MAX_REPORT_AGE_MS) return
+        if (t <= v.lastReportMs) return false
+        if (nowFix - t > MAX_REPORT_AGE_MS) return false
         // Not yet judged while our own place then is unknown: it waits for the
         // fixes after it (judgeWaiting). Feed reports reach us 2-5 s old, and
         // with a fix only every 6 s — a phone saving power — too few of those
-        // after the report have come by the reading to place us, ever; and a
-        // vehicle whose reports happen to come older would earn metres alone.
+        // after the report have come by the reading to place us; judged only
+        // at readings, such a report never was, and a vehicle whose reports
+        // happened to come older earned metres alone. The newest report
+        // waits: a stale copy of the feed does not put an older one back.
         val us = positionAt(t)
-        if (us == null) { waiting[v.key] = r; return }
-        waiting.remove(v.key)
+        val w = waiting[v.key]
+        if (us == null) {
+            if (w == null || r.timeMs > w.timeMs) waiting[v.key] = r
+            return false
+        }
+        if (w != null && w.timeMs <= r.timeMs) waiting.remove(v.key)
         v.lastReportMs = t
         val d = distance(us.lat, us.lon, r.lat, r.lon)
         v.lastDistance = d
@@ -305,6 +312,7 @@ class RideModel(
         }
         v.history.addLast(Mark(t, v.metres, d <= BESIDE_M))
         while (v.history.size > HISTORY) v.history.removeFirst()
+        return true
     }
 
     /** Ours has left us: we got off, it was not ours, or another took its place. */

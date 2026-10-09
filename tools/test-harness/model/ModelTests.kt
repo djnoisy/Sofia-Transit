@@ -137,7 +137,8 @@ fun main(args: Array<String>) {
     // ── A report judged once our place is known ──
     run {
         // Fixes to 10 s, then a reading with a report at 14 s — our place
-        // then not yet known; a fix at 15 s; the same report again.
+        // then not yet known; fixes from 11 s place it; the same report
+        // again in the next reading is not taken in twice.
         val p = Feed.path("A4508")
         val m = RideModel()
         fun fix(k: Int) { val q = p.at(3000.0 + 11 * k)
@@ -148,10 +149,63 @@ fun main(args: Array<String>) {
         m.onReading(T0 + 16_000L, T0 + 16_000L, listOf(rep))
         val before = m.vehicle("V")?.lastDistance
         for (k in 11..17) fix(k)
-        m.onReading(T0 + 18_000L, T0 + 18_000L, listOf(rep))
         val after = m.vehicle("V")?.lastDistance
-        check("a report from before our place was known: judged at the next reading",
+        val marks = m.vehicle("V")?.history?.size
+        m.onReading(T0 + 18_000L, T0 + 18_000L, listOf(rep))
+        check("a report from before our place was known: judged once fixes place us, before the next reading",
             before == null && after != null && after < 10.0) { "before $before after $after" }
+        check("…and the same report in the next reading not taken in again",
+            m.vehicle("V")?.history?.size == marks) { "${m.vehicle("V")?.history?.size} vs $marks" }
+    }
+
+    // ── A fix every 6 s and fresh reports: the report waits for the fixes after it ──
+    // (9 Oct 2026: power saving, a fix every 5-6 s; reports 2-5 s old.)
+    run {
+        val p = Feed.path("A4508")
+        val m = RideModel()
+        val fromFix = ArrayList<Pair<Int, Event>>()
+        val fromReading = ArrayList<Pair<Int, Event>>()
+        for (t in 0..240) {
+            val q = p.at(3000.0 + 11 * t)
+            if (t % 6 == 0) m.onFix(RideModel.Fix(T0 + t * 1000L, T0 + t * 1000L + 60, q.lat, q.lon, 8.0))
+                .forEach { fromFix += t to it }
+            if (t >= 5 && (t - 5) % 30 == 0) {
+                val rt = t - 3
+                val vq = p.at(3000.0 + 11 * rt).shift(3.0, 0.0)
+                m.onReading(T0 + t * 1000L + 300, T0 + t * 1000L,
+                    listOf(RideModel.Report("V", "A85-A4508-1", "A85", T0 + rt * 1000L, vq.lat, vq.lon)))
+                    .forEach { fromReading += t to it }
+            }
+        }
+        val id = (fromFix + fromReading).filter { it.second is Event.Identified }
+        check("a fix every 6 s, reports 3 s old: the vehicle identified, on the fix that placed its report",
+            id.size == 1 && fromFix.any { it.second is Event.Identified }) {
+            "fix: $fromFix reading: $fromReading" }
+    }
+    run {
+        // The first fix after the reading too vague to count, the next one
+        // places the report; then a stale copy of the feed brings an older
+        // report while a newer one waits: the newer is the one judged.
+        val p = Feed.path("A4508")
+        val m = RideModel()
+        fun fix(k: Int, acc: Double = 8.0) { val q = p.at(3000.0 + 11 * k)
+            m.onFix(RideModel.Fix(T0 + k * 1000L, T0 + k * 1000L, q.lat, q.lon, acc)) }
+        fun report(k: Int) = p.at(3000.0 + 11 * k).let {
+            RideModel.Report("V", "A85-A4508-1", "A85", T0 + k * 1000L, it.lat, it.lon) }
+        for (k in listOf(0, 6, 12)) fix(k)
+        m.onReading(T0 + 18_000L, T0 + 18_000L, listOf(report(15)))
+        fix(18, acc = 50.0)
+        val afterVague = m.vehicle("V")?.lastReportMs
+        fix(24)
+        check("a report waiting: not placed by a vague fix, placed by the next",
+            afterVague == 0L && m.vehicle("V")?.lastReportMs == T0 + 15_000L) {
+            "after the vague fix $afterVague, then ${m.vehicle("V")?.lastReportMs}" }
+        for (k in listOf(30, 36, 42)) fix(k)
+        m.onReading(T0 + 48_000L, T0 + 48_000L, listOf(report(45)))
+        m.onReading(T0 + 49_000L, T0 + 49_000L, listOf(report(41)))   // a stale copy of the feed, unplaced too
+        fix(48); fix(54)
+        check("a report waiting: a stale older one does not take its place",
+            m.vehicle("V")?.lastReportMs == T0 + 45_000L) { "${m.vehicle("V")?.lastReportMs?.minus(T0)}" }
     }
 
     // ── The clock difference learnt late: what was taken in moves with it ──
@@ -708,6 +762,29 @@ fun main(args: Array<String>) {
             lines.joinToString(" | ") }
     }
     run {
+        // A fix every 6 s, reports 3 s old: the model takes 213 on the fix
+        // after the second reading (the report waited for it), before the
+        // early rule is judged on that reading — the boarding stop known
+        // only then, the lookup taking a moment. Judged all the same.
+        val lines = ArrayList<String>()
+        val shadow = RideShadow("A85", { lines += it })
+        val p = Feed.path("A4508"); val s0 = p.along(Feed.stop("A1196"))
+        val ride = Mover(p, s0).stand(10.0).drive(s0 + 2000, 11.0)
+        for (t in 0..70) {
+            val ms = T0 + t * 1000L; val q = ride.at(t.toDouble())
+            if (t % 6 == 0) shadow.onFix(ms, ms + 60, q.lat, q.lon, 8.0)
+            if (t == 35 || t == 65) {
+                val r = ride.at(t - 3.0)
+                shadow.onReading(ms + 300, ms, listOf(RideShadow.Seen("V213", "T213", "A85", T0 / 1000 + t - 3, r.lat, r.lon)))
+            }
+            if (t == 66) shadow.judgeBoarding("X") { T0 / 1000 }
+        }
+        val id = lines.indexOfFirst { "identified A85 T213" in it }
+        val rule = lines.indexOfFirst { it.startsWith("Model (boarding stop X): would take A85 T213") }
+        check("stage 2, early rule: judged on the reading though the model took a vehicle on a fix since",
+            id in 0 until rule) { lines.joinToString(" | ") }
+    }
+    run {
         val (shadow, lines) = shadowRide(emptyList(), due = emptySet(), readings = 3, until = 100.0)
         val id = lines.firstOrNull { "identified" in it }
         check("stage 2: the model's conclusions logged in the replay's words, at the reading's time",
@@ -899,8 +976,10 @@ val variants: Map<String, (String, List<String>) -> Unit> = mapOf(
     // leaves fewer than three fixes within 10 s of a fresh report (2-5 s old
     // at the reading) by the reading: the report waits for the fixes after
     // it, and 314 is taken a few seconds later than on the real trace. At 10
-    // and 15 s no moment has three fixes within 10 s of it, and nothing is
-    // decided; whatever is, it must never be another vehicle.
+    // and 15 s only a report within about half a second of a fix can be
+    // placed, and on this trace none is: nothing is decided. Whatever is
+    // decided here must not be another vehicle — though at a fix every 10 s
+    // the simulations can take one (HANDOVER: "Пътуване от 9.10.2026").
     "2026-10-09_314.txt" to { start, lines ->
         val six = replay(start, thinned(lines, 6))
         val id = six.events.firstOrNull()
