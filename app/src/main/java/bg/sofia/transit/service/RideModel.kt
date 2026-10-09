@@ -35,8 +35,9 @@ import kotlin.math.hypot
  * few seconds of it, not one fix, with a fix that jumped left out; fixes
  * worse than [ACCURATE] count for nothing either way; a report neither beside us nor clearly apart is
  * bridged over rather than breaking the run; and parting takes two reports
- * in a row. With poor positions the model holds what it has rather than
- * deciding anew.
+ * in a row. A report whose moment our fixes cannot yet place waits for the
+ * fixes that follow it. With poor positions the model holds what it has
+ * rather than deciding anew.
  *
  * Pure Kotlin, no Android types, so it can be tested and replayed on its own
  * (tools/test-harness/run_model_tests.sh). Stage 2 runs it beside the
@@ -119,6 +120,8 @@ class RideModel(
 
     private val track = ArrayDeque<Fix>()
     private val vehicles = HashMap<String, Vehicle>()
+    /** Reports not yet judged, as our place at their moment is not yet known; by vehicle. */
+    private val waiting = HashMap<String, Report>()
     private val offsetSamples = ArrayDeque<Long>()
     /** Fix time minus arrival time of the recent fixes. */
     private val skews = ArrayDeque<Long>()
@@ -187,8 +190,31 @@ class RideModel(
             lastVehicleSpeedMs = at
         }
         val events = ArrayList<Event>()
+        val judged = judgeWaiting(f.timeMs)
         judgeParting(f.timeMs, events)
+        if (judged && !alighted) choose(events)
         return events
+    }
+
+    /**
+     * Judges the reports that were waiting for our place at their moment,
+     * now that this fix may give it; one that no fix to come can place any
+     * more is dropped. True if any was judged.
+     */
+    private fun judgeWaiting(nowFix: Long): Boolean {
+        if (alighted) { waiting.clear(); return false }
+        var judged = false
+        for (key in waiting.keys.toList()) {
+            val r = waiting.getValue(key)
+            val v = vehicles[key]
+            val t = r.timeMs + clockOffsetMs
+            when {
+                v == null -> waiting.remove(key)
+                positionAt(t) != null -> { take(v, r, nowFix); judged = true }
+                nowFix - t > SMOOTH_SPANS_MS.last() -> waiting.remove(key)
+            }
+        }
+        return judged
     }
 
     /**
@@ -237,9 +263,14 @@ class RideModel(
         val t = r.timeMs + clockOffsetMs
         if (t <= v.lastReportMs) return
         if (nowFix - t > MAX_REPORT_AGE_MS) return
-        // Not yet judged while our own place then is unknown: the same report,
-        // in the next reading, may be judged once later fixes place us.
-        val us = positionAt(t) ?: return
+        // Not yet judged while our own place then is unknown: it waits for the
+        // fixes after it (judgeWaiting). Feed reports reach us 2-5 s old, and
+        // with a fix only every 6 s — a phone saving power — too few of those
+        // after the report have come by the reading to place us, ever; and a
+        // vehicle whose reports happen to come older would earn metres alone.
+        val us = positionAt(t)
+        if (us == null) { waiting[v.key] = r; return }
+        waiting.remove(v.key)
         v.lastReportMs = t
         val d = distance(us.lat, us.lon, r.lat, r.lon)
         v.lastDistance = d

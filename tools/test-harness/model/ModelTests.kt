@@ -523,11 +523,15 @@ fun main(args: Array<String>) {
     )
     // MODEL_SEEDS=30 for a longer run.
     val seeds = System.getenv("MODEL_SEEDS")?.toIntOrNull() ?: 5
-    for ((label, gpsOf, late) in poor) {
+    // 213's reports as they reach us: 28 s old at the reading, and fresh — 3 s
+    // and 5 s, as in the feed (9 Oct 2026: 2-5 s), where few fixes after the
+    // report have come by the reading.
+    val reportAges = listOf(7.0 to "reports 28 s old", 2.0 to "reports 3 s old", 0.0 to "reports 5 s old")
+    for ((label, gpsOf, late) in poor) for ((phase, ages) in reportAges) {
         var ok = 0
         val bad = ArrayList<String>()
         for (seed in 1..seeds) {
-            val j = Journey(gps = gpsOf(seed), glitch213 = true)
+            val j = Journey(gps = gpsOf(seed), glitch213 = true, phase213 = phase)
             val r = j.sim(until = j.tLeaveOrlov + late + 60).run()
             val id = ident(r).firstOrNull()
             val off = alighted(r).firstOrNull()
@@ -535,7 +539,7 @@ fun main(args: Array<String>) {
                 off?.second?.key == "V213" && off.first >= j.tLeaveOrlov + 20 && off.first <= j.tLeaveOrlov + late
             if (good) ok++ else bad += "seed $seed: ${story(r)}"
         }
-        check("poor positions, $label: 213, never 304, got off — $ok of $seeds", ok == seeds) { bad.joinToString(" | ") }
+        check("poor positions, $label, $ages: 213, never 304, got off — $ok of $seeds", ok == seeds) { bad.joinToString(" | ") }
     }
     run {
         val j = Journey(gps = Gps(accuracy = 35.0))
@@ -893,9 +897,19 @@ fun thinned(lines: List<String>, stepS: Int): List<String> {
 val variants: Map<String, (String, List<String>) -> Unit> = mapOf(
     // 9 Oct 2026, 314: had power saving held the whole way. A fix every 6 s
     // leaves fewer than three fixes within 10 s of a fresh report (2-5 s old
-    // at the reading), so the model cannot place us at the report's moment;
-    // whatever it decides, it must never take another vehicle.
+    // at the reading) by the reading: the report waits for the fixes after
+    // it, and 314 is taken a few seconds later than on the real trace. At 10
+    // and 15 s no moment has three fixes within 10 s of it, and nothing is
+    // decided; whatever is, it must never be another vehicle.
     "2026-10-09_314.txt" to { start, lines ->
+        val six = replay(start, thinned(lines, 6))
+        val id = six.events.firstOrNull()
+        check("9.10 bus 314, a fix every 6 s: 314 identified by 15:28:15", (id?.event as? Event.Identified)?.routeId == "A200" &&
+            clock(id.atMs) <= "15:28:15") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        val off = six.events.lastOrNull()
+        check("9.10 bus 314, a fix every 6 s: got off between 15:31:00 and 15:32:30", six.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "15:31:00".."15:32:30") {
+            six.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
         for (step in listOf(6, 10, 15)) {
             val rp = replay(start, thinned(lines, step))
             println("TRACE 2026-10-09_314.txt, a fix every $step s: " +
