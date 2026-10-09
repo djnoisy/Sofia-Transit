@@ -751,6 +751,7 @@ fun main(args: Array<String>) {
                 val rp = replay(start, lines)
                 println("TRACE ${f.name}: " + rp.events.joinToString("; ") { "${clock(it.atMs)} ${describe(it.event)}" })
                 expectations[f.name]?.invoke(rp)
+                variants[f.name]?.invoke(start, lines)
             }
         }
     } else println("(no TRACE_DIR: recorded journeys not replayed)")
@@ -848,5 +849,62 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] != "A81" }
         check("7.10 evening 76: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // 9 Oct 2026: 314 (A200) from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, 213 chosen,
+    // tracking started while waiting, power saving left on: from 15:26:35 to
+    // 15:27:28 a fix every 5-6 s, standing at the stop. Departure 15:27:31.
+    // The app's first check (15:27:36) was skipped for degraded positioning
+    // and it took 314 at 15:28:07 by its boarding-stop check; the model too,
+    // at its second reading. Off at ОБЩИНА МЛАДОСТ about 15:29:50, walking
+    // from 15:30:04; 314 was over 100 m away from 15:30:34.
+    "2026-10-09_314.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("9.10 bus 314: 314 identified by 15:28:10", (id?.event as? Event.Identified)?.routeId == "A200" &&
+            clock(id.atMs) <= "15:28:10") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        check("9.10 bus 314: nothing else until getting off", rp.events.size == 2 &&
+            rp.events[1].event is Event.Alighted) { rp.events.joinToString { describe(it.event) } }
+        val off = rp.events.lastOrNull()
+        check("9.10 bus 314: got off between 15:31:00 and 15:32:30", off?.event is Event.Alighted &&
+            clock(off.atMs) in "15:31:00".."15:32:30") { off?.let { clock(it.atMs) } ?: "none" }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] != "A200" }
+        check("9.10 bus 314: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    }
+)
+
+/**
+ * The trace's records with only one fix in every [stepS] seconds kept, as a
+ * phone in power saving gives them, without speed or bearing.
+ */
+fun thinned(lines: List<String>, stepS: Int): List<String> {
+    var next = Long.MIN_VALUE
+    return lines.mapNotNull { line ->
+        val p = line.split(",")
+        if (p[0] != "F") return@mapNotNull line
+        val t = p[2].toLong()
+        if (t < next) return@mapNotNull null
+        next = t + stepS * 1000L - 500L
+        (p.take(6) + listOf("", "")).joinToString(",")
+    }
+}
+
+/** Recorded journeys replayed as they would have been with poorer positions, by file name. */
+val variants: Map<String, (String, List<String>) -> Unit> = mapOf(
+    // 9 Oct 2026, 314: had power saving held the whole way. A fix every 6 s
+    // leaves fewer than three fixes within 10 s of a fresh report (2-5 s old
+    // at the reading), so the model cannot place us at the report's moment;
+    // whatever it decides, it must never take another vehicle.
+    "2026-10-09_314.txt" to { start, lines ->
+        for (step in listOf(6, 10, 15)) {
+            val rp = replay(start, thinned(lines, step))
+            println("TRACE 2026-10-09_314.txt, a fix every $step s: " +
+                rp.events.joinToString("; ") { "${clock(it.atMs)} ${describe(it.event)}" })
+            check("9.10 bus 314, a fix every $step s: no vehicle but 314 taken", rp.events.all {
+                when (val e = it.event) {
+                    is Event.Identified -> e.routeId == "A200"
+                    is Event.Switched -> e.toRouteId == "A200"
+                    else -> true
+                } }) { rp.events.joinToString { describe(it.event) } }
+        }
     }
 )
