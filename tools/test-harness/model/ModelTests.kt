@@ -23,6 +23,7 @@ class Journey(
     val chosen: String = "A85",
     val dwellOrlov: Double = 20.0,
     val phase213: Double = 7.0,
+    val phase304: Double = 19.0,
     val silent213: List<ClosedFloatingPointRange<Double>> = emptyList(),
     /** 213 is not in the feed at all: we ride a vehicle that never reports. */
     val report213: Boolean = true,
@@ -67,7 +68,7 @@ class Journey(
             silent = silent213,
             glitch = { rt -> if (glitch213 && rt >= glitchFrom && rt < glitchFrom + 30) 50.0 else 0.0 })
         else null,
-        SimVehicle("V304", "A217-A2791-4-5-1", "A217", { bus304.at(it) }, phase = 19.0),
+        SimVehicle("V304", "A217-A2791-4-5-1", "A217", { bus304.at(it) }, phase = phase304),
         SimVehicle("VBACK", "A85-A4509-1-1-1", "A85", { oncoming.at(it) }, phase = 3.0)
     ) + extra
 
@@ -599,6 +600,37 @@ fun main(args: Array<String>) {
         val j = Journey(gps = Gps(accuracy = 35.0))
         val r = j.sim().run()
         check("every fix vaguer than 30 m: the model decides nothing", r.events.isEmpty()) { story(r) }
+    }
+
+    // ── Fixes sparser than every 8 s: no vehicle taken ──
+    // At a fix every 10 s only a report within a second or so of a fix can
+    // be placed: with 213's and 304's reports at fixed phases to our fixes,
+    // one of them earns metres alone, and 304 was taken about as often as
+    // 213 (review of 9 Oct 2026). Whatever the phases, nothing is taken.
+    for (step in listOf(10.0, 15.0)) {
+        val bad = ArrayList<String>()
+        for (p213 in 0 until 30 step 5) for (p304 in 0 until 30 step 5) {
+            val j = Journey(gps = Gps(gaps = gapsEvery(step)), phase213 = p213.toDouble(), phase304 = p304.toDouble())
+            val r = j.sim().run()
+            if (ident(r).isNotEmpty() || switched(r).isNotEmpty()) bad += "213 at $p213, 304 at $p304: ${story(r)}"
+        }
+        check("a fix every ${step.toInt()} s, reports at any phase: no vehicle taken", bad.isEmpty()) {
+            bad.joinToString(" | ") }
+    }
+    run {
+        // A fix every 10 s for the first 150 s, then every second: 213 is
+        // taken once the fixes thicken, and nothing else.
+        val bad = ArrayList<String>()
+        for (p213 in 0 until 30 step 5) for (p304 in 0 until 30 step 5) {
+            val j = Journey(gps = Gps(gaps = gapsEvery(10.0).filter { it.endInclusive < 150.0 }),
+                phase213 = p213.toDouble(), phase304 = p304.toDouble())
+            val r = j.sim().run()
+            val id = ident(r)
+            if (id.size != 1 || id[0].second.key != "V213" || id[0].first < 150.0 ||
+                switched(r).isNotEmpty() || withdrawn(r).isNotEmpty()) bad += "213 at $p213, 304 at $p304: ${story(r)}"
+        }
+        check("a fix every 10 s, then every second: 213 taken once the fixes thicken", bad.isEmpty()) {
+            bad.joinToString(" | ") }
     }
 
     // ── Getting off after a short stop, whatever the rhythm of the reports ──
