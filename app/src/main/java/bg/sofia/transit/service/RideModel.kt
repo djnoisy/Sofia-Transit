@@ -120,11 +120,6 @@ class RideModel(
         internal var lastSeenMs = 0L
         /** Time of the first report of its present run beside us. */
         internal var runFromMs = 0L
-        /**
-         * That run began just after it was seen, our place known, not beside
-         * us: its later beginning is evidence, not the phase of its reports.
-         */
-        internal var beganApart = false
         /** Time of its latest report that no fix could place. */
         internal var unplacedMs = 0L
         /** Its recent reports as judged: time, metres after it, and whether beside us. */
@@ -327,12 +322,7 @@ class RideModel(
                         val moved = distance(then.lat, then.lon, us.lat, us.lon)
                         if (moved >= MIN_MOVE_M) v.metres += moved
                     }
-                } else {
-                    v.runFromMs = t
-                    // Seen not beside us at its report before, within two reports.
-                    val prev = v.history.lastOrNull()
-                    v.beganApart = prev != null && !prev.beside && t - prev.timeMs <= 2 * HEAD_START_MS
-                }
+                } else v.runFromMs = t
                 v.togetherSinceMs = t
                 v.lastBesideMs = t
             }
@@ -449,15 +439,9 @@ class RideModel(
             // later — a vehicle just come beside us — is compared over the
             // same stretch. (Taking the latest beginning of all runs instead,
             // one vehicle beside us once switched the comparison off for the
-            // rest: review of 9 Oct 2026.) But a run begun just after its
-            // vehicle was seen not beside us began later in fact: it does not
-            // set the stretch. A bus of the chosen line waiting 45 m behind
-            // ours at the stop and closing up as we left was taken in 34, 15, 4
-            // of 60 runs (review of e7cb595), now 11, 0, 0, as before the rule.
+            // rest: review of 9 Oct 2026.)
             val first = contenders.minOf { it.runFromMs }
-            val late = contenders.filter {
-                it.runFromMs == first || (it.runFromMs - first <= HEAD_START_MS && !it.beganApart)
-            }.maxOf { it.runFromMs }
+            val late = contenders.filter { it.runFromMs - first <= HEAD_START_MS }.maxOf { it.runFromMs }
             val fair = contenders.associateWith { metresAt(it, common) - metresAt(it, late) }
             val top = fair.values.max()
             // Until the leader has gone beyond the tie in the stretch, the
