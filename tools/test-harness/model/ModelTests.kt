@@ -1055,9 +1055,10 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     },
     // 7 Oct 2026, evening: tram 22 (22 chosen, tracking started while waiting)
     // from УЛ. ОПЪЛЧЕНСКА, off at ЦЕНТРАЛНИ ХАЛИ about 18:19; the tram left
-    // about 18:19:30 and was over 100 m away from 18:19:56. Its reports come
-    // every 30 s, so the second after departure (18:15:26) is the first that
-    // can make 150 m together; the app took it at 18:14:57 by its
+    // about 18:19:30 and was over 100 m away from 18:19:56. The app reads the
+    // feed every 30 s (the tram itself reports every 5 s or so), so the
+    // second reading after departure (18:15:26) is the first that can make
+    // 150 m together; the app took it at 18:14:57 by its
     // boarding-stop check, which the model does not have.
     "2026-10-07_22.txt" to { rp ->
         val id = rp.events.firstOrNull()
