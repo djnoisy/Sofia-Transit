@@ -740,6 +740,26 @@ fun main(args: Array<String>) {
         check("in 213 from ХОТЕЛ ПЛИСКА, a bus of the chosen line beside us from ${cAfter.toInt()} s after: 213 taken",
             bad.isEmpty()) { bad.joinToString(" | ") }
     }
+    // Tracking begun mid-ride, 213 and 304 abreast; 304's second report after
+    // that 50 m off — bridged over. The metres of its next report were
+    // shared out from the bridged one, and 304 kept its head start (review
+    // of 9 Oct 2026: 63 of 900 runs; 213 at 15 s and 304 at 27 s among them).
+    run {
+        val bad = ArrayList<String>()
+        val pairs = (0 until 30 step 3).flatMap { a -> (0 until 30 step 3).map { b -> a to b } } + listOf(15 to 27)
+        for ((a, b) in pairs) {
+            val dep = Journey(startAtPliska = true).tLeavePliska
+            val ts = dep + 30.0
+            var k = b.toDouble(); while (k < ts - 3) k += 30.0
+            val glitchAt = k + 30.0
+            val j = Journey(startAtPliska = true, gps = Gps(gaps = listOf(-1.0..(ts - 0.5))), phase213 = a.toDouble(), phase304 = b.toDouble())
+            val vs = j.vehicles().map { v -> if (v.key != "V304") v else SimVehicle(v.key, v.tripId, v.routeId, v.pos, phase = v.phase,
+                glitch = { rt -> if (kotlin.math.abs(rt - glitchAt) < 0.5) 50.0 else 0.0 }) }
+            val r = Sim({ j.ours(it) }, vs, j.tLeaveOrlov + 420, j.gps, j.chosen).run()
+            if (ident(r).firstOrNull()?.second?.key != "V213") bad += "213 at $a, 304 at $b: ${story(r)}"
+        }
+        check("tracking begun mid-ride, one report of 304 50 m off: 213 taken", bad.isEmpty()) { bad.joinToString(" | ") }
+    }
     // Waiting on foot at ХОТЕЛ ПЛИСКА: a bus S stands beside us, reports
     // once and goes silent (its trip ended); 213 comes at 60 s and leaves
     // with us at 80 s. S, its run begun long before 213's, was taken with

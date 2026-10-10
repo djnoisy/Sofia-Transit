@@ -478,15 +478,27 @@ class RideModel(
 
     /**
      * A vehicle's metres at [t], from its recent reports: those of the last
-     * report by then, and of the stretch to its next report the share we had
-     * travelled by [t], when that stretch counted.
+     * report by then, and of the metres the next report added the share we
+     * had travelled by [t].
+     *
+     * Those metres were travelled from the report beside us before it, not
+     * from the last report by [t] when that one was bridged over — neither
+     * beside us nor clearly apart, it earns nothing itself. Shared out from
+     * the bridged report, all of them fell after it, and at a moment before
+     * it the vehicle seemed to have none of them: the one that began first
+     * kept its head start in the comparison from the later beginning (review
+     * of 9 Oct 2026: 304 taken in 63 of 900 simulated runs, now 0).
      */
     private fun metresAt(v: Vehicle, t: Long): Double {
         val h = v.history
         val k = h.indexOfLast { it.timeMs <= t }
         if (k < 0) return 0.0
-        val before = h[k]
-        val next = h.getOrNull(k + 1) ?: return before.metres
+        val j = (k + 1 until h.size).firstOrNull { h[it].metres > h[k].metres } ?: return h[k].metres
+        val fromIdx = (j - 1 downTo 0).firstOrNull { h[it].beside }
+        // The run that added them began after t: none of them by then.
+        if (fromIdx != null && fromIdx > k) return h[k].metres
+        val before = h[fromIdx ?: k]
+        val next = h[j]
         val gained = next.metres - before.metres
         if (gained <= 0.0) return before.metres
         val a = positionAt(before.timeMs); val b = positionAt(t); val c = positionAt(next.timeMs)
