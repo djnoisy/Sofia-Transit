@@ -1147,6 +1147,25 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] != "A200" }
         check("9.10 bus 314: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // 12 Oct 2026: 76 (A81) from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, 111 chosen,
+    // tracking started while waiting. 76 pulled out 44 m at 08:55:20 and
+    // stood 24 s; the app took it at 08:55:58 by its boarding-stop check, the
+    // model at its third reading. The trace ends aboard at 09:02:49. On the
+    // way the app's age correction put 87 at 17 m (59 m at the same moment)
+    // and trolleybus 3, its report 83 s old, at 0 m (over 150 m off): neither
+    // may earn anything.
+    "2026-10-12_76.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("12.10 bus 76: 76 identified by 08:56:30", (id?.event as? Event.Identified)?.routeId == "A81" &&
+            clock(id.atMs) <= "08:56:30") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        check("12.10 bus 76: nothing else", rp.events.size == 1) { rp.events.joinToString { describe(it.event) } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] != "A81" }
+        check("12.10 bus 76: 87 and trolleybus 3 earn nothing",
+            others.none { rp.routeOf[it.key] in setOf("A87", "TB32") && it.value > 0.0 }) {
+            others.joinToString { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } }
+        check("12.10 bus 76: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     }
 )
 
