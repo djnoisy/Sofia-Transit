@@ -1166,6 +1166,24 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
             others.joinToString { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } }
         check("12.10 bus 76: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // 12 Oct 2026, the same 76 a stop later: 305 chosen, tracking begun aboard
+    // near УМБАЛ СВ. АННА. The app took 76 at its second reading (09:05:04),
+    // the model too. Off at ПЛ. ОРЛОВ МОСТ about 09:11:20 and stood there a
+    // minute while 204 and others behind 76 came by; 76 left about 09:12:00.
+    // 204 came beside us as we pulled in: 71 m together, no more.
+    "2026-10-12_76b.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("12.10 76 from aboard: 76 identified by 09:05:05", (id?.event as? Event.Identified)?.routeId == "A81" &&
+            clock(id.atMs) <= "09:05:05") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        check("12.10 76 from aboard: nothing else until getting off", rp.events.size == 2 &&
+            rp.events[1].event is Event.Alighted) { rp.events.joinToString { describe(it.event) } }
+        val off = rp.events.lastOrNull()
+        check("12.10 76 from aboard: got off between 09:12:30 and 09:14:30", off?.event is Event.Alighted &&
+            clock(off.atMs) in "09:12:30".."09:14:30") { off?.let { clock(it.atMs) } ?: "none" }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] != "A81" }
+        check("12.10 76 from aboard: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     }
 )
 
@@ -1187,6 +1205,23 @@ fun thinned(lines: List<String>, stepS: Int): List<String> {
 
 /** Recorded journeys replayed as they would have been with poorer positions, by file name. */
 val variants: Map<String, (String, List<String>) -> Unit> = mapOf(
+    // 12 Oct 2026, 76 from aboard: tracking begun on foot at ПЛ. ОРЛОВ МОСТ,
+    // every 10 s from just after getting off, while 76 leaves and 204, 84 and
+    // 9 come by the stop: nothing may be taken.
+    "2026-10-12_76b.txt" to { start, lines ->
+        val bad = ArrayList<String>()
+        val first = lines.first { it.startsWith("F,") }.split(",")[1].toLong()
+        var from = first + (7 * 60 + 0) * 1000L   // 09:11:20
+        while (true) {
+            val i = lines.indexOfFirst { it.startsWith("F,") && it.split(",")[1].toLong() >= from }
+            if (i < 0) break
+            val rp = replay(start, lines.drop(i))
+            if (rp.events.isNotEmpty()) bad += "from ${clock(from)}: " + rp.events.joinToString { describe(it.event) }
+            from += 10_000L
+        }
+        check("12.10 76 from aboard, tracking begun on foot at the stop: nothing taken", bad.isEmpty()) {
+            bad.joinToString(" | ") }
+    },
     // 9 Oct 2026, 314: had power saving held the whole way. A fix every 6 s
     // leaves fewer than three fixes within 10 s of a fresh report (2-5 s old
     // at the reading) by the reading: the report waits for the fixes after
