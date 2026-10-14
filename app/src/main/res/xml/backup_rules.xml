@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <exclude domain="database" path="sofia_transit.db"/>
+    <!-- Positions of every journey (JourneyTrace): stays on the phone. -->
+    <exclude domain="file" path="journey_trace.txt"/>
 </full-backup-content>

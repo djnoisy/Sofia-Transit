@@ -1,16 +1,19 @@
-// The getting-off rule of JourneyService (gotOff, see ALIGHT_WAIT_MS) and what
-// counts as progress for the 10-minute no-progress limit (atVehicleSpeed, see
-// INACTIVITY_TIMEOUT_MS). run_alight_tests.sh copies the REAL functions into
-// the marked places below;
+// The getting-off rule of JourneyService (gotOff, see ALIGHT_WAIT_MS), whether
+// we kept moving while a parting was confirmed (movedSince), and what counts
+// as vehicle speed — the one measure of riding for both, and progress for the
+// 10-minute no-progress limit (atVehicleSpeed, see INACTIVITY_TIMEOUT_MS).
+// run_alight_tests.sh copies the REAL functions into the marked places below;
 // the rest is the test, with the rule's constants as JourneyService has them.
 object J {
 // @@GOTOFF@@
+// @@MOVEDSINCE@@
 // @@ATSPEED@@
 }
 
 const val WAIT = 120_000L        // JourneyService.ALIGHT_WAIT_MS
 const val VEHICLE_KMH = 10.0     // JourneyService.MIN_SPEED_FOR_IDENTIFY
 const val NO_PROGRESS = 10 * 60 * 1000L  // JourneyService.INACTIVITY_TIMEOUT_MS
+const val LEAD = 5_000L          // JourneyService.PARTING_SPEED_LEAD_MS
 
 /**
  * The no-progress limit replayed fix by fix (one a second) from departure, as
@@ -34,47 +37,96 @@ fun min(m: Int) = m * 60_000L
 
 var fails = 0
 fun eq(n: String, e: Any?, a: Any?) { if (e != a) { fails++; println("FAIL $n: expected $e got $a") } else println("PASS $n") }
-fun off(now: Long, withUs: Long, far: Boolean, peak: Double) = J.gotOff(now, withUs, far, peak, WAIT, VEHICLE_KMH)
+fun off(now: Long, withUs: Long, far: Boolean, speedAt: Long) = J.gotOff(now, withUs, far, speedAt, WAIT)
 fun s(h: Int, m: Int, sec: Int) = ((h * 60 + m) * 60 + sec) * 1000L
 
 /**
- * A ride replayed reading by reading: the vehicle's distance at each reading
- * and our short-average speed in between, as checkParted and onFix see them.
- * Returns when the rule fires (checked every 5 s, as the timer does), or null.
+ * A ride replayed second by second, as onFix, checkParted and the timer see
+ * it: a fix every second with [speedAt] its short-average speed (accurate
+ * fixes), the vehicle's distance at each of [readings], and the rule looked
+ * at every 5 s. Returns when it fires, or null.
  */
-fun replay(readings: List<Pair<Long, Double>>, speedAt: (Long) -> Double, until: Long): Long? {
-    var withUs = 0L; var far = false; var peak = 0.0
+fun replay(readings: List<Pair<Long, Double>>, speedAt: (Long) -> Double, until: Long,
+           from: Long = readings.first().first): Long? {
+    var withUs = 0L; var far = false; var vehicleSpeedAt = 0L
     var r = 0
-    var now = readings.first().first
+    var now = from
     while (now <= until) {
+        if (J.atVehicleSpeed(true, speedAt(now), VEHICLE_KMH)) vehicleSpeedAt = now
         while (r < readings.size && readings[r].first <= now) {
             val d = readings[r].second
-            if (d <= 30.0) { withUs = readings[r].first; peak = 0.0 }
-            far = d > 250.0
+            if (d <= 30.0) withUs = readings[r].first
+            if (d <= 250.0) far = false else far = true
             r++
         }
-        if (withUs != 0L) peak = maxOf(peak, speedAt(now))
-        if (off(now, withUs, far, peak)) return now
-        now += 5_000L
+        if (now % 5_000L == 0L && off(now, withUs, far, vehicleSpeedAt)) return now
+        now += 1_000L
     }
     return null
 }
 
 fun main() {
-    eq("never with us → never", false, off(10 * WAIT, 0L, true, 0.0))
-    eq("far, 2 min since with us, standing → got off", true, off(WAIT + 1, 1, true, 0.0))
-    eq("not yet 2 min", false, off(WAIT, 1, true, 0.0))
-    eq("vehicle not far (within 250 m) → no", false, off(10 * WAIT, 1, false, 0.0))
-    eq("vehicle speed since it was with us → no (we are in another vehicle)", false, off(10 * WAIT, 1, true, 12.0))
-    eq("walking pace is fine", true, off(10 * WAIT, 1, true, 6.0))
+    eq("never with us → never", false, off(10 * WAIT, 0L, true, 0L))
+    eq("far, 2 min since with us and since vehicle speed → got off", true, off(WAIT + 1, 1, true, 1))
+    eq("not yet 2 min since with us", false, off(WAIT, 1, true, 0L))
+    eq("vehicle not far (within 250 m) → no", false, off(10 * WAIT, 1, false, 0L))
+    eq("vehicle speed within the last 2 min → no (we are in another vehicle)", false,
+        off(10 * WAIT, 1, true, 10 * WAIT - 60_000L))
+    eq("vehicle speed exactly 2 min ago → got off", true, off(10 * WAIT, 1, true, 9 * WAIT))
+    eq("no vehicle speed at all → got off", true, off(10 * WAIT, 1, true, 0L))
+
+    // ── movedSince: did we keep moving while a parting was confirmed? ──
+    eq("movedSince: vehicle speed after the first reading", true, J.movedSince(s(9,0,20), s(9,0,0), LEAD))
+    eq("movedSince: at the first reading (the short average then)", true, J.movedSince(s(9,0,0) - 3_000L, s(9,0,0), LEAD))
+    eq("movedSince: only well before it", false, J.movedSince(s(9,0,0) - 10_000L, s(9,0,0), LEAD))
+    eq("movedSince: never at vehicle speed", false, J.movedSince(0L, s(9,0,0), LEAD))
+    // 6 Oct 2026, 09:04:28: walking through underpasses, fixes 56-300 m out
+    // read as 14 km/h and the vehicle was withdrawn. Inaccurate fixes are no
+    // vehicle speed, so nothing moves the last moment at vehicle speed.
+    eq("noisy walk: inaccurate 14 km/h is no vehicle speed", false, J.atVehicleSpeed(false, 14.0, VEHICLE_KMH))
 
     // 5 Oct 2026, ПЛ. ОРЛОВ МОСТ: "Слизате тук" 09:06:54; bus with us 09:07:03
     // (0 m) and 09:08:03 (21 m); 558 m at 09:09:04; we stood or walked
     // (≤ 5 km/h). The old rules ended at 09:10:35.
     val orlov = listOf(s(9,7,3) to 0.0, s(9,8,3) to 21.0, s(9,9,4) to 558.0, s(9,9,34) to 900.0, s(9,10,4) to 1200.0)
     val end = replay(orlov, { 5.0 }, s(9, 20, 0))
-    eq("Орлов мост: ends 2 min after the bus was last with us (09:10:03 → first tick)", true,
+    eq("Орлов мост 5.10: ends 2 min after the bus was last with us (09:10:03 → first tick)", true,
         end != null && end >= s(9,10,3) && end < s(9,10,10))
+
+    // 6 Oct 2026, ПЛ. ОРЛОВ МОСТ, with 304 wrongly followed: last beside us
+    // at 08:56:51 while we rode on at 30-38 km/h; we slowed from 08:57:41
+    // and stood from 08:58:11. Its distances after 08:56:51 that the log does
+    // not give (only "beyond 30 m", no parting) are put at 100-200 m. Far
+    // from 09:00:55. The rule of 5 Oct never ended it (the speed ridden after
+    // 08:56:51 stood in the way); now it ends at that first far reading.
+    val ride304 = listOf(s(8,56,51) to 0.0, s(8,57,51) to 100.0, s(8,58,51) to 150.0,
+        s(8,59,54) to 200.0, s(9,0,55) to 450.0, s(9,1,25) to 406.0, s(9,2,26) to 683.0,
+        s(9,2,57) to 697.0, s(9,3,57) to 852.0)
+    val speed6Oct = { t: Long -> when {
+        t < s(8,57,41) -> 34.0
+        t < s(8,58,11) -> 8.0
+        else -> 3.0 } }
+    val end304 = replay(ride304, speed6Oct, s(9, 10, 0), from = s(8,56,0))
+    eq("Орлов мост 6.10, wrong vehicle: ends at the first far reading (09:00:55 → first tick)", true,
+        end304 != null && end304 >= s(9,0,55) && end304 < s(9,1,0))
+
+    // The same with 213, the bus actually ridden: beside us at 08:57:51 and
+    // 08:58:51 (7 m), gone from 08:59:54 (distances assumed as above).
+    val ride213 = listOf(s(8,56,51) to 0.0, s(8,57,51) to 7.0, s(8,58,51) to 7.0,
+        s(8,59,54) to 150.0, s(9,0,55) to 400.0, s(9,1,55) to 700.0)
+    val end213 = replay(ride213, speed6Oct, s(9, 10, 0), from = s(8,56,0))
+    eq("Орлов мост 6.10, right vehicle: ends at the first far reading 2 min after it was with us", true,
+        end213 != null && end213 >= s(9,0,55) && end213 < s(9,1,0))
+
+    // The last reading with the bus beside us is taken while still riding:
+    // 40 km/h until the stop 20 s later, then off and walking; the bus far
+    // from 80 s. Ends 2 min after our last vehicle speed.
+    val lastWhileRiding = listOf(s(15,0,0) to 3.0, s(15,0,30) to 90.0, s(15,1,0) to 160.0,
+        s(15,1,20) to 300.0, s(15,1,50) to 600.0, s(15,2,20) to 900.0, s(15,2,50) to 1200.0)
+    val endRiding = replay(lastWhileRiding, { t -> if (t < s(15,0,20)) 40.0 else 4.0 }, s(15, 10, 0),
+        from = s(14,59,0))
+    eq("last with-us reading while riding: ends 2 min after the last vehicle speed", true,
+        endRiding != null && endRiding >= s(15,2,19) && endRiding < s(15,2,25))
 
     // Stayed aboard at a terminus: the bus stands with us for 10 min.
     val terminus = (0..20).map { s(10,0,0) + it * 30_000L to 5.0 }
@@ -85,10 +137,12 @@ fun main() {
     eq("aboard, moving on: never", null, replay(carried, { if (it < s(11,0,30)) 0.0 else 40.0 }, s(11, 4, 0)))
 
     // Wrongly identified bus leaves while our own bus waits at a red light
-    // for 60 s, then we move off at vehicle speed: never ends.
+    // for 70 s, having ridden before it; then we move off at vehicle speed:
+    // never ends.
     val wrong = listOf(s(12,0,0) to 0.0, s(12,0,30) to 400.0, s(12,1,0) to 700.0, s(12,1,30) to 1000.0, s(12,2,30) to 1500.0)
     eq("in another vehicle, red light 70 s: never", null,
-        replay(wrong, { if (it < s(12,1,10)) 0.0 else 30.0 }, s(12, 5, 0)))
+        replay(wrong, { if (it < s(12,0,0) || it >= s(12,1,10)) 30.0 else 0.0 }, s(12, 5, 0),
+            from = s(11,59,0)))
 
     // One stale/outlying far report while aboard and standing, then close again.
     val blip = listOf(s(13,0,0) to 0.0, s(13,1,0) to 600.0, s(13,2,0) to 4.0, s(13,3,0) to 2.0, s(13,4,0) to 3.0)
