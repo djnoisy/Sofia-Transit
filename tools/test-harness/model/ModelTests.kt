@@ -1184,8 +1184,41 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] != "A81" }
         check("12.10 76 from aboard: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // 14 Oct 2026, four short rides in one 76 (A81), ended by hand aboard
+    // but the last. (a) from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, 111 chosen. (b) begun
+    // aboard on the bend before ДЪРЖАВНА ПЕЧАТНИЦА, 185 chosen: across the
+    // bend the straight line between two reports is 97 m of 183 m driven, so
+    // the model takes 76 a reading after the app. (c) begun aboard near УМБАЛ
+    // СВ. АННА, 305 chosen; 304 passed the other way 35 m off. (d) from ХОТЕЛ
+    // ПЛИСКА, 76 chosen: 183 (A270) 16 m and 76 20 m from us as we pulled
+    // out, both due there; 183 then drove 34-61 m behind us to ПЛ. ОРЛОВ МОСТ
+    // and earns nothing. Off there about 09:11:20; our fixes went vague
+    // (68-89 m, gaps of 5-9 s) from about 09:13, so 76's reports after the
+    // first one apart could not be placed, and the app ended the journey
+    // (09:13:52) before the model concluded getting off. The passenger sat at
+    // the last door: 76's reports 15-27 m ahead of us.
+    "2026-10-14_76a.txt" to { rp -> onlyOurs(rp, "14.10 a", "A81", "08:56:35") },
+    "2026-10-14_76b.txt" to { rp -> onlyOurs(rp, "14.10 b", "A81", "09:01:10") },
+    "2026-10-14_76c.txt" to { rp -> onlyOurs(rp, "14.10 c", "A81", "09:03:50") },
+    "2026-10-14_76d.txt" to { rp ->
+        onlyOurs(rp, "14.10 d", "A81", "09:07:15")
+        val c = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] == "A270" }
+        check("14.10 d: 183, beside us as we pulled out, earns nothing", c.all { it.value <= 0.0 }) {
+            c.joinToString { "${it.key} ${it.value.toInt()}" } }
     }
 )
+
+/** A recorded ride where only [route] is concluded, by [by], and no other vehicle reaches 150 m. */
+fun onlyOurs(rp: Replayed, label: String, route: String, by: String) {
+    val id = rp.events.firstOrNull()
+    check("$label: ${route} identified by $by", (id?.event as? Event.Identified)?.routeId == route &&
+        clock(id.atMs) <= by) { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+    check("$label: nothing else", rp.events.size == 1) { rp.events.joinToString { describe(it.event) } }
+    val others = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] != route }
+    check("$label: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+        others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+}
 
 /**
  * The trace's records with only one fix in every [stepS] seconds kept, as a
