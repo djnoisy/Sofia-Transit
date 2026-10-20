@@ -1281,7 +1281,14 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
             clock(id.atMs) <= "08:50:30") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
         check("20.10 bus 76: nothing else — 185 beside us never taken", rp.events.size == 1) {
             rp.events.joinToString { describe(it.event) } }
-    }
+    },
+    // 20 Oct 2026, minutes later: the same 76 (A3118), 305 chosen, tracking
+    // begun aboard at 55 km/h. We overtook 185 (A2807): 174 m ahead, then
+    // 26 m at one report (08:57:39), then 124 m behind. Its run began within
+    // a reading of 76's, so the stretch compared was nil and the choice
+    // waited a reading: 76 taken at the third (08:58:13), as by the app — which
+    // meanwhile announced 305's ПЛОЩАД НА АВИАЦИЯТА, not on 76's way.
+    "2026-10-20_76b.txt" to { rp -> onlyOurs(rp, "20.10 b", "A81", "08:58:15") }
 )
 
 /** A recorded ride where only [route] is concluded, by [by], and no other vehicle reaches 150 m. */
