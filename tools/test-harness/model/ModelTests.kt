@@ -778,6 +778,32 @@ fun main(args: Array<String>) {
         }
         check("a bus beside us at the stop, then silent: 213 taken, not it", bad.isEmpty()) { bad.joinToString(" | ") }
     }
+    // The most ordinary boarding: waiting at ХОТЕЛ ПЛИСКА, the chosen 213
+    // stops right at us for 10 or 15 s — less than a reading — and a 304
+    // stops 12 m behind it and leaves with it. 213's report before its first
+    // beside us is often one from its approach, far off. A rule that took
+    // that as evidence — "seen away, so its later beginning is real" — gave
+    // 304 the head start: beganApart (reverted 10 Oct 2026), and both the
+    // rewording and the "joined" variant tried on 20 Oct 2026.
+    run {
+        val p213 = Feed.path("A4508"); val p304 = Feed.path("A2791")
+        val sPl = p213.along(Feed.stop("A2327")); val qPl = p304.along(Feed.stop("A2327"))
+        val stop = p213.at(sPl).shift(3.0, 3.0)
+        val bad = ArrayList<String>()
+        for (dwell in listOf(10.0, 15.0)) for (arrive in listOf(100.0, 106.0, 112.0, 118.0, 124.0))
+            for (a in 0 until 30 step 3) for (b in 0 until 30 step 3) {
+                val leave = arrive + dwell
+                val bus213 = Mover(p213, sPl - 11.0 * arrive).drive(sPl, 11.0).stand(dwell).drive(sPl + 3000, 11.0)
+                val bus304 = Mover(p304, qPl - 12.0 - 11.0 * arrive).drive(qPl - 12.0, 11.0).stand(dwell).drive(qPl + 3000, 11.0)
+                val vs = listOf(SimVehicle("V213", "A85-x", "A85", { bus213.at(it) }, phase = a.toDouble()),
+                    SimVehicle("V304", "A217-x", "A217", { bus304.at(it) }, phase = b.toDouble()))
+                val r = Sim({ t -> if (t < leave) stop else bus213.at(t).shift(1.0, 1.0) }, vs, leave + 240.0, Gps(), "A85").run()
+                if (ident(r).firstOrNull()?.second?.key != "V213")
+                    bad += "213 stands ${dwell.toInt()} s from ${arrive.toInt()} s, 213 at $a, 304 at $b: ${story(r)}"
+            }
+        check("waiting at ХОТЕЛ ПЛИСКА, 213 (chosen) stops at us 10-15 s, 304 12 m behind leaves with it: 213 taken",
+            bad.isEmpty()) { "${bad.size} of 1000: " + bad.take(3).joinToString(" | ") }
+    }
     // A fix every second with one dropout of 9 or 12 s soon after leaving
     // ХОТЕЛ ПЛИСКА, 304 alongside: every report can still be placed — 213
     // taken, nothing else. (Ending runs on a long gap alone took 304 in 20-27
