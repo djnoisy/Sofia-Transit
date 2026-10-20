@@ -1,6 +1,7 @@
 package bg.sofia.transit.ui.diagnostics
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -12,6 +13,7 @@ import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
 import bg.sofia.transit.databinding.FragmentDiagnosticsBinding
 import bg.sofia.transit.util.FileLogger
+import bg.sofia.transit.util.JourneyTrace
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -94,6 +96,7 @@ class DiagnosticsFragment : Fragment() {
         binding.btnShareLog.setOnClickListener { shareLog() }
         binding.btnClearLog.setOnClickListener {
             FileLogger.clear()
+            JourneyTrace.clear()
             Toast.makeText(requireContext(), "Логът е изчистен", Toast.LENGTH_SHORT).show()
         }
 
@@ -109,25 +112,30 @@ class DiagnosticsFragment : Fragment() {
     }
 
 
+    /**
+     * Shares the log, and with it the journey trace when there is one (see
+     * JourneyTrace) — the raw positions a ride can be replayed from.
+     */
     private fun shareLog() {
-        val file = FileLogger.file()
-        if (file == null || !file.exists() || file.length() == 0L) {
+        val files = listOfNotNull(FileLogger.file(), JourneyTrace.file())
+            .filter { it.exists() && it.length() > 0L }
+        if (files.isEmpty()) {
             Toast.makeText(requireContext(),
                 "Лог файлът е празен", Toast.LENGTH_SHORT).show()
             return
         }
         try {
-            val uri = FileProvider.getUriForFile(
-                requireContext(),
-                "${requireContext().packageName}.fileprovider",
-                file
-            )
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Sofia Transit log")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
+            val authority = "${requireContext().packageName}.fileprovider"
+            val uris = ArrayList<Uri>(files.map {
+                FileProvider.getUriForFile(requireContext(), authority, it)
+            })
+            val intent = Intent(
+                if (uris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE)
+            if (uris.size == 1) intent.putExtra(Intent.EXTRA_STREAM, uris.first())
+            else intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            intent.type = "text/plain"
+            intent.putExtra(Intent.EXTRA_SUBJECT, "Sofia Transit log")
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             startActivity(Intent.createChooser(intent, "Сподели лог чрез"))
         } catch (e: Exception) {
             Toast.makeText(requireContext(),
