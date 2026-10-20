@@ -1244,8 +1244,8 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         check("19.10 tram 18: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     },
-    // 20 Oct 2026: 76 (A3118) from near МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, 111 chosen —
-    // its nearest stop 118 m from where we waited, so no boarding stop. The
+    // 20 Oct 2026: 76 (A3118), 111 chosen, tracking begun aboard as it crawled
+    // where the routes of 111 and 76 part (taken for waiting; no boarding stop). The
     // app took 76 at its second reading (08:50:25), the model too. From
     // ДЪРЖАВНА ПЕЧАТНИЦА to УМБАЛ СВ. АННА 185 (A2807) ran beside us, 491 m
     // together; 76 had far more and was never contested. Ended aboard.
