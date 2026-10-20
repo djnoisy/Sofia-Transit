@@ -46,8 +46,9 @@ import kotlin.math.hypot
  * apart. That head start is no evidence: the first choice compares all of
  * them over one stretch, from the latest beginning among the runs begun
  * within a report of the earliest. A later beginning is evidence only when
- * the vehicle was seen clearly apart from us just before, as we moved at
- * vehicle speed: then it was not the vehicle we were in (20 Oct 2026, b).
+ * the vehicle's report before it was clearly apart from us, as we moved at
+ * vehicle speed: then it was not the vehicle we were in (20 Oct 2026, b) —
+ * unless it is of the chosen line, which has the benefit of the doubt.
  * Waiting at a stop, the bus we board is far off too until it comes. And a
  * tie the chosen line is not in is not guessed: the choice waits until one
  * has gone beyond it (20 Oct 2026).
@@ -130,6 +131,8 @@ class RideModel(
          * while we moved at vehicle speed: that later beginning is real.
          */
         internal var seenApartRiding = false
+        /** Its latest report was clearly apart from us, as judged on the present clock. */
+        internal var lastApart = false
         /** Time of its latest report that no fix could place. */
         internal var unplacedMs = 0L
         /** Its recent reports as judged: time, metres after it, and whether beside us. */
@@ -319,10 +322,11 @@ class RideModel(
         }
         if (w != null && w.timeMs <= r.timeMs) waiting.remove(v.key)
         val prevMs = v.lastReportMs
-        val prevDistance = v.lastDistance
+        val wasApart = v.lastApart
         v.lastReportMs = t
         val d = distance(us.lat, us.lon, r.lat, r.lon)
         v.lastDistance = d
+        v.lastApart = d > APART_M
         when {
             d <= BESIDE_M -> {
                 v.apartRun = 0
@@ -336,7 +340,11 @@ class RideModel(
                     }
                 } else {
                     v.runFromMs = t
-                    v.seenApartRiding = prevDistance != null && prevDistance > APART_M && movingAt(prevMs)
+                    // Not for the chosen line: one wild report of the vehicle
+                    // we are in, just after tracking begins, would count
+                    // against it (304 taken in 48 of 60 runs, 25 before:
+                    // review of 20 Oct 2026); a tie it is in goes to it anyway.
+                    v.seenApartRiding = r.routeId != chosenRouteId && wasApart && movingAt(prevMs)
                 }
                 v.togetherSinceMs = t
                 v.lastBesideMs = t
@@ -410,8 +418,9 @@ class RideModel(
     /**
      * Whether we moved at vehicle speed over [MOVING_WINDOW_MS] about [t];
      * false while our place then is not known. Waiting at a stop it is false
-     * at every report of the bus we board while that is clearly apart from
-     * us: it stands at us, and we at the stop, before we move.
+     * — barring widely scattered fixes — at the reports of the bus we board
+     * while that is clearly apart from us: it comes and stands at us before
+     * we move.
      */
     private fun movingAt(t: Long): Boolean {
         val a = positionAt(t - MOVING_WINDOW_MS / 2) ?: return false
@@ -576,6 +585,9 @@ class RideModel(
             if (v.runFromMs != 0L) v.runFromMs += shift
             if (v.unplacedMs != 0L) v.unplacedMs += shift
             for (m in v.history) m.timeMs += shift
+            // Judged against our place at the wrong moment: a vehicle beside
+            // us seemed a hundred metres off (review of 20 Oct 2026).
+            v.lastApart = false
         }
     }
 
