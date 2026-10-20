@@ -1206,6 +1206,24 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val c = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] == "A270" }
         check("14.10 d: 183, beside us as we pulled out, earns nothing", c.all { it.value <= 0.0 }) {
             c.joinToString { "${it.key} ${it.value.toInt()}" } }
+    },
+    // 19 Oct 2026: tram 22 (two trams coupled), 22 chosen, from УЛ. ОПЪЛЧЕНСКА
+    // to ЦЕНТРАЛНИ ХАЛИ, the passenger at the very back. The tram's reports
+    // were 37-40 m ahead of us at the same moment whenever it moved, 1-9 m to
+    // the side, and under BESIDE_M only standing: it earns no metres and the
+    // model takes nothing (a known limit, HANDOVER "Етап 3", point 5). The app
+    // took it at once, as the chosen line. Whatever the model concludes, it
+    // must not be another vehicle.
+    "2026-10-19_22.txt" to { rp ->
+        check("19.10 tram 22: no vehicle but 22 taken", rp.events.all {
+            when (val e = it.event) {
+                is Event.Identified -> e.routeId == "TM22" && e.key == "TM4170"
+                is Event.Switched -> e.toKey == "TM4170"
+                else -> true
+            } }) { rp.events.joinToString { describe(it.event) } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "TM4170" }
+        check("19.10 tram 22: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     }
 )
 
