@@ -1288,7 +1288,25 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // a reading of 76's, so the stretch compared was nil and the choice
     // waited a reading: 76 taken at the third (08:58:13), as by the app — which
     // meanwhile announced 305's ПЛОЩАД НА АВИАЦИЯТА, not on 76's way.
-    "2026-10-20_76b.txt" to { rp -> onlyOurs(rp, "20.10 b", "A81", "08:58:15") }
+    "2026-10-20_76b.txt" to { rp -> onlyOurs(rp, "20.10 b", "A81", "08:58:15") },
+    // 20 Oct 2026, the same 76 (A3118) once more, 76 chosen, tracking begun
+    // as it pulled out of ХОТЕЛ ПЛИСКА (never under 10 km/h: no boarding
+    // stop). The app took it at once (its line chosen), the model at its
+    // second reading. An opposite 305 and an opposite 76, at 0-11 m by the
+    // app's age correction, earned nothing. Got off at ПЛ. ОРЛОВ МОСТ about
+    // 09:07:45; ours was apart at two reports by 09:09:01, but the 120 s
+    // without vehicle speed ran out at 09:09:31, as the fixes had turned
+    // poor (57-77 m from 09:09:17) and the app ended: not concluded.
+    "2026-10-20_76c.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("20.10 c: 76 identified by 09:01:00", (id?.event as? Event.Identified)?.key == "A3118" &&
+            clock(id.atMs) <= "09:01:00") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        check("20.10 c: no other vehicle taken", rp.events.drop(1).none { it.event !is Event.Alighted }) {
+            rp.events.joinToString { describe(it.event) } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "A3118" }
+        check("20.10 c: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    }
 )
 
 /** A recorded ride where only [route] is concluded, by [by], and no other vehicle reaches 150 m. */
