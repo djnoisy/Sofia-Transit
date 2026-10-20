@@ -1243,6 +1243,18 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "TM2344" }
         check("19.10 tram 18: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // 20 Oct 2026: 76 (A3118) from near МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, 111 chosen —
+    // its nearest stop 118 m from where we waited, so no boarding stop. The
+    // app took 76 at its second reading (08:50:25), the model too. From
+    // ДЪРЖАВНА ПЕЧАТНИЦА to УМБАЛ СВ. АННА 185 (A2807) ran beside us, 491 m
+    // together; 76 had far more and was never contested. Ended aboard.
+    "2026-10-20_76.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("20.10 bus 76: 76 identified by 08:50:30", (id?.event as? Event.Identified)?.key == "A3118" &&
+            clock(id.atMs) <= "08:50:30") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        check("20.10 bus 76: nothing else — 185 beside us never taken", rp.events.size == 1) {
+            rp.events.joinToString { describe(it.event) } }
     }
 )
 
