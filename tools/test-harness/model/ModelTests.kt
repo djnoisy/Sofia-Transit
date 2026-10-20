@@ -677,6 +677,49 @@ fun main(args: Array<String>) {
         never304("$from, tracking begun ${after.toInt()} s after ХОТЕЛ ПЛИСКА",   // (18; 21)
             startAtPliska, mustTake = true) { dep -> listOf(-1.0..(dep + after - 0.5)) }
     }
+    // ── A tie the chosen line is not in; a later beginning that is real (20 Oct 2026) ──
+    // Tracking begun mid-ride, 213 and 304 abreast as far as ПЛ. ОРЛОВ МОСТ,
+    // a third line chosen: level, one was taken on a few metres — 304 in
+    // about half the runs. Now the choice waits for the roads to part (we
+    // ride on past ПЛ. ОРЛОВ МОСТ; got off there, it may never be made).
+    run {
+        val bad = ArrayList<String>()
+        for ((p213, p304) in phases) {
+            val dep = Journey(startAtPliska = true).tLeavePliska
+            val j = Journey(startAtPliska = true, alight = false, chosen = "A1",
+                gps = Gps(gaps = listOf(-1.0..(dep + 30.0 - 0.5))), phase213 = p213, phase304 = p304)
+            val r = j.sim().run()
+            val id = ident(r)
+            if (id.isEmpty() || id.any { it.second.key != "V213" } || switched(r).isNotEmpty())
+                bad += "213 at $p213, 304 at $p304: ${story(r)}"
+        }
+        check("tracking begun mid-ride, 213 and 304 abreast, a third line chosen: 213 taken, never 304", bad.isEmpty()) {
+            bad.joinToString(" | ") }
+    }
+    // In 213 from mid-ride, a slower bus C on the same road 200-250 m ahead,
+    // overtaken: beside us at one report within a reading of 213's run, it
+    // held the choice a reading (20 Oct 2026, b: 185). Seen clearly apart as
+    // we rode, its later beginning is real: 213 taken as soon as without it.
+    run {
+        val bad = ArrayList<String>()
+        for ((d, vc) in listOf(200.0 to 6.0, 250.0 to 4.0)) for (a in 0 until 30 step 3) for (c in 0 until 30 step 3) {
+            val dep = Journey(startAtPliska = true).tLeavePliska
+            val j = Journey(startAtPliska = true, chosen = "A1", gps = Gps(gaps = listOf(-1.0..(dep + 30.0 - 0.5))),
+                phase213 = a.toDouble())
+            val s0 = j.bus213.alongAt(dep + 30.0) + d - vc * (dep + 30.0)
+            val cBus = Mover(j.p213, s0).drive(s0 + vc * 3000, vc)
+            val alone = j.vehicles().filter { it.key == "V213" }
+            val r0 = Sim({ j.ours(it) }, alone, j.tLeaveOrlov + 200, j.gps, j.chosen).run()
+            val r1 = Sim({ j.ours(it) }, alone + SimVehicle("VC", "A99-c", "A99", { t -> cBus.at(t).shift(3.0, 0.0) },
+                phase = c.toDouble()), j.tLeaveOrlov + 200, j.gps, j.chosen).run()
+            val t0 = ident(r0).firstOrNull()?.first
+            val i1 = ident(r1).firstOrNull()
+            if (t0 == null || i1?.second?.key != "V213" || i1.first > t0)
+                bad += "C ${d.toInt()} m ahead at $vc m/s, 213 at $a, C at $c: alone ${t0?.toInt()} s; ${story(r1)}"
+        }
+        check("in 213 from mid-ride, a slower bus 200-250 m ahead overtaken: 213 taken as soon as without it",
+            bad.isEmpty()) { "${bad.size} of 200: " + bad.take(3).joinToString(" | ") }
+    }
     // ── Others beside us for a moment, while two run abreast (review of 9 Oct 2026) ──
     // Tracking begun mid-ride, 213 and 304 abreast; a third vehicle C beside
     // us at one report — trailing 65 m behind otherwise, or passing the
@@ -1287,8 +1330,10 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // 26 m at one report (08:57:39), then 124 m behind. Its run began within
     // a reading of 76's, so the stretch compared was nil and the choice
     // waited a reading: 76 taken at the third (08:58:13), as by the app — which
-    // meanwhile announced 305's ПЛОЩАД НА АВИАЦИЯТА, not on 76's way.
-    "2026-10-20_76b.txt" to { rp -> onlyOurs(rp, "20.10 b", "A81", "08:58:15") },
+    // meanwhile announced 305's ПЛОЩАД НА АВИАЦИЯТА, not on 76's way. Seen
+    // 174 m off as we rode, 185's later beginning is real: now at the second
+    // (08:57:43), before that announcement.
+    "2026-10-20_76b.txt" to { rp -> onlyOurs(rp, "20.10 b", "A81", "08:57:45") },
     // 20 Oct 2026, the same 76 (A3118) once more, 76 chosen, tracking begun
     // as it pulled out of ХОТЕЛ ПЛИСКА (never under 10 km/h: no boarding
     // stop). The app took it at once (its line chosen), the model at its
@@ -1338,6 +1383,24 @@ fun thinned(lines: List<String>, stepS: Int): List<String> {
 
 /** Recorded journeys replayed as they would have been with poorer positions, by file name. */
 val variants: Map<String, (String, List<String>) -> Unit> = mapOf(
+    // 20 Oct 2026, 76 with 111 chosen: tracking begun every 10 s from
+    // 08:53:29 to 08:54:19 on the stretch shared with 185. Level with 76
+    // there, 185 was taken on a few metres in all six (in three, seen 110 m
+    // off just before as we crawled on). Now the choice waits: 76, never 185.
+    "2026-10-20_76.txt" to { start, lines ->
+        val bad = ArrayList<String>()
+        val first = lines.first { it.startsWith("F,") }.split(",")[1].toLong()
+        for (k in 0 until 6) {
+            val from = first + (4 * 60 + 10 * k) * 1000L   // 08:53:29 + 10 s each
+            val i = lines.indexOfFirst { it.startsWith("F,") && it.split(",")[1].toLong() >= from }
+            val rp = replay(start, lines.drop(i))
+            val id = rp.events.firstOrNull()
+            if ((id?.event as? Event.Identified)?.key != "A3118" || rp.events.size != 1)
+                bad += "from ${clock(from)}: " + rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" }
+        }
+        check("20.10 bus 76, tracking begun 08:53:29-08:54:19 by 185: 76 taken, never 185", bad.isEmpty()) {
+            bad.joinToString(" | ") }
+    },
     // 12 Oct 2026, 76 from aboard: tracking begun on foot at ПЛ. ОРЛОВ МОСТ,
     // every 10 s from just after getting off, while 76 leaves and 204, 84 and
     // 9 come by the stop: nothing may be taken.

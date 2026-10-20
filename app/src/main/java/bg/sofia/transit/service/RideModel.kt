@@ -45,7 +45,12 @@ import kotlin.math.hypot
  * — tracking begun aboard, fixes thickening again — begin up to a report
  * apart. That head start is no evidence: the first choice compares all of
  * them over one stretch, from the latest beginning among the runs begun
- * within a report of the earliest.
+ * within a report of the earliest. A later beginning is evidence only when
+ * the vehicle was seen clearly apart from us just before, as we moved at
+ * vehicle speed: then it was not the vehicle we were in (20 Oct 2026, b).
+ * Waiting at a stop, the bus we board is far off too until it comes. And a
+ * tie the chosen line is not in is not guessed: the choice waits until one
+ * has gone beyond it (20 Oct 2026).
  *
  * Pure Kotlin, no Android types, so it can be tested and replayed on its own
  * (tools/test-harness/run_model_tests.sh). Stage 2 runs it beside the
@@ -120,6 +125,11 @@ class RideModel(
         internal var lastSeenMs = 0L
         /** Time of the first report of its present run beside us. */
         internal var runFromMs = 0L
+        /**
+         * Its present run began just after it was seen clearly apart from us
+         * while we moved at vehicle speed: that later beginning is real.
+         */
+        internal var seenApartRiding = false
         /** Time of its latest report that no fix could place. */
         internal var unplacedMs = 0L
         /** Its recent reports as judged: time, metres after it, and whether beside us. */
@@ -308,6 +318,8 @@ class RideModel(
             return false
         }
         if (w != null && w.timeMs <= r.timeMs) waiting.remove(v.key)
+        val prevMs = v.lastReportMs
+        val prevDistance = v.lastDistance
         v.lastReportMs = t
         val d = distance(us.lat, us.lon, r.lat, r.lon)
         v.lastDistance = d
@@ -322,7 +334,10 @@ class RideModel(
                         val moved = distance(then.lat, then.lon, us.lat, us.lon)
                         if (moved >= MIN_MOVE_M) v.metres += moved
                     }
-                } else v.runFromMs = t
+                } else {
+                    v.runFromMs = t
+                    v.seenApartRiding = prevDistance != null && prevDistance > APART_M && movingAt(prevMs)
+                }
                 v.togetherSinceMs = t
                 v.lastBesideMs = t
             }
@@ -393,6 +408,18 @@ class RideModel(
     }
 
     /**
+     * Whether we moved at vehicle speed over [MOVING_WINDOW_MS] about [t];
+     * false while our place then is not known. Waiting at a stop it is false
+     * at every report of the bus we board while that is clearly apart from
+     * us: it stands at us, and we at the stop, before we move.
+     */
+    private fun movingAt(t: Long): Boolean {
+        val a = positionAt(t - MOVING_WINDOW_MS / 2) ?: return false
+        val b = positionAt(t + MOVING_WINDOW_MS / 2) ?: return false
+        return distance(a.lat, a.lon, b.lat, b.lon) >= VEHICLE_SPEED_MPS * MOVING_WINDOW_MS / 1000.0
+    }
+
+    /**
      * Whether we are seen to have stayed at [then] since [since]: a fix
      * lately, our place known now, and no further from it than walking
      * takes. Without fixes no vehicle speed can show, so its absence alone
@@ -439,9 +466,16 @@ class RideModel(
             // later — a vehicle just come beside us — is compared over the
             // same stretch. (Taking the latest beginning of all runs instead,
             // one vehicle beside us once switched the comparison off for the
-            // rest: review of 9 Oct 2026.)
+            // rest: review of 9 Oct 2026.) A run begun just after its vehicle
+            // was seen clearly apart from us as we rode does not set it: 185,
+            // 174 m ahead as we went at 55 km/h and beside us at one report as
+            // we overtook it, held the choice a reading (20 Oct 2026, b).
+            // Seen apart at the stop proves nothing — the bus we board is far
+            // off too until it comes (a rule without "as we rode" took 304 at
+            // an ordinary boarding: reverted 10 Oct, and again 20 Oct 2026).
             val first = contenders.minOf { it.runFromMs }
-            val late = contenders.filter { it.runFromMs - first <= HEAD_START_MS }.maxOf { it.runFromMs }
+            val late = contenders.filter { !it.seenApartRiding && it.runFromMs - first <= HEAD_START_MS }
+                .maxOfOrNull { it.runFromMs } ?: first
             val fair = contenders.associateWith { metresAt(it, common) - metresAt(it, late) }
             val top = fair.values.max()
             // Until the leader has gone beyond the tie in the stretch, the
@@ -451,9 +485,14 @@ class RideModel(
             // latest beginning. (Waiting until the leader had twice the tie
             // let 213's one poor report tip it to 304.)
             if (top <= TIE_M) return
+            // A tie goes to the chosen line if it is in it. One it is not in
+            // is not guessed: the choice waits until one has gone beyond the
+            // tie. (20 Oct 2026: 76 and 185 level, 111 chosen — the few
+            // metres that tipped it to 185 in 6 of 30 starts mid-way were
+            // chance.)
             val close = contenders.filter { top - fair.getValue(it) <= TIE_M }
             val pick = close.filter { it.routeId == chosenRouteId }.maxByOrNull { fair.getValue(it) }
-                ?: close.maxBy { fair.getValue(it) }
+                ?: close.singleOrNull() ?: return
             ours = pick
             events += Event.Identified(pick.key, pick.tripId, pick.routeId, pick.metres)
             return
@@ -674,7 +713,7 @@ class RideModel(
          * after departure at ordinary speed (7 Oct 2026: 191 m at the second).
          */
         const val IDENTIFY_M = 150.0
-        /** Within this of the furthest, the chosen line wins the first choice. */
+        /** Within this of the furthest, the chosen line wins the first choice; a tie it is not in waits. */
         const val TIE_M = 50.0
         /** How much further another must have gone with us to replace ours. */
         const val SWITCH_M = 100.0
@@ -691,6 +730,13 @@ class RideModel(
          */
         const val VEHICLE_SPEED_MPS = 10.0 / 3.6
         const val SPEED_WINDOW_MS = 20_000L
+        /**
+         * Whether we rode as a vehicle was seen apart from us: vehicle speed
+         * over this about its report. Ten seconds, not twenty, so that a
+         * report soon after tracking begins can be judged; at a stop, fixes
+         * scattered by 8-12 m changed no boarding in simulations (20 Oct 2026).
+         */
+        const val MOVING_WINDOW_MS = 10_000L
         /** Vehicle speed this shortly before ours was first seen apart still counts as after. */
         const val LEAD_MS = 5_000L
         /** How far we must have gone on, after ours left, for it not to have been ours. */
