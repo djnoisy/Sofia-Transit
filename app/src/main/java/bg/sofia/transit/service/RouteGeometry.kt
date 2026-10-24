@@ -93,6 +93,18 @@ class RouteGeometry private constructor(
     }
 
     /**
+     * Which way [pos] on the road (null: the fix is not placed on it) lies
+     * from stop [idx]: true past it, the way the line goes — as a vehicle
+     * leaves a stop; false short of it, back along the road — as only someone
+     * on foot does; null when the fix is off the road and it cannot be told.
+     */
+    fun pastStop(pos: Double?, idx: Int): Boolean? {
+        if (pos == null) return null
+        val at = stopAlong.getOrNull(idx) ?: return null
+        return pos > at
+    }
+
+    /**
      * The stop at or ahead of [pos], from [fromIdx] on: the first not more
      * than [margin] behind it, so a rider standing at a stop is placed on
      * that stop. Null when every stop is behind.
