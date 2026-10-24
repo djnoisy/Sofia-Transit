@@ -1353,9 +1353,9 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     },
     // 24 Oct 2026: 181 (A2069), 185 chosen, tracking begun waiting at
-    // МЕТРОСТАНЦИЯ ЦАРИГРАДСКО ШОСЕ. The early rule by the boarding stop, for
-    // the first time judged on the road, would have taken 181 at once (due
-    // there, the only one beside us), as the app's boarding-stop check did at
+    // МЕТРОСТАНЦИЯ ЦАРИГРАДСКО ШОСЕ. The early rule by the boarding stop
+    // would have taken 181 at once (due there, the only one beside us), as
+    // the app's boarding-stop check did at
     // 10:03:08; by metres the model took it at 10:03:39. A trolleybus the
     // other way at 5 m, and later at 0 m on a report 76 s old by the app's age
     // correction, earned nothing. Got off at БАНЯ ПАНЧАРЕВО (181 left about
