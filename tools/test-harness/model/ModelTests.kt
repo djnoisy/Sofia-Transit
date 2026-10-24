@@ -1351,6 +1351,26 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "A3118" }
         check("20.10 c: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // 24 Oct 2026: 181 (A2069), 185 chosen, tracking begun waiting at
+    // МЕТРОСТАНЦИЯ ЦАРИГРАДСКО ШОСЕ. The early rule by the boarding stop, for
+    // the first time judged on the road, would have taken 181 at once (due
+    // there, the only one beside us), as the app's boarding-stop check did at
+    // 10:03:08; by metres the model took it at 10:03:39. A trolleybus the
+    // other way at 5 m, and later at 0 m on a report 76 s old by the app's age
+    // correction, earned nothing. Got off at БАНЯ ПАНЧАРЕВО (181 left about
+    // 10:18:43): the model at 10:20:07, the app at 10:20:14.
+    "2026-10-24_181.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("24.10 bus 181: 181 identified by 10:03:40", (id?.event as? Event.Identified)?.key == "A2069" &&
+            clock(id.atMs) <= "10:03:40") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        val off = rp.events.getOrNull(1)
+        check("24.10 bus 181: got off between 10:19:30 and 10:20:15, nothing else", rp.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "10:19:30".."10:20:15") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "A2069" }
+        check("24.10 bus 181: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     }
 )
 
