@@ -57,9 +57,9 @@ import kotlin.math.hypot
  * report is ahead of us beyond BESIDE_M, so a report in the zone ahead is
  * beside us too while no other vehicle is near us (take); at a stop, the one
  * vehicle near us that was due there is taken at once (onBoarding); off the
- * route of ours, as the app tells, and ours not with us for a minute, it has
- * left us (onOffRoute); and fixes gone vague after ours left us on foot do
- * not hold up getting off (stayed, apartFromFoot).
+ * route of ours, as the app tells, ours not with us at two readings and we
+ * moving on, it has left us (onOffRoute); and fixes gone vague after ours
+ * left us on foot do not hold up getting off (stayed, apartFromFoot).
  *
  * Pure Kotlin, no Android types, so it can be tested and replayed on its own
  * (tools/test-harness/run_model_tests.sh). Stage 2 runs it beside the
@@ -321,7 +321,7 @@ class RideModel(
      */
     class Boarding(val pick: Vehicle?, val why: String, val near: List<Pair<Vehicle, Boolean>>)
 
-    /** The early rule's verdict once it has been judged (onBoarding); null before. */
+    /** The early rule's verdict once it has been judged (onBoarding), or closed by a first choice by metres; null before. */
     var boarding: Boarding? = null
         private set
 
@@ -362,8 +362,10 @@ class RideModel(
      * The early rule by the boarding stop (boardingVerdict), at the latest
      * reading after departure, while no vehicle is ours: the vehicle it
      * finds is taken as ours. Judged once — taken or not — at the first
-     * reading it can be judged. Taken wrongly, it is put right as any other:
-     * it leaves us while we go on.
+     * reading it can be judged, and never once a vehicle has been taken by
+     * metres: ours withdrawn mid-ride, one due at the stop then beside us is
+     * no evidence (review of 24 Oct 2026). Taken wrongly, it is put right as
+     * any other: it leaves us while we go on.
      */
     fun onBoarding(due: (String) -> Boolean): List<Event> {
         if (boarding != null || ours != null || alighted) return emptyList()
@@ -510,13 +512,15 @@ class RideModel(
         val o = ours ?: return
         if (alighted) return
         if (o.apartRun < 2) {
-            // Off its route, as the app tells (onOffRoute), and not beside
-            // us for OFF_ROUTE_QUIET_MS: it has left us as if apart at two
-            // reports. Ours gone silent — taken wrongly, or on a detour — can
-            // never be seen apart, and was held for good while nothing else
-            // had gone further with us. Off the route the app's travel says
-            // we move at vehicle speed, so we did not get off it here.
-            if (offRouteOf == o.key && nowFix - o.lastBesideMs >= OFF_ROUTE_QUIET_MS)
+            // Off its route, as the app tells (onOffRoute), not beside us for
+            // OFF_ROUTE_QUIET_MS, and we move on at vehicle speed: it has left
+            // us as if apart at two reports. Ours gone silent — taken wrongly,
+            // or on a detour — can never be seen apart, and was held for good
+            // while nothing else had gone further with us. Standing, it is
+            // left to the rules above: the app stays off the route while we
+            // walk away from a stop on a detour, and that is getting off.
+            if (offRouteOf == o.key && nowFix - o.lastBesideMs >= OFF_ROUTE_QUIET_MS &&
+                nowFix - lastVehicleSpeedMs <= SPEED_LAG_MS + SPEED_WINDOW_MS)
                 leave(o, nowFix, events, "ours off its route and not with us; this one is")
             return
         }
@@ -548,6 +552,8 @@ class RideModel(
         val lost = o.metres
         o.metres = 0.0
         o.history.clear()
+        // Its run ends too: beside us again, it starts from nothing.
+        o.togetherSinceMs = 0L
         if (heir != null) {
             events += Event.Switched(o.key, heir.key, heir.tripId, heir.routeId, heir.metres, why)
             ours = heir
@@ -612,10 +618,19 @@ class RideModel(
         val latest = track.lastOrNull() ?: return false
         if (nowFix - latest.timeMs > FRESH_FIX_MS) return false
         val back = latest.timeMs - SPEED_LAG_MS
-        val (at, now) = positionAt(back)?.let { back to it } ?: lastPlaced() ?: return false
-        val walk = STAY_M + WALK_MPS * maxOf(0L, at - since) / 1000.0
-        return distance(then.lat, then.lon, now.lat, now.lon) <= walk
+        positionAt(back)?.let { now ->
+            return distance(then.lat, then.lon, now.lat, now.lon) <= walkFrom(since, back)
+        }
+        val (at, now) = lastPlaced() ?: return false
+        // And the latest fix, however vague, no further off than walking and
+        // its own accuracy allow: vague fixes that follow us riding on a
+        // kilometre show we did not stay (review of 24 Oct 2026).
+        return distance(then.lat, then.lon, now.lat, now.lon) <= walkFrom(since, at) &&
+            distance(then.lat, then.lon, latest.lat, latest.lon) <= walkFrom(since, latest.timeMs) + (latest.accuracy ?: 0.0)
     }
+
+    /** How far from where we were at [since] we may be at [at] on foot. */
+    private fun walkFrom(since: Long, at: Long): Double = STAY_M + WALK_MPS * maxOf(0L, at - since) / 1000.0
 
     /**
      * When our accurate fixes last placed us, and where — if fixes, however
@@ -726,6 +741,8 @@ class RideModel(
             val pick = close.filter { it.routeId == chosenRouteId }.maxByOrNull { fair.getValue(it) }
                 ?: close.singleOrNull() ?: return
             ours = pick
+            // The early rule by the boarding stop is for the first choice only.
+            if (boarding == null) boarding = Boarding(null, "taken by metres first", emptyList())
             events += Event.Identified(pick.key, pick.tripId, pick.routeId, pick.metres)
             return
         }
@@ -971,10 +988,12 @@ class RideModel(
         const val SWITCH_M = 100.0
         /**
          * Off ours's route and ours not beside us this long: it has left us.
-         * In the twelve journeys recorded to 14 Oct 2026 ours never missed
-         * more than one reading (at most 50 s between its reports).
+         * Not beside us at two readings in a row: in the twelve journeys
+         * recorded to 14 Oct 2026 ours never missed more than one (at most
+         * 50 s between its reports) — and after one missed, the next report,
+         * 2-7 s old, comes over 60 s after the last (review of 24 Oct 2026).
          */
-        const val OFF_ROUTE_QUIET_MS = 60_000L
+        const val OFF_ROUTE_QUIET_MS = 90_000L
         /** Ours silent this long no longer holds its place by its last report beside us. */
         const val SILENT_HOLD_MS = 5 * 60_000L
         /** Runs begun within this of the earliest set where the compared stretch begins: one report. */

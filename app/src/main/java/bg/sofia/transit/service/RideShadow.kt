@@ -39,9 +39,10 @@ class RideShadow(
     /** What became of the early rule by the boarding stop, for the summary; null while open. */
     private var boardingOutcome: String? = null
     /**
-     * The model had taken no vehicle at the latest reading. The early rule is
-     * judged on that reading, after it — by when a fix may have let the model
-     * take one, a report having waited for the fixes after it.
+     * The model had taken no vehicle at the latest reading, nor any before
+     * (the early rule is for the first choice: RideModel.onBoarding). The
+     * early rule is judged on that reading, after it — by when a fix may have
+     * let the model take one, a report having waited for the fixes after it.
      */
     private var noneAtReading = false
 
@@ -59,7 +60,7 @@ class RideShadow(
                 v.timestampSec * 1000, traced6(v.lat), traced6(v.lon))
         }
         tell(receivedMs, model.onReading(receivedMs, serverDateMs, reports))
-        noneAtReading = model.ours == null && !model.alighted
+        noneAtReading = model.ours == null && !model.alighted && model.boarding == null
         val top = model.leaders().take(3)
         if (top.isNotEmpty()) {
             debug("Model @${clock(receivedMs)}: metres together — " + top.joinToString(", ") { v ->
@@ -85,7 +86,7 @@ class RideShadow(
         if (!wantsBoarding()) return
         val b = model.boardingVerdict { dueAt(it) != null } ?: return
         val list = b.near.joinToString(", ") { (v, due) ->
-            "${v.routeId}/${v.key} ${v.lastDistance?.toInt()} m" + (if (due) " (due there)" else "")
+            "${v.routeId}/${v.key} ${v.lastDistance?.toInt()?.let { "$it m" } ?: "? m"}" + (if (due) " (due there)" else "")
         }
         val outcome = b.pick?.let { v ->
             "would take ${v.routeId} ${v.tripId} at once, due there at ${clock((dueAt(v.tripId) ?: 0L) * 1000)}"
