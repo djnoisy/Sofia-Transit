@@ -15,9 +15,9 @@ import java.util.Locale
  * six decimals, accuracy to one, ids with the trace's own escaping — and its
  * lines say what happened in the words the replay uses ([describe]).
  *
- * Also logs what the proposed early rule by the boarding stop would decide
- * (HANDOVER: "Предложение: ранно разпознаване по спирката на качване"),
- * once a journey, beside the model and without touching it.
+ * Also logs what the model's early rule by the boarding stop would decide
+ * (RideModel.boardingVerdict; HANDOVER "Етап 3", point 1), once a journey,
+ * without acting on it.
  *
  * Fixes come on the main thread and readings on a background one: each call
  * holds the lock. Pure Kotlin, no Android types.
@@ -74,30 +74,24 @@ class RideShadow(
     fun wantsBoarding(): Boolean = boardingOutcome == null && noneAtReading
 
     /**
-     * The early rule by the boarding stop, at the latest reading: of the
-     * vehicles beside us at the same moment, the one that was due at the stop
-     * we boarded at ([stopName]) around our departure, if just one was —
-     * [dueAt] tells when a trip was due there, or null. Logged, once.
+     * The early rule by the boarding stop ([stopName]) as the model judges
+     * it (RideModel.boardingVerdict) at the latest reading — [dueAt] tells
+     * when a trip was due there around our departure, or null — logged once,
+     * when it can be judged. Not acted on: the model here takes nothing by
+     * it, so that the trace's replay still gives the log's "Model @" lines.
      */
     @Synchronized
     fun judgeBoarding(stopName: String, dueAt: (String) -> Long?) {
         if (!wantsBoarding()) return
-        val beside = model.besideUs().sortedBy { it.lastDistance ?: 0.0 }
-        val due = beside.mapNotNull { v -> dueAt(v.tripId)?.let { v to it } }
-        val list = beside.joinToString(", ") { v ->
-            "${v.routeId}/${v.key} ${v.lastDistance?.toInt()} m" +
-                (if (due.any { it.first === v }) " (due there)" else "")
+        val b = model.boardingVerdict { dueAt(it) != null } ?: return
+        val list = b.near.joinToString(", ") { (v, due) ->
+            "${v.routeId}/${v.key} ${v.lastDistance?.toInt()} m" + (if (due) " (due there)" else "")
         }
-        val outcome = when {
-            beside.isEmpty() -> "nothing beside us — no early pick"
-            due.size == 1 -> due[0].let { (v, at) ->
-                "would take ${v.routeId} ${v.tripId} at once, due there at ${clock(at * 1000)}"
-            }
-            else -> "no early pick: ${due.size} of the vehicles beside us due there"
-        }
+        val outcome = b.pick?.let { v ->
+            "would take ${v.routeId} ${v.tripId} at once, due there at ${clock((dueAt(v.tripId) ?: 0L) * 1000)}"
+        } ?: "no early pick: ${b.why}"
         boardingOutcome = outcome
-        info("Model (boarding stop $stopName): $outcome" +
-            (if (beside.isEmpty()) "" else "; beside us: $list"))
+        info("Model (boarding stop $stopName): $outcome; near us: $list")
     }
 
     /** The boarding stop cannot be told this journey: the early rule is not judged. */
@@ -129,7 +123,8 @@ class RideShadow(
     companion object {
         /** What the model concluded, in the words of the replay (tools/test-harness/model/Replay.kt). */
         fun describe(e: RideModel.Event): String = when (e) {
-            is RideModel.Event.Identified -> "identified ${e.routeId} ${e.tripId} (${e.metres.toInt()} m together)"
+            is RideModel.Event.Identified -> "identified ${e.routeId} ${e.tripId} (" +
+                (if (e.byBoardingStop) "by the boarding stop" else "${e.metres.toInt()} m together") + ")"
             is RideModel.Event.Switched -> "switched ${e.fromKey} → ${e.toRouteId} ${e.toTripId} (${e.metres.toInt()} m): ${e.why}"
             is RideModel.Event.Withdrawn -> "withdrawn ${e.key} (${e.metres.toInt()} m)"
             is RideModel.Event.Alighted -> "got off ${e.tripId}, it left at ${clock(e.leftAtMs)}"

@@ -640,6 +640,250 @@ fun main(args: Array<String>) {
         check("every fix vaguer than 30 m: the model decides nothing", r.events.isEmpty()) { story(r) }
     }
 
+    // ── The zone ahead: seated at the back of a long vehicle (stage 3, 24 Oct 2026) ──
+    // Its report, from the front, 35-50 m ahead of us whenever it moves (two
+    // coupled trams of 22, 19 Oct 2026: 37-40 m): beyond BESIDE_M, it earned
+    // nothing and nothing was taken. Alone near us it is beside us in the
+    // zone ahead: taken, and getting off concluded at the back door.
+    run {
+        val p = Feed.path("A4508")
+        val s0 = p.along(Feed.stop("A1196")) - 300
+        val sStop = s0 + 2500
+        val tram = Mover(p, s0).stand(20.0).drive(sStop, 10.0)
+        val tArrive = tram.endT
+        tram.stand(20.0)
+        val tLeave = tram.endT
+        tram.drive(sStop + 2000, 10.0)
+        val bad = ArrayList<String>()
+        var n = 0
+        for (back in listOf(35.0, 40.0, 50.0)) for (seed in 1..seeds) for (gaps in listOf(false, true)) {
+            n++
+            val ours = { t: Double ->
+                if (t >= tArrive + 5) p.at(sStop - back).shift(2.0, 2.0) else p.at(tram.alongAt(t) - back).shift(1.0, 1.0) }
+            val r = Sim(ours, listOf(SimVehicle("VT", "TM22-1", "TM22", { tram.at(it) }, phase = (seed * 7 % 30).toDouble())),
+                until = tLeave + 400, gps = Gps(seed = seed, gaps = if (gaps) gapsEvery(6.0) else emptyList()),
+                chosenRoute = "TM55").run()
+            val id = ident(r).firstOrNull()
+            val off = alighted(r).firstOrNull()
+            if (id?.second?.key != "VT" || id.first > 20 + 75 || r.events.size != 2 ||
+                off?.second?.key != "VT" || off.first < tLeave + 20 || off.first > tLeave + 360)
+                bad += "${back.toInt()} m back, seed $seed${if (gaps) ", a fix every 6 s" else ""}: ${story(r)}"
+        }
+        check("seated 35-50 m behind the front of a long vehicle, nothing else near: taken, got off", bad.isEmpty()) {
+            "${bad.size} of $n: " + bad.take(3).joinToString(" | ") }
+    }
+    // A bus 36-50 m ahead of ours, riding with us all the way, its line chosen
+    // or a third: in the zone ahead, it was taken in 30-49 % of runs when the
+    // zone held whatever else was near (19 Oct 2026). With ours near us it
+    // does not hold: never taken, as by BESIDE_M alone — and with a fix only
+    // every 6 s too, when reports wait for the fixes after them.
+    run {
+        val p = Feed.path("A4508")
+        val s0 = p.along(Feed.stop("A1196")) - 300
+        val ride = Mover(p, s0).stand(20.0).drive(s0 + 3500, 11.0)
+        val bad = ArrayList<String>()
+        var n = 0
+        for (gap in listOf(36.0, 40.0, 45.0, 50.0)) for (chosen in listOf("A99", "A1")) for (seed in 1..seeds)
+            for (gaps in listOf(false, true)) {
+                n++
+                val r = Sim({ ride.at(it).shift(1.0, 1.0) }, listOf(
+                    SimVehicle("V213", "A85-A4508-2-6-1", "A85", { ride.at(it) }, phase = (seed * 7 % 30).toDouble()),
+                    SimVehicle("VX", "A99-A1-1-1-1", "A99", { t -> p.at(ride.alongAt(t) + gap) },
+                        phase = (seed * 11 % 30).toDouble())
+                ), until = 340.0, gps = Gps(seed = seed, gaps = if (gaps) gapsEvery(6.0) else emptyList()),
+                    chosenRoute = chosen).run()
+                if (r.events.any { (it.second as? Event.Identified)?.key == "VX" || (it.second as? Event.Switched)?.toKey == "VX" })
+                    bad += "${gap.toInt()} m, $chosen chosen, seed $seed${if (gaps) ", a fix every 6 s" else ""}: ${story(r)}"
+            }
+        check("a bus 36-50 m ahead of ours, with us all the way: never taken", bad.isEmpty()) {
+            "${bad.size} of $n: " + bad.take(3).joinToString(" | ") }
+        // The price, accepted on 20 Oct 2026: ours not in the feed, the only
+        // vehicle near us riding 45 m ahead with us is taken.
+        val r = Sim({ ride.at(it).shift(1.0, 1.0) }, listOf(
+            SimVehicle("VX", "A99-A1-1-1-1", "A99", { t -> p.at(ride.alongAt(t) + 45.0) }, phase = 11.0)
+        ), until = 340.0, chosenRoute = "A1").run()
+        check("known limit: ours not in the feed, the only vehicle near us 45 m ahead with us: taken",
+            ident(r).firstOrNull()?.second?.key == "VX") { story(r) }
+    }
+    // The zone holds only while we move, and only with nothing else near.
+    run {
+        val p = Feed.path("A4508")
+        val s0 = p.along(Feed.stop("A1196"))
+        val side = p.shifted(35.0)
+        /**
+         * Fixes every second for 200 s on 213's road, save within [gap]:
+         * standing 100 s, then at [mps]. A reading at 200.2 s with VT's
+         * report at [vtAt] s and maybe VO's, each placed by where we were
+         * along the road at its moment. Whether VT is then beside us.
+         */
+        fun beside(mps: Double = 8.0, vtAt: Double = 198.0, vt: (Double) -> Pt = { s -> p.at(s + 45) },
+                   vo: Pair<Double, (Double) -> Pt>? = null, gap: ClosedFloatingPointRange<Double>? = null): Boolean {
+            val m = RideModel()
+            val along = { t: Double -> s0 + mps * maxOf(0.0, t - 100.0) }
+            for (k in 0..200) {
+                if (gap != null && k.toDouble() in gap) continue
+                val q = p.at(along(k.toDouble()))
+                m.onFix(RideModel.Fix(T0 + k * 1000L, T0 + k * 1000L, q.lat, q.lon, 6.0))
+            }
+            fun report(key: String, at: Double, where: (Double) -> Pt) = where(along(at)).let {
+                RideModel.Report(key, key, key, T0 + (at * 1000).toLong(), it.lat, it.lon) }
+            m.onReading(T0 + 200_200L, 0L, listOfNotNull(report("VT", vtAt, vt), vo?.let { report("VO", it.first, it.second) }))
+            return m.besideUs().any { it.key == "VT" }
+        }
+        check("zone ahead: a vehicle 45 m ahead while we move, nothing else near — beside us", beside())
+        check("zone ahead: the same while we stand — not beside us", !beside(mps = 0.0))
+        check("zone ahead: the same while we creep at 1 m/s — not beside us", !beside(mps = 1.0))
+        check("zone ahead: a vehicle 35 m to the side while we move — not beside us",
+            !beside(vt = { s -> side.at(side.along(p.at(s))) }))
+        check("zone ahead: another vehicle 55 m behind us — not beside us", !beside(vo = 198.0 to { s -> p.at(s - 55) }))
+        check("zone ahead: another 70 m behind — beside us", beside(vo = 198.0 to { s -> p.at(s - 70) }))
+        // Our fixes end at 194 s: VO's report at 198 s cannot be placed yet,
+        // and from where we were at 194 s it is 82 m.
+        check("zone ahead: another 50 m ahead of us at a moment our fixes cannot place yet — not beside us",
+            !beside(vtAt = 190.0, vo = 198.0 to { s -> p.at(s + 50) }, gap = 194.5..200.0))
+        // VO beside us at its report 150 s before: too old to say where it is.
+        check("zone ahead: another whose only report, from beside us, is 150 s old — beside us",
+            beside(vo = 50.0 to { s -> p.at(s) }))
+    }
+
+    // ── The early rule by the boarding stop (stage 3, decided 24 Oct 2026) ──
+    // Waiting at УМБАЛ СВ. АННА; the feed's vehicles report every 5 s, and the
+    // model hears of them only from departure, as the app reads the feed only
+    // from then; the rule is asked after every reading. A third line chosen.
+    run {
+        val p = Feed.path("A4508")
+        val sStop = p.along(Feed.stop("A1196"))
+        fun dueOf(vararg trips: String): (String) -> Boolean = { it in trips }
+        fun board(dep: Double, ours: (Double) -> Pt, vehicles: List<SimVehicle>, due: (String) -> Boolean,
+                  until: Double = dep + 150) = Sim(ours, vehicles, until, chosenRoute = "A1", due = due).run()
+        fun v(key: String, trip: String, dep: Double, phase: Double, pos: (Double) -> Pt?,
+              glitch: (Double) -> Double = { 0.0 }) =
+            SimVehicle(key, trip, "R$key", pos, reportEvery = 5.0, phase = phase, silent = listOf(-1.0..(dep - 0.5)),
+                glitch = glitch)
+        // The first reading after departure comes 9-25 s after it.
+        val starts = listOf(40.0, 44.0, 48.0, 52.0, 56.0).flatMap { d -> (0..4).map { d to it.toDouble() } }
+
+        // Ours alone near us, due: taken at that first reading, without metres.
+        run {
+            val bad = ArrayList<String>()
+            for ((dep, ph) in starts) {
+                val bus = Mover(p, sStop).stand(dep).drive(sStop + 3000, 10.0)
+                val r = board(dep, { bus.at(it).shift(1.0, 1.0) }, listOf(v("V213", "T213", dep, ph, { bus.at(it) })),
+                    dueOf("T213"))
+                val id = ident(r).firstOrNull()
+                if (id?.second?.key != "V213" || !id.second.byBoardingStop || id.first != 65.0 || r.events.size != 1)
+                    bad += "departure ${dep.toInt()} s, phase $ph: ${story(r)}"
+            }
+            check("early rule: ours the only vehicle near us, due — taken at the first reading after departure",
+                bad.isEmpty()) { "${bad.size} of ${starts.size}: " + bad.take(3).joinToString(" | ") }
+        }
+        // Another, due too, leaves the stop with us 35 m behind (24 Oct
+        // 2026: 185 of the chosen line, 41 m behind us; 14 Oct, ХОТЕЛ ПЛИСКА:
+        // 183 34-61 m behind): no early pick, ours by metres, never it.
+        run {
+            val bad = ArrayList<String>()
+            for ((dep, ph) in starts) {
+                val bus = Mover(p, sStop).stand(dep).drive(sStop + 3000, 10.0)
+                val r = board(dep, { bus.at(it).shift(1.0, 1.0) }, listOf(v("V213", "T213", dep, ph, { bus.at(it) }),
+                    v("VX", "TX", dep, 4.0 - ph, { t -> p.at(bus.alongAt(t) - 35) })), dueOf("T213", "TX"))
+                val id = ident(r).firstOrNull()
+                if (id?.second?.key != "V213" || id.second.byBoardingStop || r.events.size != 1)
+                    bad += "departure ${dep.toInt()} s, phase $ph: ${story(r)}"
+            }
+            check("early rule: another due 35 m behind us — no early pick; ours by metres, never it", bad.isEmpty()) {
+                "${bad.size} of ${starts.size}: " + bad.take(3).joinToString(" | ") }
+        }
+        // Only while we move. In a vehicle not in the feed, we pull 25 m out
+        // of the stop and stand at a light for a minute while a bus due
+        // there stands at the stop, beside us; then we go on: never taken.
+        run {
+            val bad = ArrayList<String>()
+            for (ph in 0..4) {
+                val bus = Mover(p, sStop).stand(40.0).drive(sStop + 25, 5.0).stand(55.0).drive(sStop + 3000, 10.0)
+                val r = board(40.0, { bus.at(it).shift(1.0, 1.0) },
+                    listOf(v("VX", "TX", 40.0, ph.toDouble(), { p.at(sStop).shift(-3.0, 0.0) })), dueOf("TX"))
+                if (r.events.isNotEmpty()) bad += "phase $ph: ${story(r)}"
+            }
+            check("early rule: a bus due there beside us while we stand at a light, ours not in the feed — never taken",
+                bad.isEmpty()) { bad.joinToString(" | ") }
+        }
+        // Seated at the back of a long tram, its report 50 m ahead of us,
+        // alone: beside us in the zone ahead, taken at the first reading.
+        run {
+            val bad = ArrayList<String>()
+            for ((dep, ph) in starts) {
+                val tram = Mover(p, sStop).stand(dep).drive(sStop + 3000, 10.0)
+                val r = board(dep, { t -> p.at(tram.alongAt(t) - 50).shift(1.0, 1.0) },
+                    listOf(v("VT", "TT", dep, ph, { tram.at(it) })), dueOf("TT"))
+                val id = ident(r).firstOrNull()
+                if (id?.second?.key != "VT" || !id.second.byBoardingStop || id.first != 65.0 || r.events.size != 1)
+                    bad += "departure ${dep.toInt()} s, phase $ph: ${story(r)}"
+            }
+            check("early rule: seated 50 m behind the front of a long tram, alone — taken at the first reading",
+                bad.isEmpty()) { "${bad.size} of ${starts.size}: " + bad.take(3).joinToString(" | ") }
+        }
+        // Judged once: at the first reading it can be, and never after —
+        // nor once ours has been taken by metres.
+        run {
+            fun rideOf(stand: List<ClosedFloatingPointRange<Double>>): (Double) -> Double = { t ->
+                var s = sStop; var x = 0.0
+                while (x < t) { if (stand.none { x in it }) s += 1.0; x += 0.1 }
+                s }
+            fun model(along: (Double) -> Double, upTo: Int, m: RideModel = RideModel("A1"), from: Int = 0): RideModel {
+                for (k in from..upTo) { val q = p.at(along(k.toDouble())); m.onFix(RideModel.Fix(T0 + k * 1000L, T0 + k * 1000L, q.lat, q.lon, 5.0)) }
+                return m
+            }
+            fun rep(key: String, at: Double, along: (Double) -> Double, off: Double = 0.0) = p.at(along(at) + off).let {
+                RideModel.Report(key, "T$key", "R$key", T0 + (at * 1000).toLong(), it.lat, it.lon) }
+            // Moving at 10 m/s: V and W beside us, then V alone 10 s later (100 m together), W 200 m behind.
+            val go = rideOf(emptyList())
+            val m1 = model(go, 20)
+            m1.onReading(T0 + 20_200, 0L, listOf(rep("V", 18.0, go), rep("W", 18.0, go, -10.0)))
+            val e1 = m1.onBoarding { true }
+            model(go, 30, m1, from = 21)
+            m1.onReading(T0 + 30_200, 0L, listOf(rep("V", 28.0, go), rep("W", 28.0, go, -200.0)))
+            val e2 = m1.onBoarding { true }
+            check("early rule: judged once — V and W near us, then V alone: no early pick at all",
+                e1.isEmpty() && e2.isEmpty() && m1.boarding?.pick == null && m1.ours == null) {
+                "${m1.boarding?.why}; ${e1 + e2}" }
+            // Standing, moving 200 m, standing: V taken by metres at a reading
+            // the rule cannot judge (standing); moving again, it takes nothing.
+            val stop = rideOf(listOf(0.0..20.0, 40.0..80.0))
+            val m2 = model(stop, 10)
+            m2.onReading(T0 + 10_200, 0L, listOf(rep("V", 8.0, stop)))
+            val a = m2.onBoarding { true }
+            model(stop, 50, m2, from = 11)
+            val b = m2.onReading(T0 + 50_200, 0L, listOf(rep("V", 48.0, stop))) + m2.onBoarding { true }
+            model(stop, 100, m2, from = 51)
+            val c = m2.onReading(T0 + 100_200, 0L, listOf(rep("V", 98.0, stop))) + m2.onBoarding { true }
+            check("early rule: once ours is taken by metres, it takes nothing",
+                a.isEmpty() && b.singleOrNull()?.let { it is Event.Identified && !it.byBoardingStop } == true && c.isEmpty()) {
+                "${a + b + c}" }
+        }
+        // Taken wrongly, put right: ours's first report after departure
+        // 150 m out, and a bus due there arriving at the stop as we pull out
+        // slowly — beside us, alone near us. It is taken; once it is apart at
+        // two reports as we go on, ours, beside us 150 m and more, takes over.
+        run {
+            val bad = ArrayList<String>()
+            // VX's report at the first reading 3-5 s after departure, when we have moved.
+            for (ph in 0..4) for (px in 1..3) {
+                val dep = 58.0
+                val bus = Mover(p, sStop).stand(dep).drive(sStop + 100, 5.0).drive(sStop + 3000, 10.0)
+                val r = board(dep, { bus.at(it).shift(1.0, 1.0) }, listOf(
+                    v("V213", "T213", dep, ph.toDouble(), { bus.at(it) }, glitch = { rt -> if (rt < dep + 6) 150.0 else 0.0 }),
+                    v("VX", "TX", dep, px.toDouble(), { p.at(sStop).shift(-3.0, 0.0) })), dueOf("T213", "TX"), until = dep + 200)
+                val first = ident(r).firstOrNull()
+                val sw = switched(r).firstOrNull()
+                if (first?.second?.key != "VX" || !first.second.byBoardingStop || sw?.second?.toKey != "V213" ||
+                    sw.first > dep + 100 || r.model.ours?.key != "V213" || alighted(r).isNotEmpty())
+                    bad += "phases $ph, $px: ${story(r)}"
+            }
+            check("early rule: taken wrongly, ours's report 150 m out — put right once it is apart as we go on",
+                bad.isEmpty()) { bad.joinToString(" | ") }
+        }
+    }
+
     // ── Two vehicles abreast, and fixes that cannot place every report ──
     // Boarding at ХОТЕЛ ПЛИСКА with 304 standing beside us (6 Oct 2026), 213
     // chosen; 60 pairs of report phases of 213 and 304. Wherever the fixes
@@ -903,6 +1147,273 @@ fun main(args: Array<String>) {
             "304 ${r.peak("V304").toInt()} m; ${story(r)}" }
     }
 
+    // ── Getting off, our fixes gone vague after it; and tunnels (stage 3, 24 Oct 2026) ──
+    // Down into an underpass or the metro just after getting off, our fixes
+    // keep coming 50-90 m vague (14 Oct 2026, d; 20 Oct, c): once our accurate
+    // fixes have seen ours leave us on foot, they do not hold up getting off.
+    run {
+        val p = Feed.path("A4508")
+        val s0 = p.along(Feed.stop("A1196")) - 300
+        val sStop = s0 + 1500
+        val bus = Mover(p, s0).drive(sStop, 10.0).stand(20.0).drive(sStop + 3000, 10.0)   // there 150-170 s
+        val spot = p.at(sStop).shift(4.0, 4.0)
+        val ours = { t: Double -> if (t >= 158) spot else bus.at(t).shift(1.0, 1.0) }
+        fun ride(phase: Double, vagueFrom: Double) = Sim(ours, listOf(
+            SimVehicle("V213", "A85-A4508-2-6-1", "A85", { bus.at(it) }, phase = phase)
+        ), until = 450.0, gps = Gps(vague = listOf(vagueFrom..1e9)), chosenRoute = "A85").run()
+        // Its reports at 157 s (beside us), 187 s and 217 s (apart: parted at
+        // the reading at 245 s); vague from 250 s, before two minutes from
+        // our last vehicle speed — as on 20 Oct, c.
+        val a = ride(7.0, 250.0)
+        check("got off, fixes vague once ours was apart at two reports: got off concluded",
+            a.events.size == 2 && alighted(a).singleOrNull()?.let { it.second.key == "V213" && it.first in 190.0..370.0 } == true) {
+            story(a) }
+        // At 175 s (50 m off), 205 s (apart), 235 s — vague from 220 s, that
+        // one cannot be placed: as on 14 Oct, d.
+        val b = ride(25.0, 220.0)
+        check("got off, fixes vague after ours's first report apart, 50 m off at the one before: got off concluded",
+            b.events.size == 2 && alighted(b).singleOrNull()?.let { it.second.key == "V213" && it.first in 190.0..370.0 } == true) {
+            story(b) }
+        // Vague from the moment it pulls away: never seen apart, nothing is
+        // concluded (the app's timers then end the journey).
+        val c = ride(7.0, 172.0)
+        check("known limit: got off, fixes vague from as ours pulls away — nothing concluded",
+            c.events.size == 1 && ident(c).single().second.key == "V213") { story(c) }
+    }
+    // Judged against where our fixes last placed us, by hand: we ride V at
+    // 10 m/s from 0 s to 60 s, when we stop at S; V's reports 60 m and then
+    // 130 m off (at 80 s and 110 s); our fixes vague from 112 s.
+    run {
+        val p = Feed.path("A4508")
+        val s0 = p.along(Feed.stop("A1196"))
+        /** Where V is, along the road, at its reports from 70 s on; and whether we ride on in it. */
+        fun run(vAt: (Double) -> Double, ride: Boolean): List<Pair<Int, Event>> {
+            val m = RideModel("A85")
+            val out = ArrayList<Pair<Int, Event>>()
+            val us = { t: Double -> s0 + 10.0 * (if (ride) t else minOf(t, 60.0)) }
+            val rnd = kotlin.random.Random(5)
+            for (k in 0..300) {
+                val vague = k >= 112
+                val q = p.at(us(k.toDouble())).let { if (vague) it.shift(rnd.nextDouble(-30.0, 30.0), rnd.nextDouble(-30.0, 30.0)) else it }
+                m.onFix(RideModel.Fix(T0 + k * 1000L, T0 + k * 1000L, q.lat, q.lon, if (vague) 70.0 else 5.0)).forEach { out += k to it }
+                if (k % 30 == 20) {
+                    val at = k - 2.0
+                    val v = p.at(if (at < 70) us(at) else vAt(at))
+                    m.onReading(T0 + k * 1000L + 200, 0L, listOf(RideModel.Report("V", "TV", "A85", T0 + (at * 1000).toLong(), v.lat, v.lon)))
+                        .forEach { out += k to it }
+                }
+            }
+            return out
+        }
+        // V waits at a light 130-150 m beyond S until 200 s, then goes on:
+        // not clearly apart from where we were while we might have walked
+        // half way to it; once it goes on, got off.
+        val light = run({ t -> s0 + 600 + when {
+            t < 100 -> 60.0
+            t < 200 -> 130.0 + (t - 100) / 5
+            else -> 150.0 + 10 * (t - 200) } }, ride = false)
+        check("seen on foot, ours waiting at a light 150 m off, fixes vague: got off only once it goes on",
+            light.size == 2 && light[1].second is Event.Alighted && light[1].first in 230..250) {
+            light.joinToString { "${it.first}s ${describe(it.second)}" } }
+        // Never clearly apart at a report our fixes placed — 60 m, then 90 m
+        // off — before they went vague: nothing concluded.
+        val near = run({ t -> s0 + 600 + when {
+            t < 100 -> 60.0
+            t < 112 -> 90.0
+            else -> 90.0 + 10 * (t - 112) } }, ride = false)
+        check("seen on foot, ours 60 m and 90 m off, then fixes vague as it goes: nothing concluded",
+            near.size == 1) { near.joinToString { "${it.first}s ${describe(it.second)}" } }
+        // Riding on in V into a tunnel at 112 s, its reports 70 m and 130 m
+        // out just before (poor ones, beyond the zone ahead): we moved at
+        // vehicle speed, never got off.
+        val tunnel = run({ t -> s0 + 10 * t + when {
+            t < 100 -> 70.0
+            t < 112 -> 130.0
+            else -> 0.0 } }, ride = true)
+        check("in ours, two poor reports just before a tunnel, fixes vague in it: never taken for getting off",
+            tunnel.none { it.second is Event.Alighted }) { tunnel.joinToString { "${it.first}s ${describe(it.second)}" } }
+    }
+    // In ours through a tunnel, our fixes vague or none, its reports as it
+    // goes, stuck at the entrance, or none: never taken for getting off. Also
+    // standing 20 s at a stop just before it and 3 min in a jam inside.
+    run {
+        val p = Feed.path("A4508")
+        val s0 = p.along(Feed.stop("A1196")) - 300
+        val sIn = s0 + 1200
+        val bad = ArrayList<String>()
+        var n = 0
+        for (stopFirst in listOf(false, true)) for (fixes in listOf("vague", "none"))
+            for (reports in listOf("as it goes", "stuck at the entrance", "none")) {
+                n++
+                val bus = Mover(p, s0).drive(sIn - 30, 10.0)
+                if (stopFirst) bus.stand(20.0)
+                bus.drive(sIn, 10.0)
+                val tIn = bus.endT
+                if (stopFirst) bus.drive(sIn + 300, 10.0).stand(180.0)
+                bus.drive(sIn + 1000, 10.0)
+                val tOut = bus.endT
+                bus.drive(sIn + 3000, 10.0)
+                val pos = { t: Double -> if (reports == "stuck at the entrance" && t in tIn..tOut) p.at(sIn) else bus.at(t) }
+                val r = Sim({ bus.at(it).shift(1.0, 1.0) }, listOf(SimVehicle("V213", "A85-A4508-2-6-1", "A85", pos, phase = 7.0,
+                    silent = if (reports == "none") listOf(tIn..tOut) else emptyList())), until = tOut + 200,
+                    gps = if (fixes == "vague") Gps(vague = listOf(tIn..tOut)) else Gps(gaps = listOf(tIn..tOut)),
+                    chosenRoute = "A85").run()
+                if (r.events.size != 1 || ident(r).singleOrNull()?.second?.key != "V213")
+                    bad += "${if (stopFirst) "a stop before it, a jam inside" else "through"}, fixes $fixes, reports $reports: ${story(r)}"
+            }
+        check("in ours through a tunnel: never taken for getting off, never withdrawn", bad.isEmpty()) {
+            "${bad.size} of $n: " + bad.take(3).joinToString(" | ") }
+        // One report of ours 150 m out as it stands at a stop just before a
+        // 2 km tunnel: it seems to leave us as we stand, and to be far off
+        // from where our fixes last placed us — but it was beside us at the
+        // report before: never taken for getting off.
+        val bad2 = ArrayList<String>()
+        for (fixes in listOf("vague", "none")) for (phase in listOf(1.0, 7.0, 13.0, 19.0, 25.0)) {
+            val bus = Mover(p, s0).drive(sIn - 30, 10.0).stand(30.0)
+            val tStop = bus.endT - 30.0
+            bus.drive(sIn, 10.0)
+            val tIn = bus.endT
+            bus.drive(sIn + 2000, 10.0)
+            val tOut = bus.endT
+            bus.drive(sIn + 4000, 10.0)
+            val r = Sim({ bus.at(it).shift(1.0, 1.0) }, listOf(SimVehicle("V213", "A85-A4508-2-6-1", "A85", { bus.at(it) },
+                phase = phase, glitch = { rt -> if (rt >= tStop && rt < tStop + 30) 150.0 else 0.0 })), until = tOut + 200,
+                gps = if (fixes == "vague") Gps(vague = listOf(tIn..tOut)) else Gps(gaps = listOf(tIn..tOut)),
+                chosenRoute = "A85").run()
+            if (alighted(r).isNotEmpty() || withdrawn(r).isNotEmpty() || switched(r).isNotEmpty())
+                bad2 += "fixes $fixes, phase $phase: ${story(r)}"
+        }
+        check("in ours, one report 150 m out at a stop just before a 2 km tunnel: never taken for getting off",
+            bad2.isEmpty()) { bad2.joinToString(" | ") }
+    }
+
+    // ── Off ours's route and ours not with us (stage 3, decided 24 Oct 2026) ──
+    // The app tells when we are off the route of the vehicle taken as ours
+    // (RoadWatch, as its OffRoadWatch); not beside us for about a minute,
+    // it has left us. Ours gone silent could never be seen apart: it was
+    // held for good (and, with another beside us, for 5 min).
+    fun offFrom(road: Path, ours: (Double) -> Pt, until: Double): Double {
+        val w = RoadWatch(road)
+        var t = 0.0
+        while (t <= until) { if (w.off(ours(t))) return t; t += 1.0 }
+        return -1.0
+    }
+    run {
+        // 304 taken (chosen, tie at ХОТЕЛ ПЛИСКА), then silent for good; we
+        // ride 213 on past ПЛ. ОРЛОВ МОСТ, where 304's road turns off.
+        val j = Journey(startAtPliska = true, alight = false, chosen = "A217")
+        val v = j.vehicles().map { sv ->
+            if (sv.key != "V304") sv else SimVehicle(sv.key, sv.tripId, sv.routeId, sv.pos, phase = sv.phase,
+                silent = listOf(70.0..1e9))
+        }
+        val r = Sim({ j.ours(it) }, v, j.tLeaveOrlov + 300, j.gps, j.chosen,
+            offRoute = offRouteBy(mapOf("V304" to j.p304, "V213" to j.p213)) { j.ours(it) }).run()
+        val tOff = offFrom(j.p304, { j.ours(it) }, j.tLeaveOrlov + 300)
+        val sw = switched(r).firstOrNull()
+        check("304 taken wrongly, silent; off its route, 213 beside us: 213 takes over as we leave the route",
+            ident(r).firstOrNull()?.second?.key == "V304" && sw?.second?.toKey == "V213" && tOff > 0 &&
+                sw.first in tOff..(tOff + 5) && r.events.size == 2) { "off its route ${tOff.toInt()} s; ${story(r)}" }
+    }
+    run {
+        // In a vehicle not in the feed: 304, with us from ХОТЕЛ ПЛИСКА, is
+        // taken (a known limit), then silent; we leave its road: withdrawn.
+        val j = Journey(startAtPliska = true, alight = false, chosen = "A1", report213 = false)
+        val v = j.vehicles().map { sv ->
+            if (sv.key != "V304") sv else SimVehicle(sv.key, sv.tripId, sv.routeId, sv.pos, phase = sv.phase,
+                silent = listOf(100.0..1e9))
+        }
+        val r = Sim({ j.ours(it) }, v, j.tLeaveOrlov + 300, j.gps, j.chosen,
+            offRoute = offRouteBy(mapOf("V304" to j.p304)) { j.ours(it) }).run()
+        val tOff = offFrom(j.p304, { j.ours(it) }, j.tLeaveOrlov + 300)
+        val w = withdrawn(r).firstOrNull()
+        check("304 taken wrongly, silent; off its route, nothing beside us: withdrawn as we leave the route",
+            ident(r).firstOrNull()?.second?.key == "V304" && w?.second?.key == "V304" && tOff > 0 &&
+                w.first in tOff..(tOff + 5) && r.events.size == 2 && r.model.ours == null) {
+            "off its route ${tOff.toInt()} s; ${story(r)}" }
+    }
+    run {
+        // Ours on a detour (road works): 120 m off its road for 700 m, then back.
+        val p = Feed.path("A4508")
+        val s0 = p.along(Feed.stop("A1196")) - 300
+        val d1 = s0 + 800; val d2 = s0 + 1500
+        fun aside(s: Double, m: Double): Pt {
+            val a = p.at(s - 5); val b = p.at(s + 5)
+            val dn = (b.lat - a.lat) * KY; val de = (b.lon - a.lon) * KY * kotlin.math.cos(Math.toRadians(a.lat))
+            val l = kotlin.math.hypot(dn, de).takeIf { it > 0 } ?: 1.0
+            return p.at(s).shift(-de / l * m, dn / l * m)
+        }
+        val detour = { s: Double ->
+            aside(s, when {
+                s < d1 || s > d2 + 200 -> 0.0
+                s < d1 + 100 -> 120.0 * (s - d1) / 100
+                s < d2 + 100 -> 120.0
+                else -> 120.0 * (d2 + 200 - s) / 100
+            }) }
+        val bus = Mover(p, s0).drive(s0 + 4000, 10.0)
+        val ours = { t: Double -> detour(bus.alongAt(t)).shift(1.0, 1.0) }
+        val tOff = offFrom(p, ours, 400.0)
+        for (silent in listOf(false, true)) {
+            val gap = (tOff - 15)..(tOff + 100)
+            val r = Sim(ours, listOf(SimVehicle("V213", "A85-A4508-2-6-1", "A85", { detour(bus.alongAt(it)) }, phase = 7.0,
+                silent = if (silent) listOf(gap) else emptyList())), 400.0, chosenRoute = "A85",
+                offRoute = offRouteBy(mapOf("V213" to p), ours)).run()
+            if (!silent) check("ours on a detour, reporting: kept", r.events.size == 1 &&
+                ident(r).singleOrNull()?.second?.key == "V213") { "off its route ${tOff.toInt()} s; ${story(r)}" }
+            else {
+                val w = withdrawn(r).firstOrNull()
+                val again = ident(r).getOrNull(1)
+                check("ours on a detour, silent: withdrawn about a minute after it was last beside us, then taken again by metres",
+                    r.events.size == 3 && ident(r).first().second.key == "V213" && w?.second?.key == "V213" &&
+                        w.first in (tOff + 20)..(tOff + 60) && again?.second?.key == "V213" &&
+                        again.first <= gap.endInclusive + 95) { "off its route ${tOff.toInt()} s; ${story(r)}" }
+            }
+        }
+    }
+    run {
+        // On the road 213 and 304 share, ours silent and 304 beside us: we
+        // are on ours's route all the while — kept (as without being told).
+        val j0 = Journey()
+        val j = Journey(silent213 = listOf((j0.tLeavePliska + 10)..(j0.tArriveOrlov - 20)))
+        val r = Sim({ j.ours(it) }, j.vehicles(), j.tLeaveOrlov + 420, j.gps, j.chosen,
+            offRoute = offRouteBy(mapOf("V213" to j.p213, "V304" to j.p304)) { j.ours(it) }).run()
+        check("213 silent on the road it shares with 304, the app telling the route: kept, got off",
+            switched(r).isEmpty() && withdrawn(r).isEmpty() && alighted(r).singleOrNull()?.second?.key == "V213") {
+            story(r) }
+    }
+    run {
+        // About a minute since ours was last beside us, and only ours's route counts.
+        val p = Feed.path("A4508")
+        val s0 = p.along(Feed.stop("A1196"))
+        val m = RideModel("A85")
+        val out = ArrayList<Pair<Int, Event>>()
+        fun rep(at: Double) = p.at(s0 + 10 * at).let { RideModel.Report("V", "TV", "A85", T0 + (at * 1000).toLong(), it.lat, it.lon) }
+        for (k in 0..130) {
+            val q = p.at(s0 + 10.0 * k)
+            m.onFix(RideModel.Fix(T0 + k * 1000L, T0 + k * 1000L, q.lat, q.lon, 5.0)).forEach { out += k to it }
+            if (k == 20) m.onReading(T0 + 20_200, 0L, listOf(rep(18.0))).forEach { out += k to it }
+            if (k == 50) m.onReading(T0 + 50_200, 0L, listOf(rep(48.0))).forEach { out += k to it }
+            if (k >= 60) m.onOffRoute(if (k < 120) "W" else "V")
+        }
+        // V last beside us at 48 s; off W's route from 60 s, off V's from 120 s:
+        // withdrawn on the fix after.
+        check("off another's route a minute: nothing; off ours's: withdrawn on the fix after",
+            out.size == 2 && out[0].second is Event.Identified && out[1].second is Event.Withdrawn && out[1].first == 121) {
+            out.joinToString { "${it.first}s ${describe(it.second)}" } }
+        val m2 = RideModel("A85")
+        val out2 = ArrayList<Pair<Int, Event>>()
+        for (k in 0..130) {
+            val q = p.at(s0 + 10.0 * k)
+            m2.onFix(RideModel.Fix(T0 + k * 1000L, T0 + k * 1000L, q.lat, q.lon, 5.0)).forEach { out2 += k to it }
+            if (k == 20) m2.onReading(T0 + 20_200, 0L, listOf(rep(18.0))).forEach { out2 += k to it }
+            if (k == 50) m2.onReading(T0 + 50_200, 0L, listOf(rep(48.0))).forEach { out2 += k to it }
+            if (k >= 80) m2.onOffRoute("V")
+        }
+        // V last beside us at 48 s, off its route from 80 s: withdrawn at 108 s.
+        check("off ours's route: withdrawn a minute after it was last beside us",
+            out2.size == 2 && out2[0].second is Event.Identified && out2[1].second is Event.Withdrawn && out2[1].first == 108) {
+            out2.joinToString { "${it.first}s ${describe(it.second)}" } }
+    }
+
     // ── In a vehicle that never reports, another taken for it ──
     // We ride a vehicle the feed does not have; another runs with us 1.5 km
     // and is taken for ours. Both stop at a stop; it leaves, ours stays.
@@ -993,16 +1504,30 @@ fun main(args: Array<String>) {
     val opposite = SimVehicle("VOPP", "TOPP", "A99", { t -> Feed.path("A4508").let { p ->
         p.at(p.along(Feed.stop("A1196")) + 10.0 * maxOf(0.0, t - 10)).shift(0.0, 12.0) } })
     run {
+        // Only one vehicle near us at all (24 Oct 2026): of two beside us,
+        // one due is no pick — at ХОТЕЛ ПЛИСКА (14 Oct) the other was ours.
         val (_, lines) = shadowRide(listOf(opposite), due = setOf("T213"))
-        check("stage 2, early rule: of two beside us, the one due at the boarding stop is taken",
-            lines.any { it.startsWith("Model (boarding stop БУЛ. ЦАРИГРАДСКО ШОСЕ): would take A85 T213 at once") &&
+        check("stage 2, early rule: of two beside us, one due — no early pick",
+            lines.any { it.startsWith("Model (boarding stop БУЛ. ЦАРИГРАДСКО ШОСЕ): no early pick: 2 vehicles near us") &&
                 "A99/VOPP" in it && "A85/V213 0 m (due there)" in it }) { lines.joinToString(" | ") }
     }
     run {
         val (_, lines) = shadowRide(listOf(opposite), due = setOf("T213", "TOPP"))
         check("stage 2, early rule: two beside us both due — no early pick",
-            lines.any { it.startsWith("Model (boarding stop") && "no early pick: 2 of the vehicles" in it }) {
+            lines.any { it.startsWith("Model (boarding stop") && "no early pick: 2 vehicles near us" in it }) {
             lines.joinToString(" | ") }
+    }
+    run {
+        val (_, lines) = shadowRide(emptyList(), due = setOf("T213"))
+        check("stage 2, early rule: the only vehicle near us, due — would take it",
+            lines.any { it.startsWith("Model (boarding stop БУЛ. ЦАРИГРАДСКО ШОСЕ): would take A85 T213 at once") &&
+                "near us: A85/V213 0 m (due there)" in it }) { lines.joinToString(" | ") }
+    }
+    run {
+        val (_, lines) = shadowRide(emptyList(), due = emptySet())
+        check("stage 2, early rule: the only vehicle near us, not due — no early pick",
+            lines.any { it == "Model (boarding stop БУЛ. ЦАРИГРАДСКО ШОСЕ): no early pick: the only vehicle near us " +
+                "was not due there; near us: A85/V213 0 m" }) { lines.joinToString(" | ") }
     }
     run {
         val far = SimVehicle("V213", "T213", "A85", { t -> Feed.path("A4508").let { p ->
@@ -1018,12 +1543,20 @@ fun main(args: Array<String>) {
         val r = far.pos(38.0)!!
         shadow.onReading(T0 + 40_300, T0 + 40_000, listOf(RideShadow.Seen("V213", "T213", "A85", T0 / 1000 + 38, r.lat, r.lon)))
         shadow.judgeBoarding("X") { T0 / 1000 }
-        check("stage 2, early rule: nothing beside us — no early pick",
-            lines.any { it == "Model (boarding stop X): nothing beside us — no early pick" }) { lines.joinToString(" | ") }
+        check("stage 2, early rule: nothing beside us — not judged yet",
+            lines.none { it.startsWith("Model (boarding stop") } && shadow.wantsBoarding()) { lines.joinToString(" | ") }
+        for (t in 41..70) {
+            val ms = T0 + t * 1000L; val q = ride.at(t.toDouble())
+            shadow.onFix(ms, ms + 60, q.lat, q.lon, 5.0)
+        }
+        val q = ride.at(68.0)
+        shadow.onReading(T0 + 70_300, T0 + 70_000, listOf(RideShadow.Seen("V213", "T213", "A85", T0 / 1000 + 68, q.lat, q.lon)))
+        shadow.judgeBoarding("X") { T0 / 1000 }
         shadow.judgeBoarding("X") { T0 / 1000 }
         shadow.boardingUntold()
-        check("stage 2, early rule: judged once a journey", lines.count { it.startsWith("Model (boarding stop") } == 1) {
-            lines.joinToString(" | ") }
+        check("stage 2, early rule: judged once a journey, once something is beside us",
+            lines.count { it.startsWith("Model (boarding stop") } == 1 &&
+                lines.any { it.startsWith("Model (boarding stop X): would take A85 T213") }) { lines.joinToString(" | ") }
     }
     run {
         // A fix every 6 s, reports 3 s old: the model takes 213 on the fix
@@ -1097,6 +1630,17 @@ fun main(args: Array<String>) {
                 println("TRACE ${f.name}: " + rp.events.joinToString("; ") { "${clock(it.atMs)} ${describe(it.event)}" })
                 expectations[f.name]?.invoke(rp)
                 variants[f.name]?.invoke(start, lines)
+                // The early rule with every vehicle taken as due at the
+                // boarding stop, the worst it could be told: whatever it
+                // takes, the metres take too.
+                val ids = rp.events.mapNotNull { (it.event as? Event.Identified)?.key ?: (it.event as? Event.Switched)?.toKey }
+                val early = replay(start, lines) { true }
+                val taken = early.events.mapNotNull { (it.event as? Event.Identified)?.key ?: (it.event as? Event.Switched)?.toKey }
+                println("TRACE ${f.name}, early rule, all due: " +
+                    early.events.joinToString("; ") { "${clock(it.atMs)} ${describe(it.event)}" })
+                check("${f.name}, early rule with every vehicle due: nothing the metres do not take",
+                    taken.all { it in ids } && (ids.isEmpty() || taken.isNotEmpty())) {
+                    early.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
             }
         }
     } else println("(no TRACE_DIR: recorded journeys not replayed)")
@@ -1265,13 +1809,25 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // and earns nothing. Off there about 09:11:20; our fixes went vague
     // (68-89 m, gaps of 5-9 s) from about 09:13, so 76's reports after the
     // first one apart could not be placed, and the app ended the journey
-    // (09:13:52) before the model concluded getting off. The passenger sat at
-    // the last door: 76's reports 15-27 m ahead of us.
+    // (09:13:52) before the model concluded getting off. Now: seen on foot
+    // after 76 was 66 m and then 223 m off, its next report, 09:13:16, is
+    // judged against where our accurate fixes last placed us — clearly apart:
+    // got off concluded at 09:13:38. The passenger sat at the last door: 76's
+    // reports 15-27 m ahead of us.
     "2026-10-14_76a.txt" to { rp -> onlyOurs(rp, "14.10 a", "A81", "08:56:35") },
     "2026-10-14_76b.txt" to { rp -> onlyOurs(rp, "14.10 b", "A81", "09:01:10") },
     "2026-10-14_76c.txt" to { rp -> onlyOurs(rp, "14.10 c", "A81", "09:03:50") },
     "2026-10-14_76d.txt" to { rp ->
-        onlyOurs(rp, "14.10 d", "A81", "09:07:15")
+        val id = rp.events.firstOrNull()
+        check("14.10 d: 76 identified by 09:07:15", (id?.event as? Event.Identified)?.routeId == "A81" &&
+            clock(id.atMs) <= "09:07:15") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        val off = rp.events.getOrNull(1)
+        check("14.10 d: got off between 09:13:00 and 09:13:52 (the app's end), nothing else", rp.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "09:13:00".."09:13:52") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] != "A81" }
+        check("14.10 d: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
         val c = rp.metresAt.flatMap { it.second.entries }.filter { rp.routeOf[it.key] == "A270" }
         check("14.10 d: 183, beside us as we pulled out, earns nothing", c.all { it.value <= 0.0 }) {
             c.joinToString { "${it.key} ${it.value.toInt()}" } }
@@ -1279,17 +1835,19 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // 19 Oct 2026: tram 22 (two trams coupled), 22 chosen, from УЛ. ОПЪЛЧЕНСКА
     // to ЦЕНТРАЛНИ ХАЛИ, the passenger at the very back. The tram's reports
     // were 37-40 m ahead of us at the same moment whenever it moved, 1-9 m to
-    // the side, and under BESIDE_M only standing: it earns no metres and the
-    // model takes nothing (a known limit, HANDOVER "Етап 3", point 5). The app
-    // took it at once, as the chosen line. Whatever the model concludes, it
-    // must not be another vehicle.
+    // the side, and under BESIDE_M only standing: beside us by BESIDE_M alone
+    // it earned nothing and the model took nothing. Alone near us, in the
+    // zone ahead, it is taken at the second reading after departure (18:11:07)
+    // and getting off is concluded: off at ЦЕНТРАЛНИ ХАЛИ about 18:16:30, the
+    // tram over 100 m away from 18:17:11; the app ended at 18:18:17.
     "2026-10-19_22.txt" to { rp ->
-        check("19.10 tram 22: no vehicle but 22 taken", rp.events.all {
-            when (val e = it.event) {
-                is Event.Identified -> e.routeId == "TM22" && e.key == "TM4170"
-                is Event.Switched -> e.toKey == "TM4170"
-                else -> true
-            } }) { rp.events.joinToString { describe(it.event) } }
+        val id = rp.events.firstOrNull()
+        check("19.10 tram 22: 22 identified by 18:11:45", (id?.event as? Event.Identified)?.key == "TM4170" &&
+            clock(id.atMs) <= "18:11:45") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        val off = rp.events.getOrNull(1)
+        check("19.10 tram 22: got off between 18:17:30 and 18:18:30, nothing else", rp.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "18:17:30".."18:18:30") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
         val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "TM4170" }
         check("19.10 tram 22: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
@@ -1297,13 +1855,14 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // 19 Oct 2026, evening: tram 18 (TM34, TM2344), 27 chosen, from
     // ЦЕНТРАЛНИ ХАЛИ to УАСГ, the passenger 2 m from the back seat; tracking
     // begun as the tram pulled out (no boarding stop). Its reports 27-42 m
-    // ahead of us (once 55 m): bridged over mostly, so the model takes it at
-    // 18:22:35, 1.5 min after the app. Off at УАСГ; the tram left about
-    // 18:30:06 while trams 10 and 13 came by the stop.
+    // ahead of us (once 55 m): bridged over mostly by BESIDE_M alone (taken
+    // at 18:22:35, 1.5 min after the app, 650 m together of some 1.8 km);
+    // alone near us in the zone ahead, at 18:21:34, 1800 m. Off at УАСГ; the
+    // tram left about 18:30:06 while trams 10 and 13 came by the stop.
     "2026-10-19_18.txt" to { rp ->
         val id = rp.events.firstOrNull()
-        check("19.10 tram 18: 18 identified by 18:22:40", (id?.event as? Event.Identified)?.key == "TM2344" &&
-            clock(id.atMs) <= "18:22:40") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        check("19.10 tram 18: 18 identified by 18:21:40", (id?.event as? Event.Identified)?.key == "TM2344" &&
+            clock(id.atMs) <= "18:21:40") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
         check("19.10 tram 18: nothing else until getting off", rp.events.size == 2 &&
             rp.events[1].event is Event.Alighted) { rp.events.joinToString { describe(it.event) } }
         val off = rp.events.lastOrNull()
@@ -1341,7 +1900,9 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // app's age correction, earned nothing. Got off at ПЛ. ОРЛОВ МОСТ about
     // 09:07:45; ours was apart at two reports by 09:09:01, but the 120 s
     // without vehicle speed ran out at 09:09:31, as the fixes had turned
-    // poor (57-77 m from 09:09:17) and the app ended: not concluded.
+    // poor (57-77 m from 09:09:17) and the app ended: not concluded. (By the
+    // fix clock the 120 s are up 1.2 s after the trace's last fix; see the
+    // variant with the vague fixes going on.)
     "2026-10-20_76c.txt" to { rp ->
         val id = rp.events.firstOrNull()
         check("20.10 c: 76 identified by 09:01:00", (id?.event as? Event.Identified)?.key == "A3118" &&
@@ -1374,6 +1935,30 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     }
 )
 
+/**
+ * The app's off-route watch by the road (OffRoadWatch), on our true places:
+ * over 50 m from [road] for 150 m travelled; back within 50 m, on it again.
+ */
+class RoadWatch(private val road: Path) {
+    private var travelled = 0.0
+    private var prev: Pt? = null
+    fun off(q: Pt): Boolean {
+        if (q.dist(road.at(road.along(q))) <= 50.0) travelled = 0.0 else travelled += prev?.dist(q) ?: 0.0
+        prev = q
+        return travelled >= 150.0
+    }
+}
+
+/** What the app tells the model (RideModel.onOffRoute): off the road of ours, from [roads] by vehicle. */
+fun offRouteBy(roads: Map<String, Path>, ours: (Double) -> Pt): (Double, RideModel) -> String? {
+    val watches = roads.mapValues { RoadWatch(it.value) }
+    return { t, m ->
+        val q = ours(t)
+        val off = watches.filterValues { it.off(q) }.keys
+        m.ours?.key?.takeIf { it in off }
+    }
+}
+
 /** A recorded ride where only [route] is concluded, by [by], and no other vehicle reaches 150 m. */
 fun onlyOurs(rp: Replayed, label: String, route: String, by: String) {
     val id = rp.events.firstOrNull()
@@ -1401,8 +1986,71 @@ fun thinned(lines: List<String>, stepS: Int): List<String> {
     }
 }
 
+/**
+ * The trace with our fixes moved [back] metres back along the way we went
+ * (from our fixes 5 s either side; standing, the way last seen): as if we
+ * had sat further back in the vehicle.
+ */
+fun movedBack(lines: List<String>, back: Double): List<String> {
+    val fixes = lines.filter { it.startsWith("F,") }.map { it.split(",") }
+    val t = fixes.map { it[2].toLong() }
+    val lat = fixes.map { it[3].toDouble() }
+    val lon = fixes.map { it[4].toDouble() }
+    var way: Pair<Double, Double>? = null
+    val moved = HashMap<String, String>()
+    for (i in fixes.indices) {
+        val a = t.indexOfFirst { it >= t[i] - 5000 }
+        val b = t.indexOfLast { it <= t[i] + 5000 }
+        val kx = KY * kotlin.math.cos(Math.toRadians(lat[i]))
+        val dx = (lon[b] - lon[a]) * kx
+        val dy = (lat[b] - lat[a]) * KY
+        val l = kotlin.math.hypot(dx, dy)
+        if (l >= 5.0) way = dx / l to dy / l
+        val p = fixes[i].toMutableList()
+        way?.let { (ex, ny) ->
+            p[3] = String.format(java.util.Locale.US, "%.6f", lat[i] - ny * back / KY)
+            p[4] = String.format(java.util.Locale.US, "%.6f", lon[i] - ex * back / kx)
+        }
+        moved[fixes[i].joinToString(",")] = p.joinToString(",")
+    }
+    return lines.map { moved[it] ?: it }
+}
+
 /** Recorded journeys replayed as they would have been with poorer positions, by file name. */
 val variants: Map<String, (String, List<String>) -> Unit> = mapOf(
+    // 20 Oct 2026, c: had the journey gone on, the fixes going on as vague in
+    // the metro underpass (70 m, one every 6 s, where the last one was): got
+    // off concluded once the 120 s are up — our accurate fixes last placed us
+    // at 09:09:14, near where we stood as 76 left. Without that, never.
+    "2026-10-20_76c.txt" to { start, lines ->
+        val last = lines.last { it.startsWith("F,") }.split(",")
+        val more = (1..5).map { k ->
+            listOf("F", (last[1].toLong() + 6000L * k).toString(), (last[2].toLong() + 6000L * k).toString(),
+                last[3], last[4], "70.0", "", "").joinToString(",") }
+        val rp = replay(start, lines + more)
+        val off = rp.events.getOrNull(1)
+        check("20.10 c, the vague fixes going on: got off between 09:09:33 and 09:09:45, nothing else",
+            rp.events.size == 2 && off?.event is Event.Alighted && clock(off.atMs) in "09:09:33".."09:09:45") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+    },
+    // 24 Oct 2026, 181: "had I sat at the very back?" (the owner). Our fixes
+    // moved 10-25 m back: 185 (A2517) of the chosen line, which left the
+    // stop just behind us, is nearer our place than 181 at the first reading
+    // from 15 m on (21 m against 32 m at 20 m) — the early rule by "one due
+    // among those beside us" would have taken it at 20 m. Both due there:
+    // never 185, by the early rule or by metres; 181 taken.
+    "2026-10-24_181.txt" to { start, lines ->
+        val bad = ArrayList<String>()
+        for (back in listOf(10.0, 15.0, 17.0, 20.0, 25.0)) {
+            val rp = replay(start, movedBack(lines, back)) { it in setOf("A269-A3105-4-8-7102987730", "A234-A2619-2-8-25198859290") }
+            val id = rp.events.firstOrNull()
+            if ((id?.event as? Event.Identified)?.key != "A2069" || rp.events.any {
+                    (it.event as? Event.Identified)?.key == "A2517" || (it.event as? Event.Switched)?.toKey == "A2517" })
+                bad += "${back.toInt()} m back: " + rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" }
+        }
+        check("24.10 bus 181, seated 10-25 m further back, 181 and 185 due: 181, never 185", bad.isEmpty()) {
+            bad.joinToString(" | ") }
+    },
     // 20 Oct 2026, 76 with 111 chosen: tracking begun every 10 s from
     // 08:53:29 to 08:54:19 on the stretch shared with 185. Level with 76
     // there, 185 was taken on a few metres in all six (in three, seen 110 m

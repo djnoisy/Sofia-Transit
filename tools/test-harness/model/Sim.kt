@@ -110,7 +110,11 @@ class Gps(
     val jumpM: Double = 0.0,
     /** No fixes within these spans of time (seconds). */
     val gaps: List<ClosedFloatingPointRange<Double>> = emptyList(),
-    val seed: Int = 1
+    val seed: Int = 1,
+    /** Within these spans fixes are vague: scattered by [vagueSigma], their accuracy [vagueAccuracy]. */
+    val vague: List<ClosedFloatingPointRange<Double>> = emptyList(),
+    val vagueSigma: Double = 30.0,
+    val vagueAccuracy: Double = 70.0
 )
 
 class SimResult(val events: List<Pair<Double, RideModel.Event>>, val model: RideModel,
@@ -135,7 +139,18 @@ class Sim(
     /** The phone's clock ahead of true time, ms. */
     val phoneClockAheadMs: Long = 0L,
     /** Readings before this carry no Date header. */
-    val dateFrom: Double = 0.0
+    val dateFrom: Double = 0.0,
+    /**
+     * Trips due at the stop we boarded at: the early rule by the boarding
+     * stop is asked after every reading, as the app does from departure;
+     * null, never.
+     */
+    val due: ((String) -> Boolean)? = null,
+    /**
+     * After every fix: the vehicle whose route the app says we are off, at a
+     * time, given the model (for which vehicle is ours); null, never told.
+     */
+    val offRoute: ((Double, RideModel) -> String?)? = null
 ) {
     fun run(): SimResult {
         val model = RideModel(chosenRoute)
@@ -148,14 +163,17 @@ class Sim(
         var t = 0.0
         while (t <= until) {
             if (gps.gaps.none { t in it }) {
-                var p = ours(t).shift(gauss() * gps.sigma, gauss() * gps.sigma)
+                val vague = gps.vague.any { t in it }
+                val sigma = if (vague) gps.vagueSigma else gps.sigma
+                var p = ours(t).shift(gauss() * sigma, gauss() * sigma)
                 if (gps.jumpOneIn > 0 && rnd.nextInt(gps.jumpOneIn) == 0) {
                     val a = rnd.nextDouble() * 2 * Math.PI
                     p = p.shift(gps.jumpM * cos(a), gps.jumpM * sin(a))
                 }
                 val trueMs = T0 + (t * 1000).toLong()
                 model.onFix(RideModel.Fix(trueMs + fixClockAheadMs, trueMs + phoneClockAheadMs + 60,
-                    p.lat, p.lon, gps.accuracy)).forEach { events += t to it }
+                    p.lat, p.lon, if (vague) gps.vagueAccuracy else gps.accuracy)).forEach { events += t to it }
+                offRoute?.let { o -> model.onOffRoute(o(t, model)) }
             }
             if (t >= 5 && ((t - 5) % 30.0) == 0.0) {
                 val reports = vehicles.mapNotNull { v ->
@@ -170,6 +188,7 @@ class Sim(
                 val trueMs = T0 + (t * 1000).toLong()
                 model.onReading(trueMs + phoneClockAheadMs + 300, if (t < dateFrom) 0L else trueMs / 1000 * 1000, reports)
                     .forEach { events += t to it }
+                due?.let { d -> model.onBoarding(d).forEach { events += t to it } }
                 metres += t to model.leaders().associate { it.key to it.metres }
             }
             t += 1.0

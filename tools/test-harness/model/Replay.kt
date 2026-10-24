@@ -27,7 +27,12 @@ fun journeys(file: File): List<Pair<String, List<String>>> {
 fun chosenRoute(start: String): String =
     Regex("""\(route ([^,)]+)""").find(start)?.groupValues?.get(1) ?: ""
 
-fun replay(start: String, lines: List<String>): Replayed {
+/**
+ * [due], when given: trips taken as due at the stop we boarded at — the early
+ * rule by the boarding stop is asked after every reading, as the app would.
+ * (The trace does not record the arrivals at the stop.)
+ */
+fun replay(start: String, lines: List<String>, due: ((String) -> Boolean)? = null): Replayed {
     val model = RideModel(chosenRoute(start))
     val events = ArrayList<Concluded>()
     val metresAt = ArrayList<Pair<Long, Map<String, Double>>>()
@@ -38,6 +43,7 @@ fun replay(start: String, lines: List<String>): Replayed {
         val r = reading ?: return
         reading = null
         model.onReading(r.first, r.second, r.third).forEach { events += Concluded(r.first, it) }
+        due?.let { d -> model.onBoarding(d).forEach { events += Concluded(r.first, it) } }
         metresAt += r.first to model.leaders().associate { it.key to it.metres }
     }
     for (line in lines) {
