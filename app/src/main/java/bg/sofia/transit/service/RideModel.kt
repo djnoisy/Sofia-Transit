@@ -532,7 +532,12 @@ class RideModel(
             // while nothing else had gone further with us. Standing, it is
             // left to the rules above: the app stays off the route while we
             // walk away from a stop on a detour, and that is getting off.
-            if (offRouteOf == o.key && nowFix - o.lastBesideMs >= OFF_ROUTE_QUIET_MS &&
+            // Counted from its last report beside us or from when we left its
+            // route, whichever is later: silent a while before a detour — in
+            // a long tram, gaps of 96-97 s (review of 25 Oct 2026) — ours was
+            // dropped seconds into it, and on the chosen line the passenger
+            // heard "Изглежда не пътувате с линия …" in the right vehicle.
+            if (offRouteOf == o.key && nowFix - maxOf(o.lastBesideMs, offRouteFromMs) >= OFF_ROUTE_QUIET_MS &&
                 nowFix - lastVehicleSpeedMs <= SPEED_LAG_MS + SPEED_WINDOW_MS)
                 leave(o, nowFix, events, "ours off its route and not with us; this one is")
             return
@@ -578,16 +583,21 @@ class RideModel(
 
     /** The vehicle whose route the app says we are off (onOffRoute); null while on it. */
     private var offRouteOf: String? = null
+    /** Since when, on the fix clock: the latest fix when we were told; 0 if none. */
+    private var offRouteFromMs = 0L
 
     /**
      * From the app: we are off the route of vehicle [key] — by the road, over
      * 50 m from it for 150 m at vehicle speed (OffRoadWatch), or without the
      * road by the stops — or null once we are back on it. The app only
      * tells; whether ours has left us is judged here, at every fix and
-     * reading (HANDOVER "Етап 3", point 2; decided 24 Oct 2026).
+     * reading (HANDOVER "Етап 3", point 2; decided 24 Oct 2026). Told the
+     * same again, nothing changes: the time off its route runs on.
      */
     fun onOffRoute(key: String?) {
+        if (key == offRouteOf) return
         offRouteOf = key
+        offRouteFromMs = if (key == null) 0L else track.lastOrNull()?.timeMs ?: 0L
     }
 
     /**
@@ -1000,7 +1010,8 @@ class RideModel(
         /** How much further another must have gone with us to replace ours. */
         const val SWITCH_M = 100.0
         /**
-         * Off ours's route and ours not beside us this long: it has left us.
+         * Off ours's route and ours not beside us this long — and off its
+         * route this long too (judgeParting): it has left us.
          * Not beside us at two readings in a row: in the twelve journeys
          * recorded to 14 Oct 2026 ours never missed more than one (at most
          * 50 s between its reports) — and after one missed, the next report,

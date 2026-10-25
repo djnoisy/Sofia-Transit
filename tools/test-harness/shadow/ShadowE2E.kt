@@ -50,10 +50,10 @@ fun main(args: Array<String>) {
         val otherBack = if (seed % 3 == 0) 300.0 else 40.0
         val other = Mover(p, s0 - otherBack).stand(15.0).drive(s0 + 4000, 9.5)
         // Ours silent from 250 s to 420 s in half the journeys; off its route
-        // from 260 s to 330 s (silent: it leaves us) or 120-180 s (beside us: it stays).
+        // from 260 s to 380 s (silent: it leaves us 90 s on) or 120-180 s (beside us: it stays).
         val silent = seed % 2 == 0
         val offFrom = if (silent) 260.0 else 120.0
-        val offTo = if (silent) 330.0 else 180.0
+        val offTo = if (silent) 380.0 else 180.0
         val vehicles = listOf(
             Triple("V,213", "T,213", { t: Double -> if (silent && t in 250.0..420.0) null else bus.at(t) }),
             Triple("", "T304", { t: Double -> other.at(t).shift(3.0, 0.0) }),

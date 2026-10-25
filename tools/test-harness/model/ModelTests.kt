@@ -1349,9 +1349,12 @@ fun main(args: Array<String>) {
             offRoute = offRouteBy(mapOf("V304" to j.p304, "V213" to j.p213)) { j.ours(it) }).run()
         val tOff = offFrom(j.p304, { j.ours(it) }, j.tLeaveOrlov + 300)
         val sw = switched(r).firstOrNull()
-        check("304 taken wrongly, silent; off its route, 213 beside us: 213 takes over as we leave the route",
+        // Within 90 s of leaving its route (25 Oct 2026: counted from then,
+        // not from its last report beside us) — here sooner, 304 having been
+        // silent 5 min (SILENT_HOLD_MS).
+        check("304 taken wrongly, silent; off its route, 213 beside us: 213 takes over within 90 s of leaving it",
             ident(r).firstOrNull()?.second?.key == "V304" && sw?.second?.toKey == "V213" && tOff > 0 &&
-                sw.first in tOff..(tOff + 5) && r.events.size == 2) { "off its route ${tOff.toInt()} s; ${story(r)}" }
+                sw.first in tOff..(tOff + 92) && r.events.size == 2) { "off its route ${tOff.toInt()} s; ${story(r)}" }
     }
     run {
         // In a vehicle not in the feed: 304, with us from ХОТЕЛ ПЛИСКА, is
@@ -1365,46 +1368,56 @@ fun main(args: Array<String>) {
             offRoute = offRouteBy(mapOf("V304" to j.p304)) { j.ours(it) }).run()
         val tOff = offFrom(j.p304, { j.ours(it) }, j.tLeaveOrlov + 300)
         val w = withdrawn(r).firstOrNull()
-        check("304 taken wrongly, silent; off its route, nothing beside us: withdrawn as we leave the route",
+        check("304 taken wrongly, silent; off its route, nothing beside us: withdrawn 90 s after leaving it",
             ident(r).firstOrNull()?.second?.key == "V304" && w?.second?.key == "V304" && tOff > 0 &&
-                w.first in tOff..(tOff + 5) && r.events.size == 2 && r.model.ours == null) {
+                w.first in (tOff + 88)..(tOff + 92) && r.events.size == 2 && r.model.ours == null) {
             "off its route ${tOff.toInt()} s; ${story(r)}" }
     }
     run {
-        // Ours on a detour (road works): 120 m off its road for 700 m, then back.
+        // Ours on a detour (road works): 120 m off its road for 700 m, then
+        // back — or for 1.7 km.
         val p = Feed.path("A4508")
         val s0 = p.along(Feed.stop("A1196")) - 300
-        val d1 = s0 + 800; val d2 = s0 + 1500
+        val d1 = s0 + 800
         fun aside(s: Double, m: Double): Pt {
             val a = p.at(s - 5); val b = p.at(s + 5)
             val dn = (b.lat - a.lat) * KY; val de = (b.lon - a.lon) * KY * kotlin.math.cos(Math.toRadians(a.lat))
             val l = kotlin.math.hypot(dn, de).takeIf { it > 0 } ?: 1.0
             return p.at(s).shift(-de / l * m, dn / l * m)
         }
-        val detour = { s: Double ->
-            aside(s, when {
-                s < d1 || s > d2 + 200 -> 0.0
-                s < d1 + 100 -> 120.0 * (s - d1) / 100
-                s < d2 + 100 -> 120.0
-                else -> 120.0 * (d2 + 200 - s) / 100
-            }) }
-        val bus = Mover(p, s0).drive(s0 + 4000, 10.0)
-        val ours = { t: Double -> detour(bus.alongAt(t)).shift(1.0, 1.0) }
-        val tOff = offFrom(p, ours, 400.0)
-        for (silent in listOf(false, true)) {
-            val gap = (tOff - 15)..(tOff + 100)
-            val r = Sim(ours, listOf(SimVehicle("V213", "A85-A4508-2-6-1", "A85", { detour(bus.alongAt(it)) }, phase = 7.0,
-                silent = if (silent) listOf(gap) else emptyList())), 400.0, chosenRoute = "A85",
-                offRoute = offRouteBy(mapOf("V213" to p), ours)).run()
-            if (!silent) check("ours on a detour, reporting: kept", r.events.size == 1 &&
-                ident(r).singleOrNull()?.second?.key == "V213") { "off its route ${tOff.toInt()} s; ${story(r)}" }
-            else {
-                val w = withdrawn(r).firstOrNull()
-                val again = ident(r).getOrNull(1)
-                check("ours on a detour, silent: withdrawn 90 s after it was last beside us, then taken again by metres",
-                    r.events.size == 3 && ident(r).first().second.key == "V213" && w?.second?.key == "V213" &&
-                        w.first in (tOff + 20)..(tOff + 90) && again?.second?.key == "V213" &&
-                        again.first <= gap.endInclusive + 95) { "off its route ${tOff.toInt()} s; ${story(r)}" }
+        for (d2 in listOf(s0 + 1500, s0 + 2500)) {
+            val detour = { s: Double ->
+                aside(s, when {
+                    s < d1 || s > d2 + 200 -> 0.0
+                    s < d1 + 100 -> 120.0 * (s - d1) / 100
+                    s < d2 + 100 -> 120.0
+                    else -> 120.0 * (d2 + 200 - s) / 100
+                }) }
+            val bus = Mover(p, s0).drive(s0 + 4000, 10.0)
+            val ours = { t: Double -> detour(bus.alongAt(t)).shift(1.0, 1.0) }
+            val tOff = offFrom(p, ours, 400.0)
+            val long = d2 > s0 + 2000
+            for (silent in listOf(false, true)) {
+                val gap = (tOff - 15)..(tOff + if (long) 150 else 100)
+                val r = Sim(ours, listOf(SimVehicle("V213", "A85-A4508-2-6-1", "A85", { detour(bus.alongAt(it)) }, phase = 7.0,
+                    silent = if (silent) listOf(gap) else emptyList())), 400.0, chosenRoute = "A85",
+                    offRoute = offRouteBy(mapOf("V213" to p), ours)).run()
+                val label = if (long) "a 1.7 km detour" else "a detour"
+                if (!silent || !long) {
+                    // Silent through a detour shorter than 90 s off its road: kept
+                    // (25 Oct 2026: the 90 s run from leaving its route; before,
+                    // from its last report beside us — withdrawn, taken again).
+                    check("ours on $label, ${if (silent) "silent through it" else "reporting"}: kept",
+                        r.events.size == 1 && ident(r).singleOrNull()?.second?.key == "V213") {
+                        "off its route ${tOff.toInt()} s; ${story(r)}" }
+                } else {
+                    val w = withdrawn(r).firstOrNull()
+                    val again = ident(r).getOrNull(1)
+                    check("ours on a 1.7 km detour, silent: withdrawn 90 s after we left its route, then taken again by metres",
+                        r.events.size == 3 && ident(r).first().second.key == "V213" && w?.second?.key == "V213" &&
+                            w.first in (tOff + 88)..(tOff + 92) && again?.second?.key == "V213" &&
+                            again.first <= gap.endInclusive + 95) { "off its route ${tOff.toInt()} s; ${story(r)}" }
+                }
             }
         }
     }
@@ -1426,7 +1439,7 @@ fun main(args: Array<String>) {
         val m = RideModel("A85")
         val out = ArrayList<Pair<Int, Event>>()
         fun rep(at: Double) = p.at(s0 + 10 * at).let { RideModel.Report("V", "TV", "A85", T0 + (at * 1000).toLong(), it.lat, it.lon) }
-        for (k in 0..170) {
+        for (k in 0..260) {
             val q = p.at(s0 + 10.0 * k)
             m.onFix(RideModel.Fix(T0 + k * 1000L, T0 + k * 1000L, q.lat, q.lon, 5.0)).forEach { out += k to it }
             if (k == 20) m.onReading(T0 + 20_200, 0L, listOf(rep(18.0))).forEach { out += k to it }
@@ -1434,9 +1447,10 @@ fun main(args: Array<String>) {
             if (k >= 60) m.onOffRoute(if (k < 150) "W" else "V")
         }
         // V last beside us at 48 s; off W's route from 60 s, off V's from 150 s:
-        // withdrawn on the fix after.
-        check("off another's route 90 s: nothing; off ours's: withdrawn on the fix after",
-            out.size == 2 && out[0].second is Event.Identified && out[1].second is Event.Withdrawn && out[1].first == 151) {
+        // withdrawn 90 s after we left its route (25 Oct 2026; before, on the
+        // fix after — it had been silent 100 s by then).
+        check("off another's route 90 s: nothing; off ours's, silent long before: withdrawn 90 s after leaving it",
+            out.size == 2 && out[0].second is Event.Identified && out[1].second is Event.Withdrawn && out[1].first == 240) {
             out.joinToString { "${it.first}s ${describe(it.second)}" } }
         val m2 = RideModel("A85")
         val out2 = ArrayList<Pair<Int, Event>>()
@@ -1445,9 +1459,9 @@ fun main(args: Array<String>) {
             m2.onFix(RideModel.Fix(T0 + k * 1000L, T0 + k * 1000L, q.lat, q.lon, 5.0)).forEach { out2 += k to it }
             if (k == 20 || k == 50 || k == 150 || k == 180)
                 m2.onReading(T0 + k * 1000L + 200, 0L, listOf(rep(k - 2.0))).forEach { out2 += k to it }
-            if (k >= 80) m2.onOffRoute("V")
+            if (k >= 40) m2.onOffRoute("V")
         }
-        // V last beside us at 48 s, off its route from 80 s: withdrawn at 138 s.
+        // V last beside us at 48 s, off its route from 40 s: withdrawn at 138 s.
         // Beside us again at 148 s, 100 s after 48 s: its run starts afresh —
         // taken again at the next report, not at once on the metres between.
         check("off ours's route: withdrawn 90 s after it was last beside us; taken again from nothing",
@@ -1663,8 +1677,9 @@ fun main(args: Array<String>) {
             }
         }
         val w = got.firstOrNull { it.second is Event.Withdrawn }
+        // Last beside us at 93 s, off its route from 120 s: withdrawn 90 s after that.
         check("stage 3: off its route, ours silent, riding on — withdrawn and handed to the app",
-            got.any { it.second is Event.Identified } && w != null && w.first in 150..200 &&
+            got.any { it.second is Event.Identified } && w != null && w.first in 205..215 &&
                 !shadow.withUs(T0 + 300_000, 90_000L)) { got.toString() }
     }
     run {
