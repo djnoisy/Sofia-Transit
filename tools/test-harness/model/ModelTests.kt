@@ -1341,20 +1341,29 @@ fun main(args: Array<String>) {
         // 304 taken (chosen, tie at ХОТЕЛ ПЛИСКА), then silent for good; we
         // ride 213 on past ПЛ. ОРЛОВ МОСТ, where 304's road turns off.
         val j = Journey(startAtPliska = true, alight = false, chosen = "A217")
-        val v = j.vehicles().map { sv ->
-            if (sv.key != "V304") sv else SimVehicle(sv.key, sv.tripId, sv.routeId, sv.pos, phase = sv.phase,
-                silent = listOf(70.0..1e9))
-        }
-        val r = Sim({ j.ours(it) }, v, j.tLeaveOrlov + 300, j.gps, j.chosen,
-            offRoute = offRouteBy(mapOf("V304" to j.p304, "V213" to j.p213)) { j.ours(it) }).run()
         val tOff = offFrom(j.p304, { j.ours(it) }, j.tLeaveOrlov + 300)
+        fun ride(silentFrom: Double) = Sim({ j.ours(it) }, j.vehicles().map { sv ->
+            if (sv.key != "V304") sv else SimVehicle(sv.key, sv.tripId, sv.routeId, sv.pos, phase = sv.phase,
+                silent = listOf(silentFrom..1e9))
+        }, j.tLeaveOrlov + 300, j.gps, j.chosen,
+            offRoute = offRouteBy(mapOf("V304" to j.p304, "V213" to j.p213)) { j.ours(it) }).run()
+        // Silent from 2 min before we leave its route: 213 takes over 90 s
+        // after we leave it (25 Oct 2026: counted from then, not from its
+        // last report beside us) — by the off-route rule.
+        val r = ride(tOff - 120)
         val sw = switched(r).firstOrNull()
-        // Within 90 s of leaving its route (25 Oct 2026: counted from then,
-        // not from its last report beside us) — here sooner, 304 having been
-        // silent 5 min (SILENT_HOLD_MS).
-        check("304 taken wrongly, silent; off its route, 213 beside us: 213 takes over within 90 s of leaving it",
+        check("304 taken wrongly, silent; off its route, 213 beside us: 213 takes over 90 s after we leave it",
             ident(r).firstOrNull()?.second?.key == "V304" && sw?.second?.toKey == "V213" && tOff > 0 &&
-                sw.first in tOff..(tOff + 92) && r.events.size == 2) { "off its route ${tOff.toInt()} s; ${story(r)}" }
+                sw.first in (tOff + 88)..(tOff + 92) && "off its route" in sw.second.why && r.events.size == 2) {
+            "off its route ${tOff.toInt()} s; ${story(r)}" }
+        // Silent from 70 s, long before: the 5 min of silence (SILENT_HOLD_MS)
+        // come first, and 213, with far more metres, takes over then.
+        val r2 = ride(70.0)
+        val sw2 = switched(r2).firstOrNull()
+        check("304 taken wrongly, silent 5 min by the time we leave its route + 90 s: 213 takes over on the silence",
+            ident(r2).firstOrNull()?.second?.key == "V304" && sw2?.second?.toKey == "V213" &&
+                sw2.first in tOff..(tOff + 92) && "further with us" in sw2.second.why && r2.events.size == 2) {
+            "off its route ${tOff.toInt()} s; ${story(r2)}" }
     }
     run {
         // In a vehicle not in the feed: 304, with us from ХОТЕЛ ПЛИСКА, is
