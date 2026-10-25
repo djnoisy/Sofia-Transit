@@ -34,12 +34,22 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   F,<received ms>,<fix time ms>,<lat>,<lon>,<accuracy m>,<speed m/s>,<bearing °>
  *   V,<received ms>,<server Date ms>,<feed header s>,<vehicles listed>,<our lat>,<our lon>
  *   v,<trip_id>,<route_id>,<vehicle id>,<report s>,<lat>,<lon>,<bearing °>
+ *   B,<ms>,<boarding stop>,<trip_id>,<due s>,<trip_id>,<due s>,…
+ *   O,<ms>,<vehicle key>
  *   # end <ms>
  *
  * An empty field is a value the source did not give. The fix time is the
  * receiver's own (satellite time for GPS), unlike the received time, which
  * is the phone's clock; the server's Date and the report times are the
  * feed's. Together they show how far apart the clocks are.
+ *
+ * The other two are what the app tells the model besides (stage 3, see
+ * RideShadow), so that a replay gives what the app did. B: the early rule by
+ * the boarding stop asked — the stop, and the trips due there around our
+ * departure with when; an empty stop: it cannot be told this journey. O: we
+ * are off the route of the vehicle followed, by the model's key (its vehicle
+ * id, or its trip id when it has none) — an empty key once back on it;
+ * written when that changes.
  *
  * A journey left open — a new journey started over it — is closed with
  * "# end <ms> unclosed" before the next start. If the whole app was killed,
@@ -110,7 +120,7 @@ object JourneyTrace {
     /**
      * The vehicles of a reading that the trace lists: those within
      * [VEHICLE_RADIUS_M] of us ([lat], [lon]), and the one followed
-     * ([trackedTripId]) wherever it is. The model in stage 2 is given the same.
+     * ([trackedTripId]) wherever it is. The model is given the same.
      */
     fun listed(s: VehicleSnapshot, lat: Double, lon: Double, trackedTripId: String): List<VehicleInfo> =
         s.vehicles.filter { v ->
@@ -132,6 +142,23 @@ object JourneyTrace {
             // Queued together, so that a reading is never split by a fix.
             enqueueAll(lines)
         } catch (_: Throwable) { }
+    }
+
+    /**
+     * The early rule by the boarding stop asked at [atMs] by the phone's
+     * clock: the stop ([stopName]; empty when it cannot be told) and the
+     * trips due there ([due]: trip id → epoch s).
+     */
+    fun boarding(atMs: Long, stopName: String, due: Map<String, Long>) {
+        try {
+            enqueue("B,$atMs,${clean(stopName)}" +
+                due.entries.sortedBy { it.key }.joinToString("") { (trip, s) -> ",${clean(trip)},$s" })
+        } catch (_: Throwable) { }
+    }
+
+    /** At [atMs] we are off the route of the vehicle followed — [key] as the model knows it — or, null, back on it. */
+    fun offRoute(atMs: Long, key: String?) {
+        try { enqueue("O,$atMs,${clean(key)}") } catch (_: Throwable) { }
     }
 
     /** Returns the underlying file (call only after init). */

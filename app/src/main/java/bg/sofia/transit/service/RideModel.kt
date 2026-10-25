@@ -62,8 +62,8 @@ import kotlin.math.hypot
  * left us on foot do not hold up getting off (stayed, apartFromFoot).
  *
  * Pure Kotlin, no Android types, so it can be tested and replayed on its own
- * (tools/test-harness/run_model_tests.sh). Stage 2 runs it beside the
- * current rules through [RideShadow], logging only; nothing reads it yet.
+ * (tools/test-harness/run_model_tests.sh). The app follows its conclusions
+ * (stage 3), fed through [RideShadow].
  */
 class RideModel(
     /** The line the passenger chose; it wins a tie between vehicles. */
@@ -189,6 +189,19 @@ class RideModel(
     fun leaders(): List<Vehicle> = vehicles.values.filter { it.metres > 0 }.sortedByDescending { it.metres }
     /** Vehicles beside us at their latest report, if that is recent at the latest reading. */
     fun besideUs(): List<Vehicle> = vehicles.values.filter { it.besideAt(readingNowMs) }
+
+    /**
+     * Whether ours was beside us at a report at most [withinMs] before
+     * [nowMs], a time on the phone's clock (as the fixes' arrival times are).
+     * False with no vehicle ours. Read only: for the app's "the vehicle is
+     * still with us", which holds its timers back in a jam.
+     */
+    fun ourBesideWithin(nowMs: Long, withinMs: Long): Boolean {
+        val o = ours ?: return false
+        if (alighted) return false
+        val lastFix = track.lastOrNull() ?: return false
+        return lastFix.timeMs + (nowMs - lastFix.receivedMs) - o.lastBesideMs <= withinMs
+    }
 
     /** One position of ours. Returns what that concluded, if anything. */
     fun onFix(f: Fix): List<Event> {

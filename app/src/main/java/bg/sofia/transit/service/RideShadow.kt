@@ -3,21 +3,20 @@ package bg.sofia.transit.service
 import java.util.Locale
 
 /**
- * Stage 2 of the new approach (HANDOVER: "Нов подход"): [RideModel] run
- * beside the current rules, on the very fixes and readings the journey trace
- * records, with its conclusions written to the log and nothing else. No
- * announcement, no tracking decision, nothing the passenger sees reads it.
+ * Feeds [RideModel] in the app and hands on what it concludes: since stage 3
+ * of the new approach (HANDOVER "Етап 3") JourneyService follows the events
+ * returned here — a vehicle identified, another switched to, ours withdrawn,
+ * got off. The name is from stage 2, when the model ran beside the rules and
+ * only wrote to the log.
  *
- * The check it is there for is that the model is fed in the app as in the
- * tests: replaying the same journey's trace (run_model_tests.sh --replay)
- * must conclude the same, at the same times, as the "Model @" lines of the
- * log. So it is given the values exactly as the trace writes them — places to
- * six decimals, accuracy to one, ids with the trace's own escaping — and its
- * lines say what happened in the words the replay uses ([describe]).
- *
- * Also logs what the model's early rule by the boarding stop would decide
- * (RideModel.boardingVerdict; HANDOVER "Етап 3", point 1), once a journey,
- * without acting on it.
+ * The model is fed the very fixes and readings the journey trace records, and
+ * what else the app tells it — the boarding stop with the trips due there,
+ * being off the route of ours — is recorded there as well, so that replaying
+ * the trace (run_model_tests.sh --replay, run_trace_checks.sh --shadow)
+ * concludes the same, at the same times, as the "Model" lines of the log: as
+ * the app did. So it is given the values exactly as the trace writes them —
+ * places to six decimals, accuracy to one, ids with the trace's own escaping —
+ * and its lines say what happened in the words the replay uses ([describe]).
  *
  * Fixes come on the main thread and readings on a background one: each call
  * holds the lock. Pure Kotlin, no Android types.
@@ -36,31 +35,28 @@ class RideShadow(
     )
 
     private val model = RideModel(chosenRouteId)
-    /** What became of the early rule by the boarding stop, for the summary; null while open. */
+    /** What became of the early rule by the boarding stop, once logged; null before. */
     private var boardingOutcome: String? = null
-    /**
-     * The model had taken no vehicle at the latest reading, nor any before
-     * (the early rule is for the first choice: RideModel.onBoarding). The
-     * early rule is judged on that reading, after it — by when a fix may have
-     * let the model take one, a report having waited for the fixes after it.
-     */
-    private var noneAtReading = false
+    /** The trip and route ids of each vehicle as the feed last gave them, by the model's key. */
+    private val feedIds = HashMap<String, Pair<String, String>>()
 
+    /** One fix of ours. Returns what the model concluded on it. */
     @Synchronized
-    fun onFix(timeMs: Long, receivedMs: Long, lat: Double, lon: Double, accuracy: Double?) {
+    fun onFix(timeMs: Long, receivedMs: Long, lat: Double, lon: Double, accuracy: Double?): List<RideModel.Event> {
         val f = RideModel.Fix(timeMs, receivedMs, traced6(lat), traced6(lon), accuracy?.let { traced1(it) })
-        tell(receivedMs, model.onFix(f))
+        return tell(receivedMs, model.onFix(f))
     }
 
+    /** One reading of the feed: the vehicles the trace lists. Returns what the model concluded on it. */
     @Synchronized
-    fun onReading(receivedMs: Long, serverDateMs: Long, vehicles: List<Seen>) {
+    fun onReading(receivedMs: Long, serverDateMs: Long, vehicles: List<Seen>): List<RideModel.Event> {
         val reports = vehicles.map { v ->
-            val tripId = clean(v.tripId)
-            RideModel.Report(clean(v.vehicleId).ifBlank { tripId }, tripId, clean(v.routeId),
+            val key = keyOf(v.vehicleId, v.tripId)
+            feedIds[key] = v.tripId to v.routeId
+            RideModel.Report(key, clean(v.tripId), clean(v.routeId),
                 v.timestampSec * 1000, traced6(v.lat), traced6(v.lon))
         }
-        tell(receivedMs, model.onReading(receivedMs, serverDateMs, reports))
-        noneAtReading = model.ours == null && !model.alighted && model.boarding == null
+        val events = tell(receivedMs, model.onReading(receivedMs, serverDateMs, reports))
         val top = model.leaders().take(3)
         if (top.isNotEmpty()) {
             debug("Model @${clock(receivedMs)}: metres together — " + top.joinToString(", ") { v ->
@@ -68,40 +64,66 @@ class RideShadow(
                     (v.lastDistance?.let { " (${it.toInt()} m away)" } ?: "")
             })
         }
+        return events
     }
 
-    /** Whether the early rule by the boarding stop is still to be judged. */
-    @Synchronized
-    fun wantsBoarding(): Boolean = boardingOutcome == null && noneAtReading
-
     /**
-     * The early rule by the boarding stop ([stopName]) as the model judges
-     * it (RideModel.boardingVerdict) at the latest reading — [dueAt] tells
-     * when a trip was due there around our departure, or null — logged once,
-     * when it can be judged. Not acted on: the model here takes nothing by
-     * it, so that the trace's replay still gives the log's "Model @" lines.
+     * Whether the early rule by the boarding stop is still open: not judged,
+     * nor closed by the model's first choice by metres (the rule is for the
+     * first choice: RideModel.onBoarding), nor the stop found untold.
      */
     @Synchronized
-    fun judgeBoarding(stopName: String, dueAt: (String) -> Long?) {
-        if (!wantsBoarding()) return
-        val b = model.boardingVerdict { dueAt(it) != null } ?: return
-        val list = b.near.joinToString(", ") { (v, due) ->
-            "${v.routeId}/${v.key} ${v.lastDistance?.toInt()?.let { "$it m" } ?: "? m"}" + (if (due) " (due there)" else "")
+    fun wantsBoarding(): Boolean = boardingOutcome == null && model.boarding == null
+
+    /**
+     * The early rule by the boarding stop ([stopName]) at [atMs], after a
+     * reading: the model takes the vehicle it finds (RideModel.onBoarding).
+     * [due]: the trips due there around our departure, by trip id as the
+     * trace writes it, and when. Logged once, when it can be judged — until
+     * then (nothing beside us at a report taken while we moved) it is asked
+     * again after the next reading. Returns what the model concluded.
+     */
+    @Synchronized
+    fun onBoarding(atMs: Long, stopName: String, due: Map<String, Long>): List<RideModel.Event> {
+        if (!wantsBoarding()) return emptyList()
+        val events = model.onBoarding { it in due }
+        val b = model.boarding ?: return emptyList()
+        val list = b.near.joinToString(", ") { (v, isDue) ->
+            "${v.routeId}/${v.key} ${v.lastDistance?.toInt()?.let { "$it m" } ?: "? m"}" + (if (isDue) " (due there)" else "")
         }
         val outcome = b.pick?.let { v ->
-            "would take ${v.routeId} ${v.tripId} at once, due there at ${clock((dueAt(v.tripId) ?: 0L) * 1000)}"
+            "took ${v.routeId} ${v.tripId} at once, due there at ${clock((due[v.tripId] ?: 0L) * 1000)}"
         } ?: "no early pick: ${b.why}"
         boardingOutcome = outcome
-        info("Model (boarding stop $stopName): $outcome; near us: $list")
+        info("Model (boarding stop ${clean(stopName)}): $outcome; near us: $list")
+        return tell(atMs, events)
     }
 
     /** The boarding stop cannot be told this journey: the early rule is not judged. */
     @Synchronized
     fun boardingUntold() {
-        if (boardingOutcome != null) return
+        if (!wantsBoarding()) return
         boardingOutcome = "boarding stop not told"
         info("Model (boarding stop): not told — the early rule is not judged")
     }
+
+    /**
+     * From the app: we are off the route of the vehicle the model holds as
+     * [key] (RideModel.onOffRoute), or null once back on it.
+     */
+    @Synchronized
+    fun onOffRoute(key: String?) = model.onOffRoute(key)
+
+    /** Whether ours was beside us at a report at most [withinMs] before [nowMs] (RideModel.ourBesideWithin). */
+    @Synchronized
+    fun withUs(nowMs: Long, withinMs: Long): Boolean = model.ourBesideWithin(nowMs, withinMs)
+
+    /**
+     * The trip and route ids of the vehicle the model knows as [key], as the
+     * feed last gave them: the model's own have ';' for ','. Null if unseen.
+     */
+    @Synchronized
+    fun feedIds(key: String): Pair<String, String>? = feedIds[key]
 
     /** What the model holds at the end of the journey, for the log. */
     @Synchronized
@@ -114,11 +136,12 @@ class RideShadow(
             (if (model.alighted) ", got off concluded" else "") +
             (if (others.isEmpty()) "" else "; others: " +
                 others.joinToString(", ") { "${it.routeId}/${it.key} ${it.metres.toInt()} m" }) +
-            "; early rule by the boarding stop: ${boardingOutcome ?: "not judged"}"
+            "; early rule by the boarding stop: ${boardingOutcome ?: model.boarding?.why ?: "not judged"}"
     }
 
-    private fun tell(atMs: Long, events: List<RideModel.Event>) {
+    private fun tell(atMs: Long, events: List<RideModel.Event>): List<RideModel.Event> {
         for (e in events) info("Model @${clock(atMs)}: ${describe(e)}")
+        return events
     }
 
     companion object {
@@ -135,9 +158,14 @@ class RideShadow(
         fun clock(ms: Long): String = java.time.Instant.ofEpochMilli(ms)
             .atZone(java.time.ZoneId.of("Europe/Sofia")).toLocalTime().withNano(0).toString()
 
+        /** An id or a name as the trace writes it (util/JourneyTrace.kt): a comma or line break would break its line. */
+        fun clean(s: String) = s.replace(',', ';').replace('\n', ' ')
+
+        /** The model's key of a vehicle: its id, or its trip's when it has none — as the trace writes them. */
+        fun keyOf(vehicleId: String, tripId: String) = clean(vehicleId).ifBlank { clean(tripId) }
+
         /** As the trace writes them (util/JourneyTrace.kt). */
         private fun traced6(v: Double) = String.format(Locale.US, "%.6f", v).toDouble()
         private fun traced1(v: Double) = String.format(Locale.US, "%.1f", v).toDouble()
-        private fun clean(s: String) = s.replace(',', ';').replace('\n', ' ')
     }
 }

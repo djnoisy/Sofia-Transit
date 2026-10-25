@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The getting-off rule, the parting's "kept moving" and the no-progress limit of JourneyService (see
-# alight/AlightTests.kt). The real functions are copied out of the source, since JourneyService itself cannot be
-# compiled without the Android SDK.
+# What counts as vehicle speed for the no-progress limit of JourneyService (see alight/AlightTests.kt). The real
+# function is copied out of the source, since JourneyService itself cannot be compiled without the Android SDK.
+# Getting off is the model's since stage 3 (run_model_tests.sh).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -17,8 +17,6 @@ def grab(sig):
     i = js.index("        internal fun " + sig)
     return js[i:js.index("\n\n", i)]
 open(out, "w").write(open(tmpl).read()
-    .replace("// @@GOTOFF@@", grab("gotOff("))
-    .replace("// @@MOVEDSINCE@@", grab("movedSince("))
     .replace("// @@ATSPEED@@", grab("atVehicleSpeed(")))
 PY
 "$KOTLINC" "$OUT/AlightTests.kt" -d "$OUT/c" 2>&1 | grep -A3 "error:" || true

@@ -1561,10 +1561,10 @@ fun main(args: Array<String>) {
             r.model.clockOffsetMs == 0L) { "${r.model.clockOffsetMs}" }
     }
 
-    // ── Stage 2: the model beside the rules (service/RideShadow.kt) ──
+    // ── The model in the app (service/RideShadow.kt; stage 2, acting since stage 3) ──
     // We pull out of A1196 on 213's road at 10 m/s with 213 (due at the stop
     // we boarded at) and whatever [others] are; a reading every 30 s, from
-    // 35 s, of reports 2 s old. The early rule by the boarding stop is judged
+    // 35 s, of reports 2 s old. The early rule by the boarding stop is asked
     // after the first reading, as the app does once the stop is known.
     fun shadowRide(others: List<SimVehicle>, due: Set<String>, readings: Int = 1,
                    until: Double = 40.0, judge: Boolean = true): Pair<RideShadow, List<String>> {
@@ -1585,7 +1585,7 @@ fun main(args: Array<String>) {
                 shadow.onReading(ms + 300, ms, all.mapNotNull { v ->
                     v.pos(t - 2)?.let { RideShadow.Seen(v.key, v.tripId, v.routeId, (T0 / 1000) + (t - 2).toLong(), it.lat, it.lon) }
                 })
-                if (read == 1 && judge) shadow.judgeBoarding("БУЛ. ЦАРИГРАДСКО ШОСЕ") { trip -> if (trip in due) T0 / 1000 else null }
+                if (read == 1 && judge) shadow.onBoarding(ms + 400, "БУЛ. ЦАРИГРАДСКО ШОСЕ", due.associateWith { T0 / 1000 })
             }
             t += 1.0
         }
@@ -1610,10 +1610,62 @@ fun main(args: Array<String>) {
             lines.joinToString(" | ") }
     }
     run {
-        val (_, lines) = shadowRide(emptyList(), due = setOf("T213"))
-        check("stage 2, early rule: the only vehicle near us, due — would take it",
-            lines.any { it.startsWith("Model (boarding stop БУЛ. ЦАРИГРАДСКО ШОСЕ): would take A85 T213 at once") &&
-                "near us: A85/V213 0 m (due there)" in it }) { lines.joinToString(" | ") }
+        val (shadow, lines) = shadowRide(emptyList(), due = setOf("T213"))
+        check("stage 3, early rule: the only vehicle near us, due — taken at once",
+            lines.any { it.startsWith("Model (boarding stop БУЛ. ЦАРИГРАДСКО ШОСЕ): took A85 T213 at once") &&
+                "near us: A85/V213 0 m (due there)" in it } &&
+                lines.any { Regex("""^Model @\d\d:\d\d:\d\d: identified A85 T213 \(by the boarding stop\)$""").matches(it) } &&
+                shadow.summary().startsWith("Model at the end: ours A85/V213 T213") &&
+                shadow.summary().endsWith("early rule by the boarding stop: took A85 T213 at once, " +
+                    "due there at ${RideShadow.clock(T0 / 1000 * 1000)}")) {
+            lines.joinToString(" | ") + " || " + shadow.summary() }
+    }
+    run {
+        // What the app follows: the model's conclusions come back from each call.
+        val lines = ArrayList<String>()
+        val shadow = RideShadow("A85", { lines += it })
+        val p = Feed.path("A4508"); val s0 = p.along(Feed.stop("A1196"))
+        val ride = Mover(p, s0).stand(10.0).drive(s0 + 2000, 10.0)
+        val got = ArrayList<RideModel.Event>()
+        for (t in 0..40) {
+            val ms = T0 + t * 1000L; val q = ride.at(t.toDouble())
+            got += shadow.onFix(ms, ms + 60, q.lat, q.lon, 5.0)
+            if (t == 35) got += shadow.onReading(ms + 300, ms, listOf(RideShadow.Seen("V,213", "T,213", "A,85", T0 / 1000 + 33,
+                ride.at(33.0).lat, ride.at(33.0).lon)))
+        }
+        got += shadow.onBoarding(T0 + 35_400, "X, Y", mapOf("T;213" to T0 / 1000))
+        val e = got.singleOrNull() as? Event.Identified
+        check("stage 3: the early rule's pick returned to the app, with the trace's ids, and the feed's kept",
+            e != null && e.key == "V;213" && e.tripId == "T;213" && e.byBoardingStop &&
+                shadow.feedIds("V;213") == ("T,213" to "A,85") && shadow.feedIds("V,213") == null) {
+            "$got ${shadow.feedIds("V;213")}" }
+        check("stage 3: the boarding stop's name logged as the trace writes it (comma escaped)",
+            lines.any { it.startsWith("Model (boarding stop X; Y): took") }) { lines.joinToString(" | ") }
+        check("stage 3: the vehicle taken is with us, at a report up to 90 s back by the phone's clock",
+            shadow.withUs(T0 + 40_060, 90_000L) && shadow.withUs(T0 + 33_000 + 60 + 90_000, 90_000L) &&
+                !shadow.withUs(T0 + 33_000 + 60 + 90_001, 90_000L)) { "" }
+    }
+    run {
+        // Off the route of ours, as the app tells (onOffRoute), ours silent
+        // and we ride on: it left us — the app is handed the withdrawal.
+        val shadow = RideShadow("A85", { })
+        val p = Feed.path("A4508"); val s0 = p.along(Feed.stop("A1196"))
+        val ride = Mover(p, s0).stand(10.0).drive(s0 + 4000, 10.0)
+        val got = ArrayList<Pair<Int, RideModel.Event>>()
+        for (t in 0..300) {
+            val ms = T0 + t * 1000L; val q = ride.at(t.toDouble())
+            if (t == 120) shadow.onOffRoute("V213")
+            shadow.onFix(ms, ms + 60, q.lat, q.lon, 5.0).forEach { got += t to it }
+            if (t >= 35 && (t - 35) % 30 == 0) {
+                val r = ride.at(t - 2.0)
+                val seen = if (t < 100) listOf(RideShadow.Seen("V213", "T213", "A85", T0 / 1000 + t - 2, r.lat, r.lon)) else emptyList()
+                shadow.onReading(ms + 300, ms, seen).forEach { got += t to it }
+            }
+        }
+        val w = got.firstOrNull { it.second is Event.Withdrawn }
+        check("stage 3: off its route, ours silent, riding on — withdrawn and handed to the app",
+            got.any { it.second is Event.Identified } && w != null && w.first in 150..200 &&
+                !shadow.withUs(T0 + 300_000, 90_000L)) { got.toString() }
     }
     run {
         val (_, lines) = shadowRide(emptyList(), due = emptySet())
@@ -1634,31 +1686,35 @@ fun main(args: Array<String>) {
         }
         val r = far.pos(38.0)!!
         shadow.onReading(T0 + 40_300, T0 + 40_000, listOf(RideShadow.Seen("V213", "T213", "A85", T0 / 1000 + 38, r.lat, r.lon)))
-        shadow.judgeBoarding("X") { T0 / 1000 }
+        val none = shadow.onBoarding(T0 + 40_400, "X", mapOf("T213" to T0 / 1000))
         check("stage 2, early rule: nothing beside us — not judged yet",
-            lines.none { it.startsWith("Model (boarding stop") } && shadow.wantsBoarding()) { lines.joinToString(" | ") }
+            none.isEmpty() && lines.none { it.startsWith("Model (boarding stop") } && shadow.wantsBoarding()) {
+            lines.joinToString(" | ") }
         for (t in 41..70) {
             val ms = T0 + t * 1000L; val q = ride.at(t.toDouble())
             shadow.onFix(ms, ms + 60, q.lat, q.lon, 5.0)
         }
         val q = ride.at(68.0)
         shadow.onReading(T0 + 70_300, T0 + 70_000, listOf(RideShadow.Seen("V213", "T213", "A85", T0 / 1000 + 68, q.lat, q.lon)))
-        shadow.judgeBoarding("X") { T0 / 1000 }
-        shadow.judgeBoarding("X") { T0 / 1000 }
+        val took = shadow.onBoarding(T0 + 70_400, "X", mapOf("T213" to T0 / 1000)) +
+            shadow.onBoarding(T0 + 70_500, "X", mapOf("T213" to T0 / 1000))
         shadow.boardingUntold()
         check("stage 2, early rule: judged once a journey, once something is beside us",
-            lines.count { it.startsWith("Model (boarding stop") } == 1 &&
-                lines.any { it.startsWith("Model (boarding stop X): would take A85 T213") }) { lines.joinToString(" | ") }
+            lines.count { it.startsWith("Model (boarding stop") } == 1 && took.size == 1 &&
+                lines.any { it.startsWith("Model (boarding stop X): took A85 T213") }) { lines.joinToString(" | ") }
     }
     run {
-        // A fix every 6 s, reports 3 s old: the model takes 213 on the fix
-        // after the second reading (the report waited for it), before the
-        // early rule is judged on that reading — the boarding stop known
-        // only then, the lookup taking a moment. Judged all the same.
+        // A fix every 6 s, reports 3 s old: the model takes 213 by metres on
+        // the fix after the second reading (the report waited for it), before
+        // the early rule is asked on that reading — the boarding stop known
+        // only then, the lookup taking a moment. Stage 3: the rule is closed
+        // then, as the model has taken a vehicle; nothing is judged, and the
+        // summary says why.
         val lines = ArrayList<String>()
         val shadow = RideShadow("A85", { lines += it })
         val p = Feed.path("A4508"); val s0 = p.along(Feed.stop("A1196"))
         val ride = Mover(p, s0).stand(10.0).drive(s0 + 2000, 11.0)
+        var late = emptyList<RideModel.Event>()
         for (t in 0..70) {
             val ms = T0 + t * 1000L; val q = ride.at(t.toDouble())
             if (t % 6 == 0) shadow.onFix(ms, ms + 60, q.lat, q.lon, 8.0)
@@ -1666,12 +1722,39 @@ fun main(args: Array<String>) {
                 val r = ride.at(t - 3.0)
                 shadow.onReading(ms + 300, ms, listOf(RideShadow.Seen("V213", "T213", "A85", T0 / 1000 + t - 3, r.lat, r.lon)))
             }
-            if (t == 66) shadow.judgeBoarding("X") { T0 / 1000 }
+            if (t == 66) late = shadow.onBoarding(ms, "X", mapOf("T213" to T0 / 1000))
         }
-        val id = lines.indexOfFirst { "identified A85 T213" in it }
-        val rule = lines.indexOfFirst { it.startsWith("Model (boarding stop X): would take A85 T213") }
-        check("stage 2, early rule: judged on the reading though the model took a vehicle on a fix since",
-            id in 0 until rule) { lines.joinToString(" | ") }
+        check("stage 3, early rule: closed once the model took a vehicle by metres on a fix after the reading",
+            lines.any { "identified A85 T213" in it && "m together" in it } && late.isEmpty() &&
+                lines.none { it.startsWith("Model (boarding stop") } && !shadow.wantsBoarding() &&
+                shadow.summary().endsWith("early rule by the boarding stop: taken by metres first")) {
+            lines.joinToString(" | ") + " || " + shadow.summary() }
+    }
+    run {
+        // The boarding stop cannot be told (we waited over 60 m from any stop
+        // of the line): the early rule is not judged for the journey, even
+        // with a vehicle due there beside us after.
+        val lines = ArrayList<String>()
+        val shadow = RideShadow("A85", { lines += it })
+        val p = Feed.path("A4508"); val s0 = p.along(Feed.stop("A1196"))
+        val ride = Mover(p, s0).stand(10.0).drive(s0 + 2000, 10.0)
+        var got = emptyList<RideModel.Event>()
+        for (t in 0..40) {
+            val ms = T0 + t * 1000L; val q = ride.at(t.toDouble())
+            shadow.onFix(ms, ms + 60, q.lat, q.lon, 5.0)
+            if (t == 35) {
+                val r = ride.at(33.0)
+                shadow.onReading(ms + 300, ms, listOf(RideShadow.Seen("V213", "T213", "A85", T0 / 1000 + 33, r.lat, r.lon)))
+                shadow.boardingUntold()
+                got = shadow.onBoarding(ms + 400, "X", mapOf("T213" to T0 / 1000))
+            }
+        }
+        check("stage 3, early rule: the boarding stop not told — not judged for the journey",
+            got.isEmpty() && !shadow.wantsBoarding() &&
+                lines.count { it.startsWith("Model (boarding stop") } == 1 &&
+                lines.any { it == "Model (boarding stop): not told — the early rule is not judged" } &&
+                shadow.summary().endsWith("early rule by the boarding stop: boarding stop not told")) {
+            lines.joinToString(" | ") + " || " + shadow.summary() }
     }
     run {
         val (shadow, lines) = shadowRide(emptyList(), due = emptySet(), readings = 3, until = 100.0)

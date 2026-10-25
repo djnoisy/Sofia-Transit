@@ -28,9 +28,14 @@ fun chosenRoute(start: String): String =
     Regex("""\(route ([^,)]+)""").find(start)?.groupValues?.get(1) ?: ""
 
 /**
- * [due], when given: trips taken as due at the stop we boarded at — the early
- * rule by the boarding stop is asked after every reading, as the app would.
- * (The trace does not record the arrivals at the stop.)
+ * What the app told the model besides fixes and readings is replayed where
+ * the trace records it (stage 3): B — the early rule by the boarding stop
+ * asked, with the trips due there; O — off the route of the vehicle
+ * followed, or back on it (util/JourneyTrace.kt).
+ *
+ * [due], when given, replaces the B lines: trips taken as due at the stop we
+ * boarded at, the early rule asked after every reading — for traces from
+ * before stage 3, which do not record the arrivals at the stop.
  */
 fun replay(start: String, lines: List<String>, due: ((String) -> Boolean)? = null): Replayed {
     val model = RideModel(chosenRoute(start))
@@ -67,6 +72,17 @@ fun replay(start: String, lines: List<String>, due: ((String) -> Boolean)? = nul
                 r.third += RideModel.Report(key, p[1], p[2], p[4].toLong() * 1000,
                     p[5].toDouble(), p[6].toDouble())
                 if (r.third.size == expected) flush()
+            }
+            "B" -> {
+                flush()
+                if (due == null && p[2].isNotEmpty()) {
+                    val trips = (3 until p.size - 1 step 2).map { p[it] }.toSet()
+                    model.onBoarding { it in trips }.forEach { events += Concluded(p[1].toLong(), it) }
+                }
+            }
+            "O" -> {
+                flush()
+                model.onOffRoute(p.getOrNull(2)?.ifEmpty { null })
             }
         }
     }

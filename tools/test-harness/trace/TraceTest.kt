@@ -1,5 +1,6 @@
 // JourneyTrace (util/JourneyTrace.kt), the raw record of each journey: the
-// format of every line, which vehicles a reading lists, readings never split
+// format of every line (the boarding stop and off-route lines of stage 3
+// included), which vehicles a reading lists, readings never split
 // by fixes written at the same time from other threads, the size cap with the
 // journey's start line kept, clear during a journey, a journey left open
 // closed by the next, and that nothing reaches the caller — before init
@@ -69,6 +70,12 @@ fun main() {
         veh("odd,id", lat, lon + 0.001, id = "x,y") // ~80 m, commas in its ids
     ))
     JourneyTrace.vehicles(snap, lat, lon, JourneyTrace.listed(snap, lat, lon, "tracked"))
+    // What the app tells the model besides (stage 3): the boarding stop, being off the route of ours.
+    JourneyTrace.boarding(1_759_730_003_000L, "БУЛ. ЦАРИГРАДСКО, ШОСЕ",
+        mapOf("x,y" to 1_759_730_010L, "A85-1" to 1_759_729_990L))
+    JourneyTrace.boarding(1_759_730_004_000L, "", emptyMap())
+    JourneyTrace.offRoute(1_759_730_005_000L, "V,213")
+    JourneyTrace.offRoute(1_759_730_006_000L, null)
     JourneyTrace.end()
     waitFor(f, "# end")
     val ls = lines(f)
@@ -93,6 +100,13 @@ fun main() {
     check("vehicle 2 km away left out", vs.none { it.startsWith("v,far,") })
     check("commas in ids do not break the line", vs.any { it.startsWith("v,odd;id,A85,x;y,") } &&
         vs.all { it.split(",").size == 8 }, vs.toString())
+    check("boarding stop: its name and the trips due there, in order, commas escaped",
+        ls.contains("B,1759730003000,БУЛ. ЦАРИГРАДСКО; ШОСЕ,A85-1,1759729990,x;y,1759730010"),
+        ls.filter { it.startsWith("B,") }.toString())
+    check("boarding stop not told: an empty name", ls.contains("B,1759730004000,"))
+    check("off the route of ours, then back on it", ls.contains("O,1759730005000,V;213") &&
+        ls.indexOf("O,1759730006000,") == ls.indexOf("O,1759730005000,V;213") + 1,
+        ls.filter { it.startsWith("O,") }.toString())
     check("end line last", ls.lastOrNull()?.startsWith("# end ") == true)
 
     // Many threads at once: fixes from one, readings from others — one long

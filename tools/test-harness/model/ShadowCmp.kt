@@ -1,6 +1,7 @@
 // The Model lines a recorded journey gives through RideShadow, as JourneyService feeds it
 // (tools/test-harness/run_trace_checks.sh --shadow): compared with the phone's log, they
-// must be the same. The early rule's line and the end line are written by JourneyService.
+// must be the same — the early rule by the boarding stop (B lines) and being off the route
+// of ours (O lines) included, and the line at the end when the journey was closed.
 import bg.sofia.transit.service.RideShadow
 import java.io.File
 fun main(args: Array<String>) {
@@ -14,6 +15,10 @@ fun main(args: Array<String>) {
         "F" -> { flush(); sh.onFix(p[2].toLong(), p[1].toLong(), p[3].toDouble(), p[4].toDouble(), p[5].toDoubleOrNull()) }
         "V" -> { flush(); cur = Triple(p[1].toLong(), p[2].toLong(), ArrayList()); exp = p[4].toInt() }
         "v" -> { val r = cur ?: continue; r.third += RideShadow.Seen(p[3], p[1], p[2], p[4].toLong(), p[5].toDouble(), p[6].toDouble()); if (r.third.size == exp) flush() }
+        "B" -> { flush(); if (p[2].isEmpty()) sh.boardingUntold()
+                 else sh.onBoarding(p[1].toLong(), p[2], (3 until p.size - 1 step 2).associate { p[it] to p[it + 1].toLong() }) }
+        "O" -> { flush(); sh.onOffRoute(p.getOrNull(2)?.ifEmpty { null }) }
     } }
     flush()
+    if (lines.any { it.startsWith("# end ") }) println("I " + sh.summary())
 }
