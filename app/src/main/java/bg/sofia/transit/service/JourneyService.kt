@@ -223,6 +223,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             accurateFix && (kmh ?: 0.0) >= vehicleKmh
 
         /**
+         * Whether the no-progress limit (INACTIVITY_TIMEOUT_MS) applies:
+         * attached to the route, or off it with a vehicle identified.
+         *
+         * Off the route with nothing identified it does not: the limit for
+         * that has a truer message ("Линията не беше установена"). Nor on the
+         * route while tracking is still finding its place on it. Off the
+         * route of the vehicle we follow it does (decided 25 Oct 2026): got
+         * off during a detour while ours was silent, nothing else ends the
+         * journey — the model sees no parting without reports, and holds ours
+         * while we do not ride on (RideModel.onOffRoute); the three-minute
+         * rule that used to withdraw it is gone. Ours beside us, or a moment
+         * at vehicle speed, still holds the limit off.
+         */
+        internal fun noProgressLimitApplies(offRoute: Boolean, awaitingFirstFix: Boolean,
+                                            identified: Boolean): Boolean =
+            if (offRoute) identified else !awaitingFirstFix
+
+        /**
          * The same idea before the journey has begun, with a longer allowance.
          *
          * Standing at a stop is not idleness — a bus may be twenty minutes
@@ -3152,15 +3170,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // INACTIVITY_TIMEOUT_MS). Counted from the first movement
         // rather than from the first stop reached: tied to reaching a stop,
         // the timer never started for a journey that made no progress from
-        // the outset. Not applied off the route, which has its own limit
-        // above with a truer message, nor while tracking is still finding its
-        // place on the route.
+        // the outset. Where it applies — see noProgressLimitApplies.
         //
         // Nor while the vehicle we follow is still with us: that is a ride
         // held up in traffic, not a journey abandoned — the same reason the
         // limit at the chosen stop above waits.
         if (movingSinceMs != 0L && orderedStops.isNotEmpty() &&
-            !offRoute && !awaitingFirstFix && !vehicleWithUs(now) &&
+            noProgressLimitApplies(offRoute, awaitingFirstFix, identified) && !vehicleWithUs(now) &&
             now - lastProgressMs > INACTIVITY_TIMEOUT_MS) {
             // Having left a stop on foot, that is what the silence was.
             if (leftOnFoot) {
