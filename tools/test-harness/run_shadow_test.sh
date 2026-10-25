@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Stage 2 from end to end (shadow/ShadowE2E.kt): journeys written through the
-# REAL util/JourneyTrace.kt and given to the REAL service/RideShadow.kt as
-# JourneyService does, then the written trace replayed through the model
+# The model in the app from end to end (shadow/ShadowE2E.kt): journeys written
+# through the REAL util/JourneyTrace.kt and given to the REAL
+# service/RideShadow.kt as JourneyService does (the boarding stop and off-route
+# lines included), then the written trace replayed through the model
 # (model/Replay.kt) — the replay must give the app's "Model @" lines. The
 # Android types JourneyTrace uses are stubbed as in run_trace_test.sh; the
 # roads are the real ones, as in run_model_tests.sh. Needs kotlinc and a JDK.

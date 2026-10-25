@@ -20,5 +20,7 @@ fun main(args: Array<String>) {
         "O" -> { flush(); sh.onOffRoute(p.getOrNull(2)?.ifEmpty { null }) }
     } }
     flush()
-    if (lines.any { it.startsWith("# end ") }) println("I " + sh.summary())
+    // The line at the end is the app's when it closed the journey; not when the
+    // app was killed and the next journey closed it ("unclosed").
+    if (lines.any { it.startsWith("# end ") && !it.endsWith(" unclosed") }) println("I " + sh.summary())
 }

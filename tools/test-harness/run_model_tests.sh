@@ -3,8 +3,8 @@
 # travelled together (model/ModelTests.kt): simulated journeys along the real
 # roads of 213 and 304 (model/Sim.kt), and, with TRACE_DIR set to a folder of
 # journey traces from the phone (journey_trace.txt), the recorded journeys.
-# Compiles the REAL service/RideModel.kt and service/RideShadow.kt (stage 2's
-# model beside the rules); needs kotlinc and a JDK.
+# Compiles the REAL service/RideModel.kt and service/RideShadow.kt (what feeds
+# the model in the app); needs kotlinc and a JDK.
 #
 #   run_model_tests.sh                       the tests
 #   run_model_tests.sh --replay <trace>      what the model concludes on a trace

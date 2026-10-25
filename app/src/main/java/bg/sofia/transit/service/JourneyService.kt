@@ -164,17 +164,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /** After this long without a usable fix the journey is abandoned. */
         private const val SNAP_GIVE_UP_MS = 3 * 60 * 1000L
 
-        /**
-         * How long tracking may stay silent while the actual line is being
-         * identified. If it cannot be settled in that time, continuing serves
-         * no purpose: nothing can be announced and the GPS runs for nothing.
-         */
-
         /** Below this we are standing: vehicle speed, for progress and for the off-route watches. */
         private const val MIN_SPEED_FOR_IDENTIFY = 10.0
 
-        /** Older than this, our own position cannot be compared with a moving
-         *  vehicle's. Normal operation delivers a fix every second. */
+        /** Older than this, our position is too stale to attach to a stop by
+         *  (positionUnreliable). Normal operation delivers a fix every second. */
         private const val MAX_FIX_AGE_FOR_DECISIONS_MS = 4_000L
         /** At or below this many fixes a minute, positioning is degraded. */
         private const val MIN_CADENCE_FOR_DECISIONS = 25
@@ -928,9 +922,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     /**
      * The model's conclusions, each with the journey's model it came from,
      * queued under traceFeedLock and followed one at a time on the main
-     * thread (see onCreate): adopting a vehicle waits on the database.
+     * thread (see onCreate): adopting a vehicle waits on the database. A null
+     * conclusion: try again to adopt the vehicle that could not be (unadopted).
      */
-    private val modelEvents = Channel<Pair<RideShadow, RideModel.Event>>(Channel.UNLIMITED)
+    private val modelEvents = Channel<Pair<RideShadow, RideModel.Event?>>(Channel.UNLIMITED)
+    /**
+     * The vehicle the model holds as ours that the app could not adopt —
+     * its trip not in the static data, the direction not known yet (see
+     * adoptVehicle) — tried again after each reading, as the rules before
+     * the model did; null when there is none.
+     */
+    @Volatile private var unadopted: Unadopted? = null
 
     /** True once "Изглежда не пътувате с линия X" has been said. */
     private var wrongLineNoticeGiven = false
@@ -1107,10 +1109,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastTraceFeedMs = 0L
 
         // A journey started over one still running closes its trace first.
-        if (journeyActive) { JourneyTrace.end(); endShadow() }
+        if (journeyActive) closeTrace()
         synchronized(journeyLock) { journeyActive = true }
-        JourneyTrace.start("$label (route $routeId, trip $tripId)")
-        startShadow(routeId)
+        openTrace("$label (route $routeId, trip $tripId)", routeId)
         publish(distance = null)
         acquireWakeLock()
         startLocUpdates()
@@ -1176,10 +1177,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastTraceFeedMs = 0L
 
         // A journey started over one still running closes its trace first.
-        if (journeyActive) { JourneyTrace.end(); endShadow() }
+        if (journeyActive) closeTrace()
         synchronized(journeyLock) { journeyActive = true }
-        JourneyTrace.start("$label (route $routeId, direction to be determined)")
-        startShadow(routeId)
+        openTrace("$label (route $routeId, direction to be determined)", routeId)
         publish(distance = null)
         acquireWakeLock()
         startLocUpdates()
@@ -1453,8 +1453,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val waited = now - snapWaitStartedMs
 
         // Fixes arriving too sparsely disqualify the position as surely as a
-        // wide error radius does, and by the same measure already used to
-        // suspend decisions about the vehicle. Underground, the receiver
+        // wide error radius does, by the same measure as the degraded-signal
+        // notice (positionUnreliable). Underground, the receiver
         // reported six fixes a minute and each one looked accurate enough on
         // its own; tracking attached to a stop on the strength of them and
         // then had nothing to work with.
@@ -1537,7 +1537,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val wasActive = synchronized(journeyLock) {
             journeyActive.also { journeyActive = false }
         }
-        if (wasActive) { JourneyTrace.end(); endShadow() }
+        if (wasActive) closeTrace()
         stopLocUpdates()
         releaseWakeLock()
 
@@ -2231,12 +2231,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * us prove nothing, and polling for twenty minutes would spend data for
      * no purpose.
      */
-    private fun startVehicleTracking(initialDelayMs: Long = FIRST_VEHICLE_CHECK_DELAY_MS) {
+    private fun startVehicleTracking() {
         vehicleJob?.cancel()
         if (routeId.isBlank()) return
 
         vehicleJob = serviceScope.launch {
-            delay(initialDelayMs)
+            delay(FIRST_VEHICLE_CHECK_DELAY_MS)
             while (isActive) {
                 try {
                     readVehicles()
@@ -2259,6 +2259,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     private suspend fun readVehicles() {
         if (!journeyActive || movingSinceMs == 0L) return
+        val shadow = rideShadow ?: return
         val now = System.currentTimeMillis()
         val feedAt = realtimeRepo.vehicleFeedFetchedAtMs()
         val snap = if (now - lastTraceAttemptMs >= VEHICLE_CHECK_INTERVAL_MS &&
@@ -2277,9 +2278,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             JourneyTrace.listed(snap, lat, lon, tripId)
         } catch (_: Throwable) { return }
         synchronized(traceFeedLock) {
+            // Ended — or ended and another begun — since the fetch began:
+            // not this journey's reading, in the trace or for the model.
+            if (rideShadow !== shadow || !journeyActive) return
             JourneyTrace.vehicles(snap, lat, lon, listed)
-            shadowReading(snap, listed)
+            shadowReading(shadow, snap, listed)
         }
+        // A vehicle the model holds that could not be followed is tried again.
+        if (unadopted != null) modelEvents.trySend(shadow to null)
         askBoarding()
     }
 
@@ -2292,16 +2298,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     // time (followModel). A failure in it is caught: the journey goes on, on
     // the line chosen.
 
-    private fun startShadow(chosenRouteId: String) {
+    /**
+     * A journey's trace and model begin together ([start], the trace's start
+     * line) — and end together (closeTrace): under traceFeedLock, so that no
+     * reading falls between the two.
+     */
+    private fun openTrace(start: String, chosenRouteId: String) = synchronized(traceFeedLock) {
+        JourneyTrace.start(start)
         offRouteToldKey = null
+        unadopted = null
         rideShadow = try {
             RideShadow(chosenRouteId,
                 { FileLogger.i(MODEL_TAG, it) }, { FileLogger.d(MODEL_TAG, it) })
         } catch (_: Throwable) { null }
     }
 
-    private fun endShadow() {
-        val shadow = rideShadow ?: return
+    private fun closeTrace() = synchronized(traceFeedLock) {
+        JourneyTrace.end()
+        val shadow = rideShadow ?: return@synchronized
         rideShadow = null
         try { FileLogger.i(MODEL_TAG, shadow.summary()) } catch (_: Throwable) { }
     }
@@ -2320,10 +2334,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun shadowReading(
+        shadow: RideShadow,
         snap: bg.sofia.transit.data.repository.VehicleSnapshot,
         listed: List<bg.sofia.transit.data.repository.VehicleInfo>
     ) {
-        val shadow = rideShadow ?: return
         try {
             follow(shadow, shadow.onReading(snap.fetchedAtMs, snap.serverDateMs, listed.map { v ->
                 RideShadow.Seen(v.vehicleId, v.tripId, v.routeId, v.timestamp, v.lat, v.lon)
@@ -2392,13 +2406,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 adoptFromModel(source, e.key, e.tripId, e.routeId, e.metres, switched = false)
             is RideModel.Event.Switched ->
                 adoptFromModel(source, e.toKey, e.toTripId, e.toRouteId, e.metres, switched = true)
-            is RideModel.Event.Withdrawn ->
+            is RideModel.Event.Withdrawn -> {
+                if (unadopted?.key == e.key) unadopted = null
                 if (identified && e.key == followedKey) {
                     revokeIdentification("The model withdrew it: it left us, or we left its route " +
                         "without it, while we went on")
                 } else {
                     FileLogger.d(TAG, "The model withdrew ${e.key}, not the vehicle followed — nothing to undo")
                 }
+            }
             is RideModel.Event.Alighted ->
                 if (destinationIdx != null && destinationArrivedMs != 0L) {
                     // "Слизате тук" has been said; only the end itself is
@@ -2418,11 +2434,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * Adopts the vehicle the model has found us in: [key], with its trip and
      * line as the model has them. [switched]: it replaced ours, which has
      * left us — if this one cannot be followed, ours is not followed on.
+     * One that cannot be followed is tried again after each reading
+     * (unadopted), until it is, or the model holds another.
      */
     private suspend fun adoptFromModel(
         source: RideShadow, key: String, modelTripId: String, modelRouteId: String,
         metres: Double, switched: Boolean
     ) {
+        val retry = unadopted?.key == key
+        unadopted = null
         // The ids as the feed gives them: the model's have ';' for ','.
         val (trip, route) = source.feedIds(key) ?: (modelTripId to modelRouteId)
         if (identified && key == followedKey && trip == tripId) {
@@ -2442,11 +2462,22 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val headsign = try { gtfsRepo.getHeadsignByTripIdPrefix(trip) } catch (e: Exception) { null }
         if (line != null && adoptVehicle(source, FollowedVehicle(key, route, line.routeShortName,
                 line.routeType, trip, headsign, metres))) return
-        FileLogger.w(TAG, "Cannot follow the model's vehicle (route $route, trip $trip)")
-        if (switched && identified && rideShadow === source && journeyActive) {
+        // The lookups wait: the journey may have ended meanwhile.
+        if (rideShadow !== source || !journeyActive) return
+        unadopted = Unadopted(key, modelTripId, modelRouteId, metres)
+        if (retry) {
+            FileLogger.d(TAG, "Still cannot follow the model's vehicle (route $route, trip $trip)")
+            return
+        }
+        FileLogger.w(TAG, "Cannot follow the model's vehicle (route $route, trip $trip) — " +
+            "tried again after each reading")
+        if (switched && identified) {
             revokeIdentification("The vehicle followed left us, and the one with us now cannot be followed")
         }
     }
+
+    /** The model's vehicle not adopted, as the model has it (see unadopted). */
+    private class Unadopted(val key: String, val tripId: String, val routeId: String, val metres: Double)
 
     /** The vehicle the model has found us in, as adopted (adoptVehicle). */
     private class FollowedVehicle(
@@ -3178,9 +3209,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (movingSinceMs != 0L && orderedStops.isNotEmpty() &&
             noProgressLimitApplies(offRoute, awaitingFirstFix, identified) && !vehicleWithUs(now) &&
             now - lastProgressMs > INACTIVITY_TIMEOUT_MS) {
-            // Having left a stop on foot, that is what the silence was.
-            if (leftOnFoot) {
-                end("No progress for 10 min since leaving a stop on foot",
+            // Having left a stop on foot, that is what the silence was — and
+            // off the route of the vehicle we follow, no longer with us (see
+            // noProgressLimitApplies), getting off during a detour.
+            if (leftOnFoot || offRoute) {
+                end("No progress for 10 min " +
+                    (if (leftOnFoot) "since leaving a stop on foot" else "off the route of the vehicle followed"),
                     "Изглежда слязохте. Следенето се прекратява.")
             } else {
                 end("No progress for 10 min", "Няма движение по маршрута. Следенето е спряно.")
@@ -3367,6 +3401,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     /** Clears everything identification keeps between readings. */
     private fun resetIdentificationState() {
         followedKey = null
+        unadopted = null
         wrongLineNoticeGiven = false
         offRoute = false
         lostSinceMs = 0L
@@ -4162,7 +4197,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 // Only the journey's own: one ended or replaced since says nothing of this one.
                 if (source !== rideShadow || !journeyActive) continue
                 try {
-                    followModel(source, e)
+                    if (e != null) followModel(source, e)
+                    else unadopted?.let { u -> adoptFromModel(source, u.key, u.tripId, u.routeId, u.metres, switched = false) }
                 } catch (ce: CancellationException) {
                     throw ce
                 } catch (ex: Exception) {
@@ -4183,7 +4219,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val wasActive = synchronized(journeyLock) {
             journeyActive.also { journeyActive = false }
         }
-        if (wasActive) { JourneyTrace.end(); endShadow() }
+        if (wasActive) closeTrace()
         stopLocUpdates()
         releaseWakeLock()
         etaJob?.cancel()
