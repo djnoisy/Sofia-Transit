@@ -20,7 +20,7 @@ case "${1:-}" in
   --shadow)
     "$KOTLINC" "$SRC/RideModel.kt" "$SRC/RideShadow.kt" "$HERE/model/ShadowCmp.kt" -d "$OUT/c" 2>&1 | grep -A3 "error:" || true
     java -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -cp "$OUT/c:$KLIB/kotlin-stdlib.jar" ShadowCmpKt "$2" 2>/dev/null | sed 's/^[ID] //' > "$OUT/replay.txt"
-    grep -o "RideModel: .*" "$3" | sed 's/^RideModel: //' > "$OUT/log.txt" || true
+    tr -d '\r' < "$3" | grep -o "RideModel: .*" | sed 's/^RideModel: //' > "$OUT/log.txt" || true
     if diff "$OUT/replay.txt" "$OUT/log.txt"; then echo "same Model lines as the log ($(wc -l < "$OUT/log.txt"))"; else echo "DIFFERENT (< replay, > log)"; exit 1; fi ;;
   --stress)
     "$KOTLINC" "$SRC/RideModel.kt" "$SRC/RideShadow.kt" "$HERE/model/Replay.kt" "$HERE/model/Stress.kt" -d "$OUT/c" 2>&1 | grep -A3 "error:" || true

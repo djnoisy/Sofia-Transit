@@ -16,7 +16,8 @@ class Replayed(val journey: String, val events: List<Concluded>, val model: Ride
 /** The journeys in a trace, each as its start line and its records. */
 fun journeys(file: File): List<Pair<String, List<String>>> {
     val out = ArrayList<Pair<String, MutableList<String>>>()
-    for (line in file.readLines()) {
+    // A trace passed through Windows ends its lines with "\r\n".
+    for (line in file.readLines().map { it.trimEnd('\r') }) {
         if (line.startsWith("# start ")) out.add(line to ArrayList())
         else if (line.startsWith("# end") || line.startsWith("# cleared")) continue
         else out.lastOrNull()?.second?.add(line)

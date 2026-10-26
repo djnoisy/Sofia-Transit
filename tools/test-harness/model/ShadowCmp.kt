@@ -5,7 +5,7 @@
 import bg.sofia.transit.service.RideShadow
 import java.io.File
 fun main(args: Array<String>) {
-    val lines = File(args[0]).readLines()
+    val lines = File(args[0]).readLines().map { it.trimEnd('\r') }   // "\r\n" if passed through Windows
     val start = lines.first { it.startsWith("# start ") }
     val route = Regex("""\(route ([^,)]+)""").find(start)!!.groupValues[1]
     val sh = RideShadow(route, { println("I " + it) }, { println("D " + it) })
