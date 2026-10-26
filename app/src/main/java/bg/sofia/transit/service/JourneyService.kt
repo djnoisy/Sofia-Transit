@@ -274,9 +274,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * queued speech can finish before the engine is shut down.
          */
         private const val TEARDOWN_DELAY_MS = 10_000L
-        /** Grace period after boarding, so the first GPS fixes can arrive. */
-        private const val FIRST_VEHICLE_CHECK_DELAY_MS = 30_000L
-
         /**
          * How often the readings look again whether we have departed, and the
          * boarding watch whether its arrivals are due a refresh. Nothing is
@@ -2226,17 +2223,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * and when we get off (see followModel) — and for the journey trace:
      * every VEHICLE_CHECK_INTERVAL_MS from departure, throughout the
      * journey. Until departure the loop only looks every few seconds whether
-     * it has come, so that the first reading follows it within seconds.
-     * Nothing is fetched while waiting: at the stop, vehicles standing beside
-     * us prove nothing, and polling for twenty minutes would spend data for
-     * no purpose.
+     * it has come, so that the first reading follows it within seconds —
+     * from the start: tracking begun as the bus pulls away departs within
+     * seconds, and a wait of half a minute before the first look held the
+     * first reading back 21 s (26 Oct 2026, b). Nothing is fetched while
+     * waiting: at the stop, vehicles standing beside us prove nothing, and
+     * polling for twenty minutes would spend data for no purpose.
      */
     private fun startVehicleTracking() {
         vehicleJob?.cancel()
         if (routeId.isBlank()) return
 
         vehicleJob = serviceScope.launch {
-            delay(FIRST_VEHICLE_CHECK_DELAY_MS)
             while (isActive) {
                 try {
                     readVehicles()
