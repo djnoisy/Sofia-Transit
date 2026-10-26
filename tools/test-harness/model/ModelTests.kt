@@ -2107,7 +2107,15 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "A2069" }
         check("24.10 bus 181: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
-    }
+    },
+    // 26 Oct 2026 (stage 3, №113): 305 from АЛ. МАЛИНОВ, 111 chosen; the
+    // early rule not judged (305 still pulling away at its report, 314 at
+    // 48 m) — 305 at the second reading after departure (08:40:08).
+    "2026-10-26_305.txt" to { rp -> onlyOurs(rp, "26.10 bus 305 (111 chosen)", "A87", "08:40:40") },
+    // The same day, b: 305 again, 213 chosen, begun as it pulled out of
+    // УМБАЛ СВ. АННА (departure 08:47:11); stopped by hand before getting
+    // off could be concluded. Both came with Windows line ends.
+    "2026-10-26_305b.txt" to { rp -> onlyOurs(rp, "26.10 b bus 305 (213 chosen)", "A87", "08:48:03") }
 )
 
 /**
