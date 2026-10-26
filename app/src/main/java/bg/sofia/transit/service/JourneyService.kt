@@ -216,6 +216,46 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         internal fun atVehicleSpeed(accurateFix: Boolean, kmh: Double?, vehicleKmh: Double): Boolean =
             accurateFix && (kmh ?: 0.0) >= vehicleKmh
 
+        /** Where a reading after departure is taken from (readVehicles). */
+        internal enum class ReadingFrom { FETCH, CACHED, NONE }
+
+        /**
+         * Where the reading at [now] after departure ([departedMs]) is taken
+         * from — the vehicle feed last fetched at [feedAt] by anything in the
+         * app (0 if never), ours last tried at [lastAttemptMs] and last taken
+         * at [lastFeedMs]: fetched once VEHICLE_CHECK_INTERVAL_MS have passed
+         * since both; or the feed another part of the app has fetched since;
+         * or nothing new. The first reading is one fetched since departure: a
+         * feed fetched before it — by a journey just ended, or another screen
+         * — is too old to begin with, so it is fetched at once, and would
+         * otherwise hold the next one back half a minute.
+         */
+        internal fun readingFrom(now: Long, feedAt: Long, lastAttemptMs: Long,
+                                 lastFeedMs: Long, departedMs: Long): ReadingFrom = when {
+            (now - lastAttemptMs >= VEHICLE_CHECK_INTERVAL_MS && now - feedAt >= VEHICLE_CHECK_INTERVAL_MS) ||
+                (lastFeedMs < departedMs && feedAt < departedMs) -> ReadingFrom.FETCH
+            feedAt != 0L && feedAt != lastFeedMs -> ReadingFrom.CACHED
+            else -> ReadingFrom.NONE
+        }
+
+        /**
+         * Whether a feed fetched at [fetchedAtMs] makes a new reading: not the
+         * one last taken ([lastFeedMs]), and fetched since departure — the
+         * feed's own cache may hand back a copy from before (asked again
+         * shortly; see nextLookMs).
+         */
+        internal fun readingAccepted(fetchedAtMs: Long, lastFeedMs: Long, departedMs: Long): Boolean =
+            fetchedAtMs != lastFeedMs && fetchedAtMs >= departedMs
+
+        /**
+         * How long until the readings look again: every few seconds until
+         * departure ([departedMs], 0 before it) and until the first reading
+         * fetched since then is had; then the regular interval.
+         */
+        internal fun nextLookMs(departedMs: Long, lastFeedMs: Long): Long =
+            if (departedMs == 0L || lastFeedMs < departedMs) DEFERRED_CHECK_RETRY_MS
+            else VEHICLE_CHECK_INTERVAL_MS
+
         /**
          * Whether the no-progress limit (INACTIVITY_TIMEOUT_MS) applies:
          * attached to the route, or off it with a vehicle identified.
@@ -2243,10 +2283,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 } catch (e: Exception) {
                     FileLogger.w(TAG, "Vehicle reading failed: ${e.message}")
                 }
-                // Every few seconds until departure, and until the first
-                // reading since departure is had; then the regular interval.
-                delay(if (movingSinceMs == 0L || lastTraceFeedMs < movingSinceMs) DEFERRED_CHECK_RETRY_MS
-                      else VEHICLE_CHECK_INTERVAL_MS)
+                delay(nextLookMs(movingSinceMs, lastTraceFeedMs))
             }
         }
     }
@@ -2262,24 +2299,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (!journeyActive || movingSinceMs == 0L) return
         val shadow = rideShadow ?: return
         val now = System.currentTimeMillis()
-        val feedAt = realtimeRepo.vehicleFeedFetchedAtMs()
-        // The first reading is one fetched since departure: a feed fetched
-        // before it — by a journey just ended, or another screen — is too
-        // old to begin with, and would hold the next one back half a minute.
-        val noneSinceDeparture = lastTraceFeedMs < movingSinceMs
-        val snap = if ((now - lastTraceAttemptMs >= VEHICLE_CHECK_INTERVAL_MS &&
-                now - feedAt >= VEHICLE_CHECK_INTERVAL_MS) ||
-            (noneSinceDeparture && feedAt < movingSinceMs)) {
-            lastTraceAttemptMs = now
-            realtimeRepo.getVehicleSnapshot()
-        } else if (feedAt != 0L && feedAt != lastTraceFeedMs) {
-            realtimeRepo.cachedVehicleSnapshot()
-        } else null
-        // The fetch may have outlasted the journey; and the feed's own cache
-        // may hand back a copy from before departure (asked again shortly).
-        if (snap == null || snap.fetchedAtMs == lastTraceFeedMs || snap.fetchedAtMs < movingSinceMs ||
+        val snap = when (readingFrom(now, realtimeRepo.vehicleFeedFetchedAtMs(),
+                lastTraceAttemptMs, lastTraceFeedMs, movingSinceMs)) {
+            ReadingFrom.FETCH -> {
+                lastTraceAttemptMs = now
+                realtimeRepo.getVehicleSnapshot()
+            }
+            ReadingFrom.CACHED -> realtimeRepo.cachedVehicleSnapshot()
+            ReadingFrom.NONE -> null
+        }
+        // The fetch may have outlasted the journey.
+        if (snap == null || !readingAccepted(snap.fetchedAtMs, lastTraceFeedMs, movingSinceMs) ||
             !journeyActive) return
-        lastTraceFeedMs = snap.fetchedAtMs
         val lat = lastLat
         val lon = lastLon
         val listed = try {
@@ -2287,8 +2318,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         } catch (_: Throwable) { return }
         synchronized(traceFeedLock) {
             // Ended — or ended and another begun — since the fetch began:
-            // not this journey's reading, in the trace or for the model.
+            // not this journey's reading, in the trace or for the model; nor
+            // taken as the new one's (its first reading would wait 30 s).
             if (rideShadow !== shadow || !journeyActive) return
+            lastTraceFeedMs = snap.fetchedAtMs
             JourneyTrace.vehicles(snap, lat, lon, listed)
             shadowReading(shadow, snap, listed)
         }
