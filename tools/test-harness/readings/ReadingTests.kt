@@ -17,6 +17,8 @@ object J {
 
 const val TTL = 20_000L                              // RealtimeRepository.CACHE_TTL_MS
 const val S = 1000L
+/** The clock of the app is epoch time: "never" (0) is long ago, as on the phone. */
+const val T0 = 1_792_996_539_103L
 
 class Result(val readings: List<Pair<Long, Long>>, val requests: List<Long>) {
     /** When each reading was taken, and the time of the feed it was taken from. */
@@ -33,14 +35,21 @@ class Result(val readings: List<Pair<Long, Long>>, val requests: List<Long>) {
 }
 
 /**
- * Tracking begun at 0, departure at [departAt], until [until]. The feed was
- * last fetched at [prevFeedAt] (0: never), answers after [latency], fails
- * fast while [down]; other screens fetch it at [others].
+ * Tracking begun at 0, departure at [departAt], until [until] — all relative
+ * to T0. The feed was last fetched at [prevFeedAt] (null: never), answers
+ * after [latency], fails fast while [down]; other screens fetch it at [others].
  */
 fun simulate(departAt: Long, until: Long, latency: Long = 500, down: (Long) -> Boolean = { false },
-             others: List<Long> = emptyList(), prevFeedAt: Long = 0L): Result {
+             others: List<Long> = emptyList(), prevFeedAt: Long? = null): Result {
+    val r = simulateAbs(T0 + departAt, T0 + until, latency, { down(it - T0) }, others.map { T0 + it },
+        prevFeedAt?.let { T0 + it } ?: 0L)
+    return Result(r.readings.map { (a, b) -> a - T0 to b - T0 }, r.requests.map { it - T0 })
+}
+
+fun simulateAbs(departAt: Long, until: Long, latency: Long, down: (Long) -> Boolean,
+                others: List<Long>, prevFeedAt: Long): Result {
     var feedAt = prevFeedAt
-    var t = 0L
+    var t = T0
     var lastAttempt = 0L; var lastFeed = 0L
     val readings = ArrayList<Pair<Long, Long>>(); val requests = ArrayList<Long>()
     var o = 0
