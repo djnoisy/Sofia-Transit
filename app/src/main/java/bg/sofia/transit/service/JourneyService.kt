@@ -2243,7 +2243,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 } catch (e: Exception) {
                     FileLogger.w(TAG, "Vehicle reading failed: ${e.message}")
                 }
-                delay(if (movingSinceMs == 0L) DEFERRED_CHECK_RETRY_MS else VEHICLE_CHECK_INTERVAL_MS)
+                // Every few seconds until departure, and until the first
+                // reading since departure is had; then the regular interval.
+                delay(if (movingSinceMs == 0L || lastTraceFeedMs < movingSinceMs) DEFERRED_CHECK_RETRY_MS
+                      else VEHICLE_CHECK_INTERVAL_MS)
             }
         }
     }
@@ -2260,15 +2263,22 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val shadow = rideShadow ?: return
         val now = System.currentTimeMillis()
         val feedAt = realtimeRepo.vehicleFeedFetchedAtMs()
-        val snap = if (now - lastTraceAttemptMs >= VEHICLE_CHECK_INTERVAL_MS &&
-            now - feedAt >= VEHICLE_CHECK_INTERVAL_MS) {
+        // The first reading is one fetched since departure: a feed fetched
+        // before it — by a journey just ended, or another screen — is too
+        // old to begin with, and would hold the next one back half a minute.
+        val noneSinceDeparture = lastTraceFeedMs < movingSinceMs
+        val snap = if ((now - lastTraceAttemptMs >= VEHICLE_CHECK_INTERVAL_MS &&
+                now - feedAt >= VEHICLE_CHECK_INTERVAL_MS) ||
+            (noneSinceDeparture && feedAt < movingSinceMs)) {
             lastTraceAttemptMs = now
             realtimeRepo.getVehicleSnapshot()
         } else if (feedAt != 0L && feedAt != lastTraceFeedMs) {
             realtimeRepo.cachedVehicleSnapshot()
         } else null
-        // The fetch may have outlasted the journey.
-        if (snap == null || snap.fetchedAtMs == lastTraceFeedMs || !journeyActive) return
+        // The fetch may have outlasted the journey; and the feed's own cache
+        // may hand back a copy from before departure (asked again shortly).
+        if (snap == null || snap.fetchedAtMs == lastTraceFeedMs || snap.fetchedAtMs < movingSinceMs ||
+            !journeyActive) return
         lastTraceFeedMs = snap.fetchedAtMs
         val lat = lastLat
         val lon = lastLon
@@ -2371,6 +2381,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val shadow = rideShadow ?: return
         try {
             if (!shadow.wantsBoarding()) return
+            // The arrivals at the stops around us not in yet — tracking begun
+            // as the bus pulls away, the first fetch still under way: asked
+            // after the next reading, rather than judged on none due.
+            if (expectedArrivals.isEmpty() && boardingJob?.isActive == true) return
             val stop = findBoardingStop() ?: return
             val due = dueAtBoarding(stop.ids)
             synchronized(traceFeedLock) {
