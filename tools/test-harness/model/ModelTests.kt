@@ -2115,7 +2115,27 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // The same day, b: 305 again, 213 chosen, begun as it pulled out of
     // УМБАЛ СВ. АННА (departure 08:47:11); stopped by hand before getting
     // off could be concluded. Both came with Windows line ends.
-    "2026-10-26_305b.txt" to { rp -> onlyOurs(rp, "26.10 b bus 305 (213 chosen)", "A87", "08:48:03") }
+    "2026-10-26_305b.txt" to { rp -> onlyOurs(rp, "26.10 b bus 305 (213 chosen)", "A87", "08:48:03") },
+    // The same day, c (№113): 76 (A3120) from ХОТЕЛ ПЛИСКА, 213 chosen,
+    // waited 4 min; seven trips due there (routes A85 = 213, A81 = 76, A58,
+    // A91, TB1, TB3, TB39). At the first reading after departure (08:58:49) 76
+    // was alone near us (25 m), 213 and TB1 some 360 m ahead: the early rule
+    // took 76 at once. An oncoming TB32 at 36 m at the second reading earned
+    // nothing. Off at ПЛ. ОРЛОВ МОСТ (76 left about 09:03:47); the app ended
+    // at 09:05:28 as the model concluded.
+    "2026-10-26_76.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("26.10 c bus 76 (213 chosen): 76 taken by the boarding stop by 08:58:50",
+            (id?.event as? Event.Identified)?.let { it.key == "A3120" && it.byBoardingStop } == true &&
+            clock(id!!.atMs) <= "08:58:50") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        val off = rp.events.getOrNull(1)
+        check("26.10 c bus 76: got off between 09:04:30 and 09:05:30, nothing else", rp.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "09:04:30".."09:05:30") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "A3120" }
+        check("26.10 c bus 76: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    }
 )
 
 /**
