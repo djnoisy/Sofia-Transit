@@ -2198,7 +2198,29 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // matching our heading with straight lines between stops, not the road,
     // could not tell 305's direction round the block until 08:48:35. Ended
     // aboard.
-    "2026-10-27_76b.txt" to { rp -> onlyOurs(rp, "27.10 b bus 76 (305 chosen, begun crawling)", "A81", "08:48:57") }
+    "2026-10-27_76b.txt" to { rp -> onlyOurs(rp, "27.10 b bus 76 (305 chosen, begun crawling)", "A81", "08:48:57") },
+    // The same morning, c (№114): 76 (A3114) again, 280 chosen, from ХОТЕЛ
+    // ПЛИСКА; due there: three 280s, 76, trolleybus 1. 76 alone 14 m from us
+    // at the first reading: taken by the early rule (08:55:00). In the jam
+    // before ПЛ. ОРЛОВ МОСТ a 280 (A2305, the chosen line) came to 14 m,
+    // 83 m together, then fell 265 m back: nothing. Off at ПЛ. ОРЛОВ МОСТ
+    // about 09:03:30; 76's report at 09:04:34 was 99 m off (APART_M is 100),
+    // then our fixes went vague (49-87 m) and jumped 95 m at 09:05:31 — the
+    // phone's own speed with them 8-10 m/s for 12 s; apart at reports we
+    // could place from 09:06:09: got off concluded 09:06:43, as the app.
+    "2026-10-27_76c.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("27.10 c bus 76 (280 chosen): 76 taken by the boarding stop by 08:55:01",
+            (id?.event as? Event.Identified)?.let { it.key == "A3114" && it.byBoardingStop } == true &&
+            clock(id!!.atMs) <= "08:55:01") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        val off = rp.events.getOrNull(1)
+        check("27.10 c bus 76: got off between 09:04:00 and 09:06:45, nothing else", rp.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "09:04:00".."09:06:45") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "A3114" }
+        check("27.10 c bus 76: no other vehicle reaches 150 m (280 in the jam: 83 m)", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    }
 )
 
 /**
