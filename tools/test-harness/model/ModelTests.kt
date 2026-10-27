@@ -2135,6 +2135,47 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "A3120" }
         check("26.10 c bus 76: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // The same day, d (№113): tram 22 (TM4155, long), 22 chosen, the
+    // passenger at the very back, from УЛ. ОПЪЛЧЕНСКА; its reports 32-48 m
+    // ahead of us. The early rule was not judged at the first reading (the
+    // tram's report taken before we moved) and took it at the second
+    // (12:41:21, 48 m, the zone ahead). Off at ЦЕНТРАЛНИ ХАЛИ, then on foot
+    // to the stop of 18; stopped by hand at 12:48:41. Getting off was not
+    // concluded: at 12:46:52 our fixes jumped some 50 m back from a drift,
+    // which read as vehicle speed, and walking on took us 100 m from where
+    // the tram first left us — "we went on": withdrawn at 12:47:59. Without
+    // the drift, got off at 12:48:01 (HANDOVER, "Пътуване от 26.10.2026 d").
+    "2026-10-26_22.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("26.10 d tram 22: 22 taken by the boarding stop by 12:41:25",
+            (id?.event as? Event.Identified)?.let { it.key == "TM4155" && it.byBoardingStop } == true &&
+            clock(id!!.atMs) <= "12:41:25") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        check("26.10 d tram 22: no other vehicle taken", rp.events.none {
+            (it.event as? Event.Identified)?.key.let { k -> k != null && k != "TM4155" } || it.event is Event.Switched }) {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "TM4155" }
+        check("26.10 d tram 22: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // The same day, e (№113): tram 18 (TM2330), 27 chosen, from ЦЕНТРАЛНИ
+    // ХАЛИ. Its arrival there had dropped out of the trip updates 6 min
+    // before (gone at 12:49:52, never back), so nothing was due at the stop:
+    // the early rule held back ("the only vehicle near us was not due
+    // there", 29 m) and the metres took it at the second reading (12:56:21).
+    // Off at ПЛ. ГАРИБАЛДИ (18 left about 13:01:52): the app ended at
+    // 13:02:28 as the model concluded.
+    "2026-10-26_18.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("26.10 e tram 18 (27 chosen): 18 identified by 12:56:25", (id?.event as? Event.Identified)?.key == "TM2330" &&
+            clock(id.atMs) <= "12:56:25") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        val off = rp.events.getOrNull(1)
+        check("26.10 e tram 18: got off between 13:01:50 and 13:02:30, nothing else", rp.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "13:01:50".."13:02:30") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "TM2330" }
+        check("26.10 e tram 18: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     }
 )
 
