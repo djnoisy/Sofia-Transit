@@ -2176,7 +2176,16 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "TM2330" }
         check("26.10 e tram 18: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
-    }
+    },
+    // 27 Oct 2026 (№114): 76 (A3114), 305 chosen, tracking begun aboard as
+    // it crawled (1.5-3.5 m/s for 1.5 min, turning from south to north-west
+    // onto 305's road; departure taken at 08:47:24, no boarding stop). 76
+    // was beside us at every reading from the first (13, 15, 20, 15 m),
+    // alone within 60 m at the first two; by metres alone it waited for
+    // 150 m: taken at the fourth reading (08:48:56, 222 m). The compass
+    // could not tell 305's direction until we were on its road (08:48:35).
+    // Ended aboard.
+    "2026-10-27_76.txt" to { rp -> onlyOurs(rp, "27.10 bus 76 (305 chosen, begun crawling)", "A81", "08:48:57") }
 )
 
 /**
