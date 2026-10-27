@@ -900,6 +900,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var lastMovingHeading: Double? = null
     private var lastMovingHeadingAtMs = 0L
     private var lastCompassLogMs = 0L
+    /**
+     * The road of each of [candidates] (null where no shape fits its stops),
+     * for the compass (compassDirection); null until loaded. Paired with the
+     * list it was loaded for, which a later list replaces.
+     */
+    private var candidateRoads: Pair<List<DirectionCandidate>, List<RouteGeometry?>>? = null
 
     /**
      * The direction last announced ("Посока, X", or as part of a switch), so
@@ -1183,6 +1189,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         resetIdentificationState()
         chosen = ChosenLine(label, "", routeId, "", emptyList(), emptyList(), candidates)
         this.candidates   = candidates
+        loadCandidateRoads(routeId, candidates)
         anchorIdx         = emptyList()
         destinationEtaEpoch = null
         etaSource         = EtaSource.NONE
@@ -1375,24 +1382,34 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * told: the index into [candidates] and a description for the log.
      *
      * Only after departure, with our heading known (see updateHeading). Each
-     * direction's stretch of route nearest us is compared with our heading;
-     * the direction is told when one is within COMPASS_MATCH_DEG of it and
-     * every other is beyond COMPASS_OPPOSE_DEG or has no stretch near us.
+     * direction's stretch of route nearest us — of its road where it has one
+     * (candidateRoads), else the straight line between two of its stops — is
+     * compared with our heading (RouteGeometry.compassVerdict): the direction
+     * is told when one is within COMPASS_MATCH_DEG of it and every other is
+     * beyond COMPASS_OPPOSE_DEG or has no stretch near us.
      */
     private fun compassDirection(loc: Location): Pair<Int, String>? {
         if (movingSinceMs == 0L) return null
         val ours = ourHeading() ?: return null
-        val segs = candidates.map { segmentHeadingNear(it.latLons, loc.latitude, loc.longitude) }
-        val diffs = segs.map { it?.let { b -> angleDiff(b, ours) } }
-        val matching = diffs.indices.filter { diffs[it] != null && diffs[it]!! < COMPASS_MATCH_DEG }
-        val others = diffs.indices - matching.toSet()
-        val detail = "ours ${ours.toInt()}°, " + candidates.indices.joinToString(", ") { i ->
-            "${candidates[i].headsign.take(14)}: " +
-                (segs[i]?.let { "${it.toInt()}° (Δ${diffs[i]!!.toInt()}°)" } ?: "no stretch near")
+        // By the road where the direction has one (candidateRoads), else by
+        // the straight lines between its stops.
+        val roads = candidateRoads?.takeIf { it.first === candidates }?.second
+        val ways = candidates.mapIndexed { i, c ->
+            val road = roads?.getOrNull(i)
+            RouteGeometry.headingOf(
+                road?.stretchesNear(loc.latitude, loc.longitude, SEGMENT_NEAR_RADIUS)
+                    ?: stretchesNear(c.latLons, loc.latitude, loc.longitude),
+                SEGMENT_AMBIGUITY_SLACK, COMPASS_OPPOSE_DEG)
         }
-        val decided = matching.size == 1 &&
-            others.all { diffs[it] == null || diffs[it]!! > COMPASS_OPPOSE_DEG }
-        if (!decided) {
+        val verdict = RouteGeometry.compassVerdict(ways, ours, COMPASS_MATCH_DEG, COMPASS_OPPOSE_DEG)
+        val detail = "ours ${ours.toInt()}°, " + candidates.indices.joinToString(", ") { i ->
+            "${candidates[i].headsign.take(14)}: " + when (val w = ways[i]) {
+                is RouteGeometry.Way.One -> "${w.bearing.toInt()}° (Δ${angleDiff(w.bearing, ours).toInt()}°)"
+                is RouteGeometry.Way.Both -> "both ways near"
+                else -> "no stretch near"
+            } + (if (roads?.getOrNull(i) != null) " by road" else "")
+        }
+        if (verdict == null) {
             val now = System.currentTimeMillis()
             if (now - lastCompassLogMs >= AMBIGUITY_LOG_INTERVAL_MS) {
                 lastCompassLogMs = now
@@ -1400,7 +1417,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             }
             return null
         }
-        return matching.first() to detail
+        return verdict to detail
     }
 
     /**
@@ -2819,6 +2836,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             orderedStops = c.stops
             stopLatLon = c.latLons
             candidates = c.candidates
+            loadCandidateRoads(c.routeId, c.candidates)
             anchorIdx = emptyList()
             anchorLat = 0.0; anchorLon = 0.0
             determinationStartMs = System.currentTimeMillis()
@@ -3743,22 +3761,33 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     /**
-     * The compass bearing of the stretch of a route nearest the given point
-     * — the straight line between two consecutive stops — if one lies within
-     * SEGMENT_NEAR_RADIUS; null when none does, or when the route runs both
-     * ways past the point (turning back along the same street), since its
-     * direction there cannot be told.
+     * Looks up the road of each direction in [list] (its stops fitted to the
+     * route's shapes, as loadGeometry does once the direction is known), for
+     * the compass to go by while the direction is determined. Until then, and
+     * for a direction no shape fits, the straight lines between stops.
      */
-    private fun segmentHeadingNear(
-        latLons: List<Pair<Double, Double>>, lat: Double, lon: Double
-    ): Double? {
-        val near = stretchesNear(latLons, lat, lon)
-        val nearest = near.minByOrNull { it.first } ?: return null
-        val ambiguous = near.any { (d, b) ->
-            d <= nearest.first + SEGMENT_AMBIGUITY_SLACK &&
-                angleDiff(b, nearest.second) > COMPASS_OPPOSE_DEG
+    private fun loadCandidateRoads(route: String, list: List<DirectionCandidate>) {
+        candidateRoads = null
+        if (list.isEmpty()) return
+        serviceScope.launch {
+            val roads = try {
+                val shapes = gtfsRepo.getShapesForRoute(route, null)
+                    .map { (_, blob) -> bg.sofia.transit.data.db.entity.ShapePoints.decode(blob) }
+                list.map { c -> shapes.firstNotNullOfOrNull { RouteGeometry.fit(it, c.latLons) } }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "Roads of the directions not loaded: ${e.message}")
+                return@launch
+            }
+            withContext(Dispatchers.Main) {
+                if (candidates === list) {
+                    candidateRoads = list to roads
+                    FileLogger.i(TAG, "Compass by road: " + list.indices.joinToString(", ") { i ->
+                        "${list[i].headsign.take(14)} ${if (roads[i] != null) "road" else "stops only"}" })
+                }
+            }
         }
-        return if (ambiguous) null else nearest.second
     }
 
     /**

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Road geometry: service/RouteGeometry.kt on the real shape of bus 213
 # (geometry/GeometryTests.kt), the off-road watch on the roads of 213 and 305
-# (geometry/OffRoadTests.kt), and the shapes.txt parser in
+# (geometry/OffRoadTests.kt), the compass's direction of a line along every
+# road of the bundled feed (geometry/CompassTests.kt; with TRACE_DIR, also the
+# journey of 27 Oct 2026 b), and the shapes.txt parser in
 # data/parser/GtfsParser.kt (geometry/ParserTests.kt). Compiles the REAL
 # source files; needs kotlinc and a JDK, no Android SDK.
 #
@@ -26,6 +28,11 @@ echo "== OffRoadTests =="
 "$KOTLINC" "$SRC/service/RouteGeometry.kt" "$HERE/geometry/Data213.kt" "$HERE/geometry/Data305.kt" \
     "$HERE/geometry/OffRoadTests.kt" -d "$OUT/o" 2>&1 | grep -A3 "error:" || true
 java -cp "$OUT/o:$KLIB/kotlin-stdlib.jar" OffRoadTestsKt | grep -v "^PASS" || status=1
+
+echo "== CompassTests =="
+python3 "$HERE/geometry/compass_extract.py" "$ROOT/app/src/main/assets/gtfs" "$OUT"
+"$KOTLINC" "$SRC/service/RouteGeometry.kt" "$HERE/geometry/CompassTests.kt" -d "$OUT/k" 2>&1 | grep -A3 "error:" || true
+java -Xmx3g -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -cp "$OUT/k:$KLIB/kotlin-stdlib.jar" CompassTestsKt "$OUT" | grep -v "^PASS" || status=1
 
 echo "== ParserTests =="
 "$KOTLINC" "$SRC/data/db/entity/Entities.kt" "$SRC/data/parser/GtfsParser.kt" \

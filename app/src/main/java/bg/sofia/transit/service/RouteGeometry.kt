@@ -1,5 +1,6 @@
 package bg.sofia.transit.service
 
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 
@@ -28,6 +29,16 @@ class RouteGeometry private constructor(
 ) {
     /** Where a position lies on the road: how far along, and how far off it. */
     data class Position(val along: Double, val offset: Double)
+
+    /** Which way a route runs near a point, for the compass (headingOf). */
+    sealed class Way {
+        /** No stretch of it near. */
+        object None : Way()
+        /** Stretches near running both ways: a route turning back along the same street. */
+        object Both : Way()
+        /** Its nearest stretch runs [bearing]. */
+        data class One(val bearing: Double) : Way()
+    }
 
     val length: Double get() = cum.last()
 
@@ -112,6 +123,28 @@ class RouteGeometry private constructor(
     fun nextStop(pos: Double, fromIdx: Int, margin: Double): Int? =
         (fromIdx.coerceAtLeast(0) until stopAlong.size).firstOrNull { stopAlong[it] >= pos - margin }
 
+    /**
+     * Every stretch of the road within [radius] of [lat]/[lon], as (how far
+     * off, the compass bearing the road runs there) — for telling a line's
+     * direction by compass (headingOf). The road, not the straight line
+     * between stops: between ХМС and ДЪРЖАВНА ПЕЧАТНИЦА 305 and 76 go round a
+     * block, the straight line runs 60° and the road 135-245° (27 Oct 2026):
+     * by the road the direction was plain as we pulled away, by the straight
+     * lines only 71 s later.
+     */
+    fun stretchesNear(lat: Double, lon: Double, radius: Double): List<Pair<Double, Double>> {
+        val px = lon * kx
+        val py = (lat - lat0) * KY
+        val near = ArrayList<Pair<Double, Double>>()
+        for (i in 0 until cum.size - 1) {
+            val dx = x[i + 1] - x[i]; val dy = y[i + 1] - y[i]
+            if (dx * dx + dy * dy < 1.0) continue          // under 1 m: no direction
+            val p = project(i, px, py)
+            if (p.offset <= radius) near += p.offset to (Math.toDegrees(atan2(dx, dy)) + 360.0) % 360.0
+        }
+        return near
+    }
+
     private fun project(i: Int, px: Double, py: Double): Position {
         val ax = x[i]; val ay = y[i]
         val dx = x[i + 1] - ax; val dy = y[i + 1] - ay
@@ -129,6 +162,45 @@ class RouteGeometry private constructor(
          * and straight-line distances agree where the road is straight.
          */
         private const val KY = 6_371_000.0 * Math.PI / 180.0
+
+        /**
+         * Which way a route runs at a point, from [near] — its stretches
+         * there as (how far off, bearing): the nearest one's bearing, unless
+         * another within [slack] of as near runs the other way (over
+         * [opposeDeg] apart), when it cannot be told.
+         */
+        fun headingOf(near: List<Pair<Double, Double>>, slack: Double, opposeDeg: Double): Way {
+            val nearest = near.minByOrNull { it.first } ?: return Way.None
+            val both = near.any { (d, b) ->
+                d <= nearest.first + slack && angleApart(b, nearest.second) > opposeDeg
+            }
+            return if (both) Way.Both else Way.One(nearest.second)
+        }
+
+        /**
+         * The direction told by compass, our heading [ours] against the way
+         * each direction's route runs here ([ways]): the one within
+         * [matchDeg], when every other runs beyond [opposeDeg] or has nothing
+         * near; null otherwise. A route near us both ways may be ours, so it
+         * stops the verdict: taken for "nothing near" it let the other
+         * direction win where a line goes out and back along one street
+         * (geometry/CompassTests.kt, along the roads trips take in the
+         * bundled feed: 1327 points told wrongly, 21 where the compass before
+         * was right; blocking, 301 and none).
+         */
+        fun compassVerdict(ways: List<Way>, ours: Double, matchDeg: Double, opposeDeg: Double): Int? {
+            val matching = ways.indices.filter { (ways[it] as? Way.One)?.let { w -> angleApart(w.bearing, ours) < matchDeg } == true }
+            if (matching.size != 1) return null
+            val others = ways.indices - matching.toSet()
+            return if (others.all { i -> ways[i].let { it is Way.None || (it is Way.One && angleApart(it.bearing, ours) > opposeDeg) } })
+                matching.first() else null
+        }
+
+        /** How far apart two bearings are, degrees 0-180. */
+        fun angleApart(a: Double, b: Double): Double {
+            val d = Math.abs(a - b) % 360.0
+            return if (d > 180.0) 360.0 - d else d
+        }
 
         /** A fix further than this from the road is not placed on it. */
         const val MAX_OFFSET = 60.0
