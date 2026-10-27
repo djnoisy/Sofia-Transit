@@ -2177,7 +2177,18 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         check("26.10 e tram 18: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     },
-    // 27 Oct 2026 (№114): 76 (A3114), 305 chosen, tracking begun aboard as
+    // 27 Oct 2026 (№114): 76 (A3114), 111 chosen, tracking begun on foot
+    // some 135 m from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ (A0170, a stop of 111 and 76
+    // alike), fixes vague and broken on the way (the underpass?); stood 20 m
+    // from the stop 08:40:30-08:41:07, 76 shown "now". "Where we waited" was
+    // the first fix within 30 m, taken walking at 6 km/h (under 10 counts
+    // as standing), 123 m from the stop: no boarding stop, the early rule
+    // not asked. 76 alone 11 m from us at the first reading (08:41:15); by
+    // metres taken at the third (08:42:16, 309 m). By the early rule, had
+    // the stop been told and 76 due, at the second (08:41:46): at the first,
+    // 76's report came as we pulled away (7 m in 5 s — standing).
+    "2026-10-27_76.txt" to { rp -> onlyOurs(rp, "27.10 bus 76 (111 chosen, begun walking to the stop)", "A81", "08:42:17") },
+    // The same 76 minutes later, b (№114): 305 chosen, tracking begun aboard as
     // it crawled (1.5-3.5 m/s for 1.5 min round the block between ХМС and
     // ДЪРЖАВНА ПЕЧАТНИЦА, 305's road too; departure taken at 08:47:24, no
     // boarding stop). 76
@@ -2187,7 +2198,7 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // matching our heading with straight lines between stops, not the road,
     // could not tell 305's direction round the block until 08:48:35. Ended
     // aboard.
-    "2026-10-27_76.txt" to { rp -> onlyOurs(rp, "27.10 bus 76 (305 chosen, begun crawling)", "A81", "08:48:57") }
+    "2026-10-27_76b.txt" to { rp -> onlyOurs(rp, "27.10 b bus 76 (305 chosen, begun crawling)", "A81", "08:48:57") }
 )
 
 /**
