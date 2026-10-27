@@ -328,9 +328,8 @@ class RealtimeRepository @Inject constructor() {
     private fun noteVanished(source: String, stopId: String, feed: GtfsRealtime.FeedMessage,
                              now: Long, dueNow: Map<String, Long>) {
         try {
-            val key = "$source|$stopId"
-            val before = seenAtStop[key]
-            seenAtStop[key] = SeenAtStop(now, dueNow.filterValues { it - now in VANISH_MARGIN_SEC..WATCH_AHEAD_SEC })
+            val before = seenAtStop.put("$source|$stopId",
+                SeenAtStop(now, dueNow.filterValues { it - now in VANISH_MARGIN_SEC..WATCH_AHEAD_SEC }))
             if (before == null || now - before.atSec > WATCH_GAP_SEC) return
             for ((tripId, was) in before.due) {
                 if (tripId in dueNow || was - now <= VANISH_MARGIN_SEC) continue
@@ -374,8 +373,9 @@ class RealtimeRepository @Inject constructor() {
                 (if (v.hasPosition()) " at %.6f,%.6f".format(java.util.Locale.US,
                     v.position.latitude, v.position.longitude) else "") +
                 (if (v.hasStopId()) ", stop ${v.stopId} ${v.currentStatus}" else "") +
-                ", reported ${clock(v.timestamp)}"
+                (if (v.hasTimestamp()) ", reported ${clock(v.timestamp)}" else "")
         }
+        if (feed.hasHeader() && feed.header.hasTimestamp()) parts += "feed of ${clock(feed.header.timestamp)}"
         return parts.joinToString("; ")
     }
 
