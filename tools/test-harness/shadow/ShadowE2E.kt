@@ -88,7 +88,8 @@ fun main(args: Array<String>) {
                 }
                 JourneyTrace.fix(loc, receivedMs)
                 follow(shadow.onFix(loc.time, receivedMs, loc.latitude, loc.longitude,
-                    if (loc.hasAccuracy()) loc.accuracy.toDouble() else null))
+                    if (loc.hasAccuracy()) loc.accuracy.toDouble() else null,
+                    if (loc.hasSpeed()) loc.speed.toDouble() else null))
                 lastLat = loc.latitude; lastLon = loc.longitude
             }
             if (t >= 10 && (t.toLong() % 30L) == 10L) {

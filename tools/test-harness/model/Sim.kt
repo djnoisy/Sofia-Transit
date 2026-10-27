@@ -114,7 +114,14 @@ class Gps(
     /** Within these spans fixes are vague: scattered by [vagueSigma], their accuracy [vagueAccuracy]. */
     val vague: List<ClosedFloatingPointRange<Double>> = emptyList(),
     val vagueSigma: Double = 30.0,
-    val vagueAccuracy: Double = 70.0
+    val vagueAccuracy: Double = 70.0,
+    /**
+     * Whether fixes carry the receiver's own speed: our true speed, give or
+     * take [speedSigma] — measured from the Doppler shift, it does not jump
+     * with the position. False as with a phone saving power.
+     */
+    val speeds: Boolean = true,
+    val speedSigma: Double = 0.2
 )
 
 class SimResult(val events: List<Pair<Double, RideModel.Event>>, val model: RideModel,
@@ -150,12 +157,20 @@ class Sim(
      * After every fix: the vehicle whose route the app says we are off, at a
      * time, given the model (for which vehicle is ours); null, never told.
      */
-    val offRoute: ((Double, RideModel) -> String?)? = null
+    val offRoute: ((Double, RideModel) -> String?)? = null,
+    /**
+     * The receiver's own speed at a time, m/s, where it is not our true
+     * speed by [ours] — as when [ours] carries a drift or jump of the
+     * positions, which the Doppler shift does not see; null, not given.
+     */
+    val speedAt: ((Double) -> Double?)? = null
 ) {
     fun run(): SimResult {
         val model = RideModel(chosenRoute)
         val rnd = Random(gps.seed)
         val vrnd = Random(gps.seed + 1000)
+        // Apart from the positions' draws, which the speeds leave as they were.
+        val srnd = Random(gps.seed + 2000)
         fun gauss() = rnd.nextDouble().let { u -> kotlin.math.sqrt(-2 * kotlin.math.ln(maxOf(u, 1e-12))) *
             cos(2 * Math.PI * rnd.nextDouble()) }
         val events = ArrayList<Pair<Double, RideModel.Event>>()
@@ -171,8 +186,11 @@ class Sim(
                     p = p.shift(gps.jumpM * cos(a), gps.jumpM * sin(a))
                 }
                 val trueMs = T0 + (t * 1000).toLong()
+                val speed = if (!gps.speeds) null
+                    else (speedAt?.invoke(t) ?: ours(t - 0.5).dist(ours(t + 0.5)))
+                        .let { maxOf(0.0, it + (srnd.nextDouble() * 2 - 1) * gps.speedSigma) }
                 model.onFix(RideModel.Fix(trueMs + fixClockAheadMs, trueMs + phoneClockAheadMs + 60,
-                    p.lat, p.lon, if (vague) gps.vagueAccuracy else gps.accuracy)).forEach { events += t to it }
+                    p.lat, p.lon, if (vague) gps.vagueAccuracy else gps.accuracy, speed)).forEach { events += t to it }
                 offRoute?.let { o -> model.onOffRoute(o(t, model)) }
             }
             if (t >= 5 && ((t - 5) % 30.0) == 0.0) {

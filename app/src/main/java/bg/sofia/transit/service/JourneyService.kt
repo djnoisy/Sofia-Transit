@@ -2395,7 +2395,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val shadow = rideShadow ?: return
         try {
             follow(shadow, shadow.onFix(loc.time, receivedMs, loc.latitude, loc.longitude,
-                if (loc.hasAccuracy()) loc.accuracy.toDouble() else null))
+                if (loc.hasAccuracy()) loc.accuracy.toDouble() else null,
+                if (loc.hasSpeed()) loc.speed.toDouble() else null))
         } catch (_: Throwable) { }
     }
 

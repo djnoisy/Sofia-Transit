@@ -494,6 +494,76 @@ fun main(args: Array<String>) {
             withdrawn(r).isEmpty() && off?.second?.key == "V213" && off.first >= j.tArriveOrlov + 8 + 360) { story(r) }
     }
 
+    // ── Got off and walking away, our fixes jumping: no "we went on" ──
+    run {
+        // 26 Oct 2026, d (ЦЕНТРАЛНИ ХАЛИ): walking away from tram 22 our
+        // fixes drifted and came back 50 m in a second — vehicle speed by the
+        // positions — and walking on made the 100 m: "we went on", the tram
+        // withdrawn. The receiver's own speed showed walking throughout. Here:
+        // 213 leaves ПЛ. ОРЛОВ МОСТ and we walk back along the road at 1.3
+        // m/s, 100 m, then 200 m to one side; for 30 s our fixes stay behind
+        // and slide 20-80 m aside, back or ahead, then come back at once, at
+        // moments from 20 s before 213 leaves to 90 s after. Got off, never
+        // withdrawn (before: withdrawn in 2 of the first 10).
+        val j = Journey(alight = true)
+        val p = j.p213
+        val s0 = p.along(j.stopSpot)
+        fun walk(t: Double): Pt {
+            val d = 1.3 * (t - j.tLeaveOrlov)
+            return when {
+                d <= 0 -> j.ours(t)
+                d <= 100 -> p.at(s0 - d).shift(4.0, 4.0)
+                else -> p.at(s0 - 100).shift(4.0 + minOf(d - 100, 200.0), 4.0)
+            }
+        }
+        val bad = ArrayList<String>()
+        var cases = 0
+        for (size in listOf(20.0, 35.0, 50.0, 80.0))
+            for (way in listOf("aside", "back", "ahead"))
+                for (lag in listOf(-20.0, 0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 75.0, 90.0)) {
+                    val from = j.tLeaveOrlov + lag
+                    val slide = { k: Double ->
+                        val m = size * minOf(k, 20.0) / 20.0
+                        val q = walk(from)
+                        when (way) {
+                            "aside" -> q.shift(-m, 0.0)
+                            "back" -> p.at(p.along(q) - m)
+                            else -> p.at(p.along(q) + m)
+                        }
+                    }
+                    cases++
+                    val r = Sim({ t -> val k = t - from; if (k in 0.0..30.0) slide(k) else walk(t) },
+                        j.vehicles(), j.tLeaveOrlov + 600, j.gps, j.chosen,
+                        speedAt = { t -> walk(t - 0.5).dist(walk(t + 0.5)) }).run()
+                    val off = alighted(r).singleOrNull()
+                    if (withdrawn(r).isNotEmpty() || switched(r).isNotEmpty() || off?.second?.key != "V213")
+                        bad += "${size.toInt()} m $way from ${lag.toInt()} s: ${story(r)}"
+                }
+        check("got off, walking 300 m away, fixes sliding 20-80 m and snapping back ($cases cases): " +
+            "got off, never withdrawn", bad.isEmpty()) { bad.joinToString(" | ") }
+    }
+
+    // ── The receiver's speed reading nothing while we ride on ──
+    run {
+        // In a vehicle the feed does not have, another taken for it; it
+        // leaves us at a stop, we move on after 60 s at 11 m/s — and the
+        // receiver's own speed reads 0 for the first 60 s of it (a fault of
+        // its own; the positions are right). Vehicle speed is then not
+        // counted, but the positions still show we did not stay: never
+        // "got off"; withdrawn once the speed is told again, at the latest.
+        val p = Feed.path("A4508")
+        val s0 = p.along(Feed.stop("A1196"))
+        val dep = 10.0 + 1500 / 11.0 + 60.0
+        val ride = Mover(p, s0).stand(10.0).drive(s0 + 1500, 11.0).stand(60.0).drive(s0 + 3500, 11.0)
+        val other = Mover(p, s0).stand(11.0).drive(s0 + 1500, 11.0).stand(20.0).drive(s0 + 5000, 11.0)
+        val r = Sim({ ride.at(it) }, listOf(SimVehicle("VOTHER", "A99-A1-1-1-1", "A99", { other.at(it) }, phase = 13.0)),
+            until = dep + 180, chosenRoute = "A85",
+            speedAt = { t -> if (t in dep..dep + 60) 0.0 else ride.at(t - 0.5).dist(ride.at(t + 0.5)) }).run()
+        val w = withdrawn(r).firstOrNull()
+        check("in a silent vehicle, the receiver's speed 0 for 60 s as we move on: never got off, withdrawn by 90 s",
+            alighted(r).isEmpty() && w != null && w.first <= dep + 90) { "moved on ${dep.toInt()}s; ${story(r)}" }
+    }
+
     // ── A bus of the chosen line the other way, at the first choice ──
     run {
         val bad = ArrayList<String>()
@@ -2141,18 +2211,20 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // ahead of us. The early rule was not judged at the first reading (the
     // tram's report taken before we moved) and took it at the second
     // (12:41:21, 48 m, the zone ahead). Off at ЦЕНТРАЛНИ ХАЛИ, then on foot
-    // to the stop of 18; stopped by hand at 12:48:41. Getting off was not
-    // concluded: at 12:46:52 our fixes jumped some 50 m back from a drift,
-    // which read as vehicle speed, and walking on took us 100 m from where
-    // the tram first left us — "we went on": withdrawn at 12:47:59. Without
-    // the drift, got off at 12:48:01 (HANDOVER, "Пътуване от 26.10.2026 d").
+    // to the stop of 18; stopped by hand at 12:48:41. At 12:46:52 our fixes
+    // came back 50 m in a second from a drift — vehicle speed by the
+    // positions — and walking on took us 100 m from where the tram first
+    // left us: "we went on", withdrawn at 12:47:59 (№113). The receiver's own
+    // speed read 1.3 m/s throughout, walking (walkingByReceiver): got off,
+    // 12:48:01 — as without the drift.
     "2026-10-26_22.txt" to { rp ->
         val id = rp.events.firstOrNull()
         check("26.10 d tram 22: 22 taken by the boarding stop by 12:41:25",
             (id?.event as? Event.Identified)?.let { it.key == "TM4155" && it.byBoardingStop } == true &&
             clock(id!!.atMs) <= "12:41:25") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
-        check("26.10 d tram 22: no other vehicle taken", rp.events.none {
-            (it.event as? Event.Identified)?.key.let { k -> k != null && k != "TM4155" } || it.event is Event.Switched }) {
+        val off = rp.events.getOrNull(1)
+        check("26.10 d tram 22: got off between 12:47:30 and 12:48:30, nothing else", rp.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "12:47:30".."12:48:30") {
             rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
         val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "TM4155" }
         check("26.10 d tram 22: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {

@@ -74,11 +74,14 @@ class RideModel(
      * One position of ours. [timeMs] is the receiver's own time of the fix
      * (Location.time, satellite time for GPS) — the clock the vehicles'
      * reports are on; [receivedMs] is the phone's clock when it arrived.
-     * [accuracy] in metres, null when not given.
+     * [accuracy] in metres, null when not given; [speed] in m/s, the
+     * receiver's own measure (from the Doppler shift, not from positions),
+     * null when not given — as from a phone saving power.
      */
     data class Fix(
         val timeMs: Long, val receivedMs: Long,
-        val lat: Double, val lon: Double, val accuracy: Double?
+        val lat: Double, val lon: Double, val accuracy: Double?,
+        val speed: Double? = null
     )
 
     /**
@@ -237,7 +240,8 @@ class RideModel(
         val end = positionAt(at)
         val start = positionAt(at - SPEED_WINDOW_MS)
         if (end != null && start != null &&
-            distance(end.lat, end.lon, start.lat, start.lon) >= VEHICLE_SPEED_MPS * SPEED_WINDOW_MS / 1000.0) {
+            distance(end.lat, end.lon, start.lat, start.lon) >= VEHICLE_SPEED_MPS * SPEED_WINDOW_MS / 1000.0 &&
+            !walkingByReceiver(at - SPEED_WINDOW_MS, at)) {
             lastVehicleSpeedMs = at
         }
         val events = ArrayList<Event>()
@@ -499,6 +503,40 @@ class RideModel(
         val hx = (us.lon - before.lon) * KY * cos(Math.toRadians(us.lat))
         val hy = (us.lat - before.lat) * KY
         return if (hypot(hx, hy) >= ZONE_MIN_MPS * ZONE_HEADING_MS / 1000.0) hx to hy else null
+    }
+
+    /**
+     * Whether the receiver's own speed says we went no faster than walking
+     * (WALK_MPS) from [from] to [to]: its average where it was measured from
+     * second to second — between accurate fixes that carry it, no more than
+     * RECEIVER_GAP_MS apart — over nearly all of that time (RECEIVER_COVER),
+     * so that a gap in the middle of it cannot hide a ride. Measured from
+     * the Doppler shift, it does not jump with the positions: walking away from
+     * tram 22 at ЦЕНТРАЛНИ ХАЛИ (26 Oct 2026) our fixes came back 50 m in a
+     * second from a drift — vehicle speed by the positions, and with walking
+     * on, "we went on": the tram withdrawn instead of getting off — while it
+     * read 1.3 m/s throughout. Over 26 recorded journeys it shows walking at
+     * 36 of 6594 moments of vehicle speed by the positions: those 14 s, and
+     * the first seconds of moving off or of tracking, as the positions
+     * settle. Across a gap it says nothing — standing on both sides of a hop
+     * between stops with no fixes in it reads as walking (review of 27 Oct
+     * 2026). False when it cannot tell: the positions alone decide, as with
+     * a phone saving power, whose fixes carry no speed.
+     */
+    private fun walkingByReceiver(from: Long, to: Long): Boolean {
+        var metres = 0.0
+        var covered = 0L
+        var prev: Fix? = null
+        for (f in track) {
+            if (f.timeMs < from || f.timeMs > to || (f.accuracy ?: 0.0) > ACCURATE || f.speed == null) continue
+            val p = prev
+            prev = f
+            if (p == null || f.timeMs - p.timeMs > RECEIVER_GAP_MS) continue
+            val dt = f.timeMs - p.timeMs
+            metres += dt / 1000.0 * (f.speed + p.speed!!) / 2
+            covered += dt
+        }
+        return covered >= RECEIVER_COVER * (to - from) && metres <= WALK_MPS * covered / 1000.0
     }
 
     /** Whether we were moving at [t] (see wayAt). */
@@ -1029,6 +1067,10 @@ class RideModel(
         const val MOVING_WINDOW_MS = 10_000L
         /** Vehicle speed this shortly before ours was first seen apart still counts as after. */
         const val LEAD_MS = 5_000L
+        /** Fixes carrying the receiver's speed this far apart, or nearer, measure it without a gap. */
+        const val RECEIVER_GAP_MS = 3_000L
+        /** …and over this share of the time judged, at least (17 of 20 s), or the positions decide. */
+        const val RECEIVER_COVER = 0.85
         /** How far we must have gone on, after ours left, for it not to have been ours. */
         const val WENT_ON_M = 100.0
         /** Got off: no further from where we were as ours left than this… */

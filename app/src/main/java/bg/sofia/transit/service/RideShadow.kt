@@ -42,8 +42,10 @@ class RideShadow(
 
     /** One fix of ours. Returns what the model concluded on it. */
     @Synchronized
-    fun onFix(timeMs: Long, receivedMs: Long, lat: Double, lon: Double, accuracy: Double?): List<RideModel.Event> {
-        val f = RideModel.Fix(timeMs, receivedMs, traced6(lat), traced6(lon), accuracy?.let { traced1(it) })
+    fun onFix(timeMs: Long, receivedMs: Long, lat: Double, lon: Double, accuracy: Double?,
+              speed: Double? = null): List<RideModel.Event> {
+        val f = RideModel.Fix(timeMs, receivedMs, traced6(lat), traced6(lon), accuracy?.let { traced1(it) },
+            speed?.let { traced1(it) })
         return tell(receivedMs, model.onFix(f))
     }
 

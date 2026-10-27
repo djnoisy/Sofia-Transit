@@ -12,7 +12,8 @@ fun main(args: Array<String>) {
     var cur: Triple<Long, Long, MutableList<RideShadow.Seen>>? = null; var exp = 0
     fun flush() { val r = cur ?: return; cur = null; sh.onReading(r.first, r.second, r.third) }
     for (l in lines) { val p = l.split(","); when (p[0]) {
-        "F" -> { flush(); sh.onFix(p[2].toLong(), p[1].toLong(), p[3].toDouble(), p[4].toDouble(), p[5].toDoubleOrNull()) }
+        "F" -> { flush(); sh.onFix(p[2].toLong(), p[1].toLong(), p[3].toDouble(), p[4].toDouble(), p[5].toDoubleOrNull(),
+            p.getOrNull(6)?.toDoubleOrNull()) }
         "V" -> { flush(); cur = Triple(p[1].toLong(), p[2].toLong(), ArrayList()); exp = p[4].toInt() }
         "v" -> { val r = cur ?: continue; r.third += RideShadow.Seen(p[3], p[1], p[2], p[4].toLong(), p[5].toDouble(), p[6].toDouble()); if (r.third.size == exp) flush() }
         "B" -> { flush(); if (p[2].isEmpty()) sh.boardingUntold()

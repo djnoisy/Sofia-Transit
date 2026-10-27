@@ -58,7 +58,7 @@ fun replay(start: String, lines: List<String>, due: ((String) -> Boolean)? = nul
             "F" -> {
                 flush()
                 val f = RideModel.Fix(p[2].toLong(), p[1].toLong(), p[3].toDouble(), p[4].toDouble(),
-                    p[5].toDoubleOrNull())
+                    p[5].toDoubleOrNull(), p.getOrNull(6)?.toDoubleOrNull())
                 model.onFix(f).forEach { events += Concluded(f.receivedMs, it) }
             }
             "V" -> {
