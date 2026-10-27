@@ -2179,7 +2179,7 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     },
     // 27 Oct 2026 (№114): 76 (A3114), 111 chosen, tracking begun on foot
     // some 135 m from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ (A0170, a stop of 111 and 76
-    // alike), fixes vague and broken on the way (the underpass?); stood 20 m
+    // alike), fixes vague and broken on the way (power saving left on); stood 20 m
     // from the stop 08:40:30-08:41:07, 76 shown "now". "Where we waited" was
     // the first fix within 30 m, taken walking at 6 km/h (under 10 counts
     // as standing), 123 m from the stop: no boarding stop, the early rule
