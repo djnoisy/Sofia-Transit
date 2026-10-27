@@ -424,11 +424,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         private const val VEHICLE_BESIDE_MEMORY_MS = 90_000L
 
         /**
-         * The stop we board at is the one nearest the first settled fix taken
-         * before departure — provided it is this close. Farther than this,
-         * the passenger was not waiting at a stop of this line.
+         * The stop we board at is the one nearest where we waited — the
+         * last place we stood this close to a stop of the line before
+         * departure (WaitingPlace) — provided it is this close. Farther than
+         * this, the passenger was not waiting at a stop of this line.
          */
         private const val BOARDING_REF_MAX_DIST = 60.0
+        /** Moved this far from where arrivals were last collected, by an accurate fix, they are collected afresh. */
+        private const val BOARDING_REFETCH_M = 75.0
         /** The log tag of the model's lines. */
         private const val MODEL_TAG = "RideModel"
         /** Stops around us whose arrivals are collected while waiting. */
@@ -845,10 +848,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var offRouteToldKey: String? = null
 
     // ── Boarding: where we got on, and what was due there ────────────────
-    /** The first settled, accurate fix before departure; see onFix. */
-    private var boardingRefLat = 0.0
-    private var boardingRefLon = 0.0
-    private var boardingRefSet = false
+    /** Where we waited: the last place we stood near a stop of the line before departure (WaitingPlace). */
+    private val waitingPlace = WaitingPlace()
+    /** Where arrivals around us were last collected (fetchBoardingArrivals). */
+    private var boardingFetchLat = 0.0
+    private var boardingFetchLon = 0.0
     /**
      * Where we were once the receiver had settled, whether standing or not:
      * the point departure is measured from (DEPARTURE_MIN_DISPLACEMENT).
@@ -1680,11 +1684,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         updateHeading(loc, accurateFix)
 
         // Where we are before departure, once the receiver has settled: the
-        // point departure is measured from (see recordSpeed), and — if we
-        // are standing there — the reference for telling which stop we board
-        // at (see findBoardingStop). Started aboard a moving vehicle, there is
-        // no stop we boarded at: that reference is not taken, as it never
-        // was when departure used to be detected before this moment.
+        // point departure is measured from (see recordSpeed), and where we
+        // waited — the reference for telling which stop we board at (see
+        // findBoardingStop). Started aboard a moving vehicle, there is no stop
+        // we boarded at: that reference is not taken, as it never was when
+        // departure used to be detected before this moment.
         val settledFix = movingSinceMs == 0L && accurateFix && timersStartMs != 0L &&
             System.currentTimeMillis() - timersStartMs >= DIRECTION_SETTLE_MS
         if (!departureRefSet && settledFix) {
@@ -1692,11 +1696,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             departureRefLat = loc.latitude
             departureRefLon = loc.longitude
         }
-        if (!boardingRefSet && settledFix &&
-            (shortSpeedKmh() ?: 0.0) < MIN_SPEED_FOR_FOREIGN_CHECK) {
-            boardingRefSet = true
-            boardingRefLat = loc.latitude
-            boardingRefLon = loc.longitude
+        // Where we waited: where we last stood before departure (WaitingPlace).
+        if (settledFix) {
+            val ownMps = when {
+                loc.hasSpeed() -> loc.speed.toDouble()
+                gapMs in 1..30_000 && (prevLat != 0.0 || prevLon != 0.0) ->
+                    LocationHelper.distanceMetres(prevLat, prevLon, loc.latitude, loc.longitude) / (gapMs / 1000.0)
+                else -> null
+            }
+            waitingPlace.onFix(System.currentTimeMillis(), loc.latitude, loc.longitude, ownMps, shortSpeedKmh())
         }
 
         // A moment at vehicle speed: progress for the no-progress limit,
@@ -2013,13 +2021,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // metres out of that stop — and its arrival would be announced
             // as we leave it: "Спирка, МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ" on one test
             // ride, the bus already moving. It passes unspoken; the next
-            // stop is announced on leaving it, as always.
-            silentArrivalIdx = if (movingSinceMs != 0L && boardingRefSet &&
-                bestDist <= ARRIVAL_RADIUS &&
-                stopLatLon.getOrNull(best)?.let { (sLat, sLon) ->
-                    LocationHelper.distanceMetres(boardingRefLat, boardingRefLon, sLat, sLon) <=
-                        BOARDING_REF_MAX_DIST
-                } == true) best else null
+            // stop is announced on leaving it, as always. That stop only, not
+            // any within reach of where we waited: with stops 100 m apart, a
+            // stand at a light between them silenced the next one too
+            // (review of 27 Oct 2026).
+            silentArrivalIdx = if (movingSinceMs != 0L && bestDist <= ARRIVAL_RADIUS &&
+                nearestToWaiting(stopLatLon)?.takeIf { it.second <= BOARDING_REF_MAX_DIST }?.first == best)
+                best else null
 
             FileLogger.i(TAG, "First fix: snapped to stop #$best " +
                 "(${orderedStops[best].stopName}, ${bestDist.toInt()} m${measuredHow(loc, best)})")
@@ -3296,7 +3304,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         boardingJob = serviceScope.launch {
             while (isActive && movingSinceMs == 0L) {
                 val now = System.currentTimeMillis()
-                if (lastLat != 0.0 && now - lastBoardingFetchMs >= BOARDING_REFRESH_MS) {
+                // Also once we have moved off where they were collected:
+                // walking to the stop, it may lie beyond them. By an accurate
+                // fix: vague ones jumping about indoors would fetch on every
+                // turn of this loop (review of 27 Oct 2026).
+                val moved = lastBoardingFetchMs != 0L &&
+                    (lastAccuracy ?: Float.MAX_VALUE) <= DEPARTURE_MAX_ACCURACY &&
+                    LocationHelper.distanceMetres(boardingFetchLat, boardingFetchLon, lastLat, lastLon) >
+                        BOARDING_REFETCH_M
+                if (lastLat != 0.0 && (now - lastBoardingFetchMs >= BOARDING_REFRESH_MS || moved)) {
                     lastBoardingFetchMs = now
                     try {
                         fetchBoardingArrivals(lastLat, lastLon)
@@ -3312,6 +3328,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     private suspend fun fetchBoardingArrivals(lat: Double, lon: Double) {
+        withContext(Dispatchers.Main) { boardingFetchLat = lat; boardingFetchLon = lon }
         val stops = gtfsRepo.getNearestStops(lat, lon, limit = 6).filter {
             LocationHelper.distanceMetres(lat, lon, it.stopLat, it.stopLon) <= BOARDING_STOPS_RADIUS
         }
@@ -3334,29 +3351,33 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     /**
      * The stop we boarded at: the one of the line being followed nearest to
-     * where we stood before departure, if that is close enough — which needs
+     * where we waited (WaitingPlace), if that is close enough — which needs
      * the direction, since the stops on either side of a street are
      * different stops. Null while it cannot be worked out yet, and with no
      * ids when it cannot be told at all.
      */
     private suspend fun findBoardingStop(): BoardingStop? {
-        if (!boardingRefSet || orderedStops.isEmpty() || candidates.isNotEmpty()) return null
+        if (orderedStops.isEmpty() || candidates.isNotEmpty()) return null
         val stops = orderedStops
-        var best = -1
-        var bestD = Double.MAX_VALUE
-        stopLatLon.forEachIndexed { i, (sLat, sLon) ->
-            val d = LocationHelper.distanceMetres(boardingRefLat, boardingRefLon, sLat, sLon)
-            if (d < bestD) { bestD = d; best = i }
-        }
-        if (best < 0 || bestD > BOARDING_REF_MAX_DIST) {
-            return BoardingStop("", if (best < 0) null else bestD, emptySet())
-        }
+        val (best, bestD) = nearestToWaiting(stopLatLon) ?: return null
+        if (bestD > BOARDING_REF_MAX_DIST) return BoardingStop("", bestD, emptySet())
         // The two lists are replaced one after the other; caught between, ask again later.
         if (best !in stops.indices) return null
         val ids = try {
             gtfsRepo.stopIdsOfSamePlace(stops[best].stopId).toSet()
         } catch (e: Exception) { setOf(stops[best].stopId) }
         return BoardingStop(stops[best].stopName, bestD, ids)
+    }
+
+    /**
+     * The stop of [latLons] nearest where we waited (WaitingPlace.placeFor),
+     * and how far; null before that is known, or with no stops.
+     */
+    private fun nearestToWaiting(latLons: List<Pair<Double, Double>>): Pair<Int, Double>? {
+        val (wLat, wLon) = waitingPlace.placeFor(latLons, BOARDING_REF_MAX_DIST) ?: return null
+        return latLons.indices.map { i ->
+            i to LocationHelper.distanceMetres(wLat, wLon, latLons[i].first, latLons[i].second)
+        }.minByOrNull { it.second }
     }
 
     /**
@@ -3478,7 +3499,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastDwellHoldLogMs = 0L
         lastStopAnnouncement = null
         repeatGuardArmed = false
-        boardingRefSet = false
+        waitingPlace.reset()
         departureRefSet = false
         silentArrivalIdx = null
         notApproachingSinceMs = 0L
