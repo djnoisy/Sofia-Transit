@@ -104,6 +104,13 @@ class RealtimeRepository @Inject constructor() {
         private const val CACHE_TTL_MS = 20_000L      // 20 seconds
         private const val VEHICLE_POSITIONS_URL = "$BASE_URL/vehicle-positions"
         private val SOFIA_ZONE = ZoneId.of("Europe/Sofia")
+        /** Arrivals watched for dropping out of the feed: due this soon… */
+        private const val WATCH_AHEAD_SEC = 30 * 60L
+        /** …but more than this away: nearer, the vehicle may just have come. */
+        private const val VANISH_MARGIN_SEC = 60L
+        /** Looks further apart than this are not compared. */
+        private const val WATCH_GAP_SEC = 10 * 60L
+        private val CLOCK = DateTimeFormatter.ofPattern("HH:mm:ss")
     }
 
     // ── Trip Updates ─────────────────────────────────────────────────────
@@ -281,6 +288,8 @@ class RealtimeRepository @Inject constructor() {
                        "filteredOutForUnknownRoute=$filteredOutForUnknownRoute, " +
                        "duplicateTripIds=$duplicateTripIds, " +
                        "groupedArrivals=${arrivals.size}")
+            noteVanished("arrivals", stopId, feed, now,
+                rawList.filter { it.tripId.isNotEmpty() }.groupBy { it.tripId }.mapValues { (_, l) -> l.minOf { it.epoch } })
 
             arrivals.map { (key, epochs) ->
                 val (routeId, headsign) = key.split("|", limit = 2)
@@ -299,6 +308,79 @@ class RealtimeRepository @Inject constructor() {
             emptyList()
         }
     }
+
+    // ── Arrivals that drop out of the feed (only logged) ──────────────────
+    /** The trips due at a stop at the last look: trip id → arrival, epoch s. */
+    private class SeenAtStop(val atSec: Long, val due: Map<String, Long>)
+
+    /** By who looked and the stop: the two lookups filter differently. */
+    private val seenAtStop = java.util.concurrent.ConcurrentHashMap<String, SeenAtStop>()
+
+    /**
+     * Logs what the feed now holds for a trip that was due at [stopId] at
+     * [source]'s last look there (within WATCH_GAP_SEC), within
+     * WATCH_AHEAD_SEC, and is not due there now ([dueNow]: trip id → arrival)
+     * while that arrival is still over VANISH_MARGIN_SEC away — not a vehicle
+     * that has come and gone. The arrival of tram 18 at ЦЕНТРАЛНИ ХАЛИ
+     * dropped out this way 6 min before the tram came (26 Oct 2026), and the
+     * log could not tell why. Only logs: changes nothing shown or decided.
+     */
+    private fun noteVanished(source: String, stopId: String, feed: GtfsRealtime.FeedMessage,
+                             now: Long, dueNow: Map<String, Long>) {
+        try {
+            val key = "$source|$stopId"
+            val before = seenAtStop[key]
+            seenAtStop[key] = SeenAtStop(now, dueNow.filterValues { it - now in VANISH_MARGIN_SEC..WATCH_AHEAD_SEC })
+            if (before == null || now - before.atSec > WATCH_GAP_SEC) return
+            for ((tripId, was) in before.due) {
+                if (tripId in dueNow || was - now <= VANISH_MARGIN_SEC) continue
+                FileLogger.i(TAG, "Arrival gone at $stopId ($source): trip $tripId, was due ${clock(was)}; " +
+                    describeTrip(feed, tripId, stopId))
+            }
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "noteVanished failed: ${e.message}")
+        }
+    }
+
+    /** What the trip-updates [feed] and the vehicle feed at hand (not fetched) hold for [tripId]. */
+    private fun describeTrip(feed: GtfsRealtime.FeedMessage, tripId: String, stopId: String): String {
+        fun timeOf(stu: GtfsRealtime.TripUpdate.StopTimeUpdate): String = when {
+            stu.hasArrival() && stu.arrival.hasTime() -> clock(stu.arrival.time)
+            stu.hasDeparture() && stu.departure.hasTime() -> clock(stu.departure.time)
+            else -> "no time"
+        }
+        val parts = ArrayList<String>()
+        val updates = feed.entityList.filter { it.hasTripUpdate() && it.tripUpdate.trip.tripId == tripId }
+        if (updates.isEmpty()) parts += "no trip update now"
+        for (entity in updates) {
+            val tu = entity.tripUpdate
+            val stus = tu.stopTimeUpdateList
+            val sb = StringBuilder("trip update ${tu.trip.scheduleRelationship}, ${stus.size} stops")
+            if (stus.isNotEmpty()) sb.append(" from ${stus.first().stopId} ${timeOf(stus.first())}" +
+                " to ${stus.last().stopId} ${timeOf(stus.last())}")
+            val here = stus.firstOrNull { it.stopId == stopId }
+            sb.append(if (here == null) ", $stopId not among them"
+                else ", at $stopId ${timeOf(here)} ${here.scheduleRelationship}")
+            if (tu.hasVehicle() && tu.vehicle.id.isNotEmpty()) sb.append(", vehicle ${tu.vehicle.id}")
+            if (tu.hasTimestamp()) sb.append(", updated ${clock(tu.timestamp)}")
+            parts += sb.toString()
+        }
+        val cached = feedCache[VEHICLE_POSITIONS_URL]
+        parts += if (cached == null) "no vehicle feed at hand" else {
+            val age = (System.currentTimeMillis() - cached.fetchedAtMs) / 1000
+            val v = cached.feed.entityList.firstOrNull { it.hasVehicle() && it.vehicle.trip.tripId == tripId }?.vehicle
+            if (v == null) "not in the vehicle feed (fetched $age s ago)"
+            else "in the vehicle feed (fetched $age s ago): ${v.vehicle.id}" +
+                (if (v.hasPosition()) " at %.6f,%.6f".format(java.util.Locale.US,
+                    v.position.latitude, v.position.longitude) else "") +
+                (if (v.hasStopId()) ", stop ${v.stopId} ${v.currentStatus}" else "") +
+                ", reported ${clock(v.timestamp)}"
+        }
+        return parts.joinToString("; ")
+    }
+
+    private fun clock(epochSec: Long): String =
+        Instant.ofEpochSecond(epochSec).atZone(SOFIA_ZONE).format(CLOCK)
 
     // ── Upcoming Trips at Nearby Stops (for Journey screen) ───────────────
     /**
@@ -352,6 +434,9 @@ class RealtimeRepository @Inject constructor() {
                     )
                 }
             }
+            val byStop = result.groupBy { it.stopId }
+            for (id in stopIds) noteVanished("upcoming", id, feed, now,
+                byStop[id].orEmpty().groupBy { it.tripId }.mapValues { (_, l) -> l.minOf { it.arrivalEpoch } })
             result
         } catch (e: Exception) {
             FileLogger.e(TAG, "Error fetching upcoming trips: ${e.message}")

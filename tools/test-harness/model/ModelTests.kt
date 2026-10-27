@@ -494,6 +494,42 @@ fun main(args: Array<String>) {
             withdrawn(r).isEmpty() && off?.second?.key == "V213" && off.first >= j.tArriveOrlov + 8 + 360) { story(r) }
     }
 
+    // ── Got off and walking away, our fixes drifting aside and snapping back ──
+    run {
+        // 26 Oct 2026, d (ЦЕНТРАЛНИ ХАЛИ): as 213 leaves we walk back along
+        // the road at 1.3 m/s, 100 m, then 200 m to one side; meanwhile, for
+        // 30 s, our fixes stay behind and drift 35 m off the other way, then
+        // come back at once — over 50 m in a second, vehicle speed. Walking
+        // on then takes us over 100 m from where 213 first left us. Got off,
+        // never withdrawn: a place walking reaches is no "we went on". The
+        // drift at moments from 20 s before 213 leaves to 90 s after (before
+        // the fix, withdrawn in two of them).
+        val j = Journey(alight = true)
+        val p = j.p213
+        val s0 = p.along(j.stopSpot)
+        val walk = { t: Double ->
+            val d = 1.3 * (t - j.tLeaveOrlov)
+            when {
+                d <= 0 -> j.ours(t)
+                d <= 100 -> p.at(s0 - d).shift(4.0, 4.0)
+                else -> p.at(s0 - 100).shift(4.0 + minOf(d - 100, 200.0), 4.0)
+            }
+        }
+        val bad = ArrayList<String>()
+        for (lag in listOf(-20.0, 0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 75.0, 90.0)) {
+            val from = j.tLeaveOrlov + lag
+            val r = Sim({ t ->
+                val k = t - from
+                if (k in 0.0..30.0) walk(from).shift(-35.0 * minOf(k, 20.0) / 20.0, 0.0) else walk(t)
+            }, j.vehicles(), j.tLeaveOrlov + 600, j.gps, j.chosen).run()
+            val off = alighted(r).singleOrNull()
+            if (withdrawn(r).isNotEmpty() || switched(r).isNotEmpty() || off?.second?.key != "V213")
+                bad += "drift from ${lag.toInt()} s: ${story(r)}"
+        }
+        check("got off, walking 300 m away, fixes drifting 35 m and snapping back: got off, never withdrawn",
+            bad.isEmpty()) { bad.joinToString(" | ") }
+    }
+
     // ── A bus of the chosen line the other way, at the first choice ──
     run {
         val bad = ArrayList<String>()
@@ -2141,18 +2177,19 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     // ahead of us. The early rule was not judged at the first reading (the
     // tram's report taken before we moved) and took it at the second
     // (12:41:21, 48 m, the zone ahead). Off at ЦЕНТРАЛНИ ХАЛИ, then on foot
-    // to the stop of 18; stopped by hand at 12:48:41. Getting off was not
-    // concluded: at 12:46:52 our fixes jumped some 50 m back from a drift,
-    // which read as vehicle speed, and walking on took us 100 m from where
-    // the tram first left us — "we went on": withdrawn at 12:47:59. Without
-    // the drift, got off at 12:48:01 (HANDOVER, "Пътуване от 26.10.2026 d").
+    // to the stop of 18; stopped by hand at 12:48:41. At 12:46:52 our fixes
+    // jumped some 50 m back from a drift, which read as vehicle speed, and
+    // walking on took us 100 m from where the tram first left us — "we went
+    // on": withdrawn at 12:47:59 (№113). Walking reaches that far: no longer
+    // (wentOn); getting off is due 2 min after the jump, after the end of
+    // the trace — see the variant. Without the drift, got off at 12:48:01
+    // (HANDOVER, "Пътуване от 26.10.2026 d").
     "2026-10-26_22.txt" to { rp ->
         val id = rp.events.firstOrNull()
         check("26.10 d tram 22: 22 taken by the boarding stop by 12:41:25",
             (id?.event as? Event.Identified)?.let { it.key == "TM4155" && it.byBoardingStop } == true &&
             clock(id!!.atMs) <= "12:41:25") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
-        check("26.10 d tram 22: no other vehicle taken", rp.events.none {
-            (it.event as? Event.Identified)?.key.let { k -> k != null && k != "TM4155" } || it.event is Event.Switched }) {
+        check("26.10 d tram 22: nothing else — not withdrawn on foot", rp.events.size == 1) {
             rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
         val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "TM4155" }
         check("26.10 d tram 22: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
@@ -2262,6 +2299,20 @@ fun movedBack(lines: List<String>, back: Double): List<String> {
 
 /** Recorded journeys replayed as they would have been with poorer positions, by file name. */
 val variants: Map<String, (String, List<String>) -> Unit> = mapOf(
+    // 26 Oct 2026, d: had we stood on at the stop of 18 for 90 s more
+    // instead of stopping by hand at 12:48:41, getting off concluded 2 min
+    // after the jump of our fixes (12:46:52) — not withdrawn.
+    "2026-10-26_22.txt" to { start, lines ->
+        val last = lines.last { it.startsWith("F,") }.split(",")
+        val more = (1..90).map { k ->
+            listOf("F", (last[1].toLong() + 1000L * k).toString(), (last[2].toLong() + 1000L * k).toString(),
+                last[3], last[4], last[5], "0.0", "").joinToString(",") }
+        val rp = replay(start, lines + more)
+        val off = rp.events.getOrNull(1)
+        check("26.10 d, standing on 90 s: got off between 12:48:50 and 12:49:30, nothing else",
+            rp.events.size == 2 && off?.event is Event.Alighted && clock(off.atMs) in "12:48:50".."12:49:30") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+    },
     // 20 Oct 2026, c: had the journey gone on, the fixes going on as vague in
     // the metro underpass (70 m, one every 6 s, where the last one was): got
     // off concluded once the 120 s are up — our accurate fixes last placed us

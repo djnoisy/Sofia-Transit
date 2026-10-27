@@ -538,7 +538,7 @@ class RideModel(
             return
         }
         val wentOnSince = lastVehicleSpeedMs != 0L && lastVehicleSpeedMs >= o.firstApartMs - LEAD_MS &&
-            wentOn(o.firstApartPlace)
+            wentOn(o.firstApartMs, o.firstApartPlace)
         when {
             // We went on while it left: we were never in it — unless another
             // that has been with us is still with us, which is the one.
@@ -591,14 +591,23 @@ class RideModel(
     }
 
     /**
-     * Whether we have gone on from [then], at least [WENT_ON_M] — not a
-     * moment of vehicle speed alone, which a run of wild fixes can feign.
+     * Whether we have gone on from [then], where we were at [since] — at
+     * least [WENT_ON_M], and further than walking takes (walkFrom), so that
+     * it and having stayed (stayed) are never both true: not a moment of
+     * vehicle speed alone, which a run of wild fixes can feign.
+     *
+     * At ЦЕНТРАЛНИ ХАЛИ (26 Oct 2026, d), walking away from tram 22, our
+     * fixes drifted 35 m aside and came back at once, 50 m in a moment —
+     * vehicle speed — and walking on made the 100 m: withdrawn, where we
+     * had got off.
      */
-    private fun wentOn(then: Place?): Boolean {
+    private fun wentOn(since: Long, then: Place?): Boolean {
         if (then == null) return false
         val latest = track.lastOrNull()?.timeMs ?: return false
-        val now = positionAt(latest - SPEED_LAG_MS) ?: return false
-        return distance(then.lat, then.lon, now.lat, now.lon) >= WENT_ON_M
+        val back = latest - SPEED_LAG_MS
+        val now = positionAt(back) ?: return false
+        val far = distance(then.lat, then.lon, now.lat, now.lon)
+        return far >= WENT_ON_M && far > walkFrom(since, back)
     }
 
     /**
