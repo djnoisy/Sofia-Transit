@@ -2271,8 +2271,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             1 -> announce("Остава една спирка до слизане.")
             // No name here: "Следваща спирка, X" (or "Наближава спирка, X")
             // has just been announced from the same fix, so repeating X would
-            // be the second mention in one breath.
-            0 -> announce("Слизате на следващата спирка.")
+            // be the second mention in one breath. Not at the stop itself,
+            // where "Слизате тук" is what holds: reached straight from the
+            // one before — a gap in the fixes, or stops under 135 m apart, so
+            // that leaving the one before was never seen — this followed
+            // "Спирка, X. Слизате тук." from the same fix; chosen as we
+            // arrive, it came just before it.
+            0 -> if (!atStop) announce("Слизате на следващата спирка.")
         }
     }
 
