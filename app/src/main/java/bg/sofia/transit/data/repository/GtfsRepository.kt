@@ -38,6 +38,8 @@ class GtfsRepository @Inject constructor(
 
     companion object {
         private const val TAG = "GtfsRepository"
+        /** Trip ids asked about in one query, well within SQLite's limit on query parameters. */
+        private const val TRIP_IDS_PER_QUERY = 500
         /** Directory where the update worker stores downloaded GTFS files. */
         const val EXTERNAL_DIR_NAME = "gtfs"
         private const val KEY_IMPORT_IN_PROGRESS = "in_progress"
@@ -245,6 +247,7 @@ class GtfsRepository @Inject constructor(
         // survive until the process restarts.
         trolleyRouteIdsCache = null
         trackableRoutesCache = null
+        forgetServicesToday()
         try {
             withContext(Dispatchers.IO) {
                 val dataDir = getActiveDataDir()
@@ -297,6 +300,7 @@ class GtfsRepository @Inject constructor(
                 stopDao.markTrolleyStops()
                 trolleyRouteIdsCache = null
                 trackableRoutesCache = null
+                forgetServicesToday()
                 val trolleyStops = stopDao.countTrolleyStops()
                 FileLogger.i(TAG, "Marked $trolleyStops trolley stops")
 
@@ -796,6 +800,14 @@ class GtfsRepository @Inject constructor(
      */
     suspend fun getHeadsignByTripIdPrefix(tripId: String): String? {
         val prefix = tripIdDirectionPrefix(tripId) ?: return null
+        // As today's trips with that prefix spell it, when any runs today —
+        // the prefix begins with the route id — so that it names the
+        // direction of today (RouteOfTheDay): trolley 4's runs to Дружба 2
+        // are "Ж.к. Дружба 2" today, "Ж.К. ДРУЖБА-2" in most trips of all.
+        todaysTrips(prefix.substringBefore("-")).filter { it.tripId.startsWith(prefix) && it.headsign.isNotEmpty() }
+            .groupingBy { it.headsign }.eachCount()
+            .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .firstOrNull()?.let { return it.key }
         return tripDao.getHeadsignByTripIdPrefix(prefix)
     }
 
@@ -850,9 +862,88 @@ class GtfsRepository @Inject constructor(
         routeId: String,
         headsign: String
     ): List<StopWithSequence> {
-        val tripId = tripDao.getRepresentativeTrip(routeId, headsign) ?: return emptyList()
+        val tripId = representativeTrip(routeId, headsign) ?: return emptyList()
         return getRemainingStops(tripId, fromSequence = 0)
     }
+
+    /**
+     * Ordered stops of the route the variant of [tripId] takes today — its
+     * line and road shape, the first two parts of the id
+     * (RouteOfTheDay.routeOfVariant) — for a vehicle whose own trip is not
+     * in the static data (the feed's ids differ in their service-day part).
+     * Empty when no trip of that variant runs today.
+     */
+    suspend fun getStopsForTripVariant(tripId: String): List<StopWithSequence> {
+        val prefix = tripIdDirectionPrefix(tripId) ?: return emptyList()
+        val todays = todaysTrips(prefix.substringBefore("-"))
+        val trip = withContext(Dispatchers.Default) { RouteOfTheDay.routeOfVariant(todays, prefix) }
+            ?: return emptyList()
+        return getRemainingStops(trip.tripId, fromSequence = 0)
+    }
+
+    /**
+     * The trip whose route stands for [routeId] towards [headsign]: of the
+     * trips running today (RouteOfTheDay.routeFor); with none today, the
+     * fullest of all, as before — data too old to have today in it.
+     */
+    private suspend fun representativeTrip(routeId: String, headsign: String): String? {
+        val todays = todaysTrips(routeId)
+        return withContext(Dispatchers.Default) { RouteOfTheDay.routeFor(todays, headsign.trim())?.tripId }
+            ?: tripDao.getRepresentativeTrip(routeId, headsign)
+    }
+
+    /**
+     * The trips of [routeId] running today, with their stops, for
+     * RouteOfTheDay; empty when none. Kept for the last few lines asked
+     * about, for the day and until the next import: a journey's start asks
+     * about one line several times.
+     */
+    private suspend fun todaysTrips(routeId: String): List<RouteOfTheDay.TodaysTrip> {
+        val services = servicesToday()
+        if (services.isEmpty()) return emptyList()
+        val key = "$routeId|${servicesTodayCache?.first}|$servicesTodayGeneration"
+        synchronized(todaysTripsCache) { todaysTripsCache[key] }?.let { return it }
+        val trips = tripDao.getByRoute(routeId).filter { it.serviceId in services }
+        val rows = trips.map { it.tripId }.chunked(TRIP_IDS_PER_QUERY).flatMap { stopTimeDao.getStopsOfTrips(it) }
+        val todays = withContext(Dispatchers.Default) {
+            val stops = rows.groupBy({ it.tripId }, { RouteOfTheDay.Stop(it.stopId, it.stopLat, it.stopLon) })
+            trips.mapNotNull { t ->
+                stops[t.tripId]?.let { RouteOfTheDay.TodaysTrip(t.tripId, t.tripHeadsign?.trim() ?: "", it) }
+            }
+        }
+        synchronized(todaysTripsCache) { todaysTripsCache[key] = todays }
+        return todays
+    }
+
+    /** todaysTrips by line, day and import; the eldest go. */
+    private val todaysTripsCache = object : LinkedHashMap<String, List<RouteOfTheDay.TodaysTrip>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<RouteOfTheDay.TodaysTrip>>) = size > 4
+    }
+
+    /**
+     * The services running today in Sofia, whatever the phone's own time
+     * zone, looked up once a day — calendar_dates has no index on the date,
+     * so the lookup reads it whole — and again after every import (the
+     * static data is refreshed almost daily). A lookup begun before an
+     * import cleared the cache is not kept.
+     */
+    private suspend fun servicesToday(): Set<String> {
+        val today = java.time.LocalDate.now(java.time.ZoneId.of("Europe/Sofia"))
+            .format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+        servicesTodayCache?.let { (date, services) -> if (date == today) return services }
+        val generation = servicesTodayGeneration
+        val services = calendarDateDao.getActiveServicesForDate(today).toSet()
+        if (generation == servicesTodayGeneration) servicesTodayCache = today to services
+        return services
+    }
+
+    private fun forgetServicesToday() {
+        servicesTodayGeneration++
+        servicesTodayCache = null
+    }
+
+    @Volatile private var servicesTodayCache: Pair<String, Set<String>>? = null
+    @Volatile private var servicesTodayGeneration = 0
 
     /** The whole trolley route set, for callers labelling many rows at once. */
     suspend fun trolleyRouteIds(): Set<String> = getTrolleyRouteIds()
@@ -1104,6 +1195,20 @@ class GtfsRepository @Inject constructor(
      * surfaced in the Journey screen via real-time trip_updates.
      */
     suspend fun getDirectionsForRoute(routeId: String): List<Trip> {
+        // The two busiest headsigns of all, as below, of those running today,
+        // each by the route it takes today (RouteOfTheDay) — not a diversion
+        // ended or still to come that the feed also carries. The order is
+        // reversed as below.
+        val ranking = tripDao.getHeadsignCountsForRoute(routeId)
+            .sortedWith(compareBy({ -it.tripCount }, { it.headsign }))
+            .map { it.headsign }
+        val todays = todaysTrips(routeId)
+        val directions = withContext(Dispatchers.Default) { RouteOfTheDay.directions(todays, ranking) }
+        if (directions.isNotEmpty()) {
+            val trips = tripDao.getByRoute(routeId)
+            return directions.reversed().mapNotNull { (_, t) -> trips.firstOrNull { it.tripId == t.tripId } }
+        }
+        // None of them today — data too old to have today in it: as before.
         // Pick the two most-trafficked headsigns
         val topHeadsigns = tripDao.getHeadsignCountsForRoute(routeId)
                                    .take(2)
@@ -1139,7 +1244,9 @@ class GtfsRepository @Inject constructor(
      * "Балканкар АД" for bus 102) or gets edited inconsistently between
      * feed updates. Deriving the subtitle from trip headsigns keeps the
      * list consistent with the directions screen, which uses the same
-     * top-2-headsign logic (getDirectionsForRoute).
+     * top-2-headsign logic (getDirectionsForRoute) — of the headsigns
+     * running today, there: when one of the two does not run today, the
+     * screen offers the next.
      * One SQL query for all routes; top-2 picked in memory.
      */
     suspend fun getRouteSubtitles(): Map<String, String> {
@@ -1189,7 +1296,7 @@ class GtfsRepository @Inject constructor(
      * IS a stable property of the route.
      */
     suspend fun getStopsForDirection(routeId: String, headsign: String): List<StopWithSequence> {
-        val tripId = tripDao.getRepresentativeTrip(routeId, headsign)
+        val tripId = representativeTrip(routeId, headsign)
             ?: tripDao.getByRoute(routeId)
                 .firstOrNull { it.tripHeadsign == headsign }?.tripId
             ?: return emptyList()

@@ -18,6 +18,9 @@ data class StopWithSequence(
     val minutesFromStart: Int? = null
 )
 
+/** One stop of a trip, by id and place — for telling the routes of trips apart (RouteOfTheDay). */
+data class TripStop(val tripId: String, val stopId: String, val stopLat: Double, val stopLon: Double)
+
 @Dao
 interface StopTimeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -25,6 +28,16 @@ interface StopTimeDao {
 
     @Query("SELECT * FROM stop_times WHERE tripId = :tripId ORDER BY stopSequence")
     suspend fun getForTrip(tripId: String): List<StopTime>
+
+    /** The stops of [tripIds], by trip and in order. */
+    @Query("""
+        SELECT st.tripId, st.stopId, s.stopLat, s.stopLon
+        FROM stop_times st
+        JOIN stops s ON s.stopId = st.stopId
+        WHERE st.tripId IN (:tripIds)
+        ORDER BY st.tripId, st.stopSequence
+    """)
+    suspend fun getStopsOfTrips(tripIds: List<String>): List<TripStop>
 
     @Query("""
         SELECT st.stopId, s.stopName, st.stopSequence, st.arrivalTime, st.departureTime
