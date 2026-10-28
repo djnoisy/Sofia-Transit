@@ -11,8 +11,9 @@
 // it passes without calling ("said, not called").
 // The way on from the stop we boarded at, by the timetable (RouteOfTheDay.wayOn, boardedAt; step 2): every stop of
 // every trip running that day boarded once, the metro aside, departing on time, 20 min late and 5 min early — the
-// window's edges — with where we waited at the stop itself: never worse than the direction's route followed; and,
-// reported only, beyond the window and with where we waited 25 m off the stop.
+// window's edges — and on time with where we waited 25 m off the stop, four ways: never worse than the direction's
+// route followed; reported only, beyond the window, where the trip taken ends before the bus does ("Крайна спирка"
+// said too early).
 import bg.sofia.transit.data.repository.RouteOfTheDay
 import bg.sofia.transit.data.repository.RouteOfTheDay.Stop
 import bg.sofia.transit.data.repository.RouteOfTheDay.TodaysTrip
@@ -253,8 +254,8 @@ fun main(args: Array<String>) {
         println("  the way on by the timetable, boarding at every stop (the metro aside) — on wrong stops / the run's end not known, now -> by the timetable:")
         for ((name, b) in boardings) {
             println("    $name: ${b.n} boardings; ${b.now[2]} -> ${b.new[2]} / ${b.now[1]} -> ${b.new[1]}; worse ${b.worse}" +
-                (if (b.worseBy.isEmpty()) "" else " (${top(b.worseBy)})"))
-            if (b.waitedOff == null && b.lateS in -5 * 60..20 * 60) {
+                (if (b.worseBy.isEmpty()) "" else " (${top(b.worseBy)})") + "; the trip taken ends before the bus ${b.endsEarly}")
+            if (b.lateS in -5 * 60..20 * 60) {
                 check("$label, $date, $name: never worse than the direction's route", b.worse == 0)
                 check("$label, $date, $name: fewer on wrong stops, fewer not knowing the run's end", b.new[2] <= b.now[2] && b.new[1] <= b.now[1])
             }
@@ -270,7 +271,7 @@ fun pole(id: String) = codes[id]?.takeIf { it.isNotEmpty() } ?: id
 
 /** Boardings at every stop, departing [lateS] after the timetable, where we waited [waitedOff] m (north, east) off the stop. */
 class Boarding(val lateS: Int, val waitedOff: Pair<Double, Double>?) {
-    var n = 0; var worse = 0; val now = IntArray(3); val new = IntArray(3); val worseBy = HashMap<String, Int>()
+    var n = 0; var worse = 0; var endsEarly = 0; val now = IntArray(3); val new = IntArray(3); val worseBy = HashMap<String, Int>()
 }
 
 /** The stops after [s] — by its pole — of [route]; null when it does not call there. */
@@ -307,9 +308,12 @@ fun board(todays: List<TodaysTrip>, dirs: List<TodaysTrip>, runs: Collection<Boa
         while (lo < l.size && l[lo].first <= dep + RouteOfTheDay.DUE_AFTER_S) out += l[lo++].second
         return out.toList()
     }
+    // Only trips that run the direction's way decide (as JourneyService.followTimetableWay).
+    val thisWay = dirs.associateWith { RouteOfTheDay.thisWay(todays, it).toHashSet() }
     for (x in todays) {
         val followed = dirs.firstOrNull { matched(x, it) != null } ?: dirs.maxByOrNull { stopsMatched(x, it) }!!
         val fIds = followed.stops.map { it.id }
+        val ours = thisWay[followed]!!
         for (i in 0 until x.stops.lastIndex) {
             if (x.times[i] < 0) continue
             val s = x.stops[i]; val rem = x.stops.subList(i + 1, x.stops.size).map { it.id }
@@ -318,14 +322,20 @@ fun board(todays: List<TodaysTrip>, dirs: List<TodaysTrip>, runs: Collection<Boa
                 val w = b.waitedOff?.let { (n, e) -> Stop("w", s.lat + n / 111_195.0, s.lon + e / (111_195.0 * Math.cos(Math.toRadians(s.lat)))) } ?: s
                 val near: (List<Stop>) -> Int? = { st -> st.indices.minByOrNull { dist(w, st[it]) }?.takeIf { dist(w, st[it]) <= 60.0 } }
                 val dep = x.times[i] + b.lateS
+                var early = false
                 val new = RouteOfTheDay.boardedAt(followed, todays, near)?.let { (at, idx) ->
                     val p = pole(at.id)
-                    RouteOfTheDay.wayOn(dueAround(p, dep), poleIds[p] ?: setOf(at.id), dep)?.let { (trip, k) ->
+                    RouteOfTheDay.wayOn(dueAround(p, dep).filter { it in ours }, poleIds[p] ?: setOf(at.id), dep)?.let { (trip, k) ->
                         val way = trip.stops.subList(k + 1, trip.stops.size).map { it.id }
-                        if (idx >= 0 && fIds.subList(idx + 1, fIds.size) == way) null else judge(rem, way)
+                        if (idx >= 0 && fIds.subList(idx + 1, fIds.size) == way) null else {
+                            // Its last stop one the bus calls at before its own last: tracking ends there.
+                            early = way.isNotEmpty() && rem.indexOf(way.last()).let { it in 0 until rem.lastIndex }
+                            judge(rem, way)
+                        }
                     }
                 } ?: now
                 b.n++; b.now[now]++; b.new[new]++
+                if (early) b.endsEarly++
                 if (new > now) { b.worse++; b.worseBy.merge(x.trip(), 1, Int::plus) }
             }
         }

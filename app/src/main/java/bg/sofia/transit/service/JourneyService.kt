@@ -2526,9 +2526,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * nothing changes.
      */
     private fun askTimetableWay() {
-        if (timetableWayAsked || identified || movingSinceMs == 0L || candidates.isNotEmpty() ||
-            orderedStops.isEmpty() || tripId.isNotBlank()) return
+        if (timetableWayAsked || movingSinceMs == 0L || candidates.isNotEmpty() || orderedStops.isEmpty()) return
+        // Then or never: a vehicle identified then, or a trip picked, and
+        // withdrawn later, leaves us far from where we boarded, maybe off the
+        // route — not to be put back on it by the timetable (review of
+        // 28 Oct 2026).
         timetableWayAsked = true
+        if (identified || tripId.isNotBlank()) return
         val source = rideShadow ?: return
         serviceScope.launch(Dispatchers.Main) {
             try {
@@ -2569,7 +2573,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
         val clock = "%02d:%02d".format(Locale.ROOT, departedSec / 3600 % 24, departedSec / 60 % 60)
         val poles = try { gtfsRepo.stopIdsOfSamePlace(boarded.id).toSet() } catch (e: Exception) { setOf(boarded.id) }
-        val (trip, at) = RouteOfTheDay.wayOn(trips, poles, departedSec) ?: run {
+        // Only trips that run its way: at a stop both ways share, or the one
+        // across the street taken for ours, the way back's would be followed
+        // (118 at СЕЛО ЖЕЛЯВА, 28 at СЕЛО ЛОКОРСКО; review of 28 Oct 2026).
+        val (trip, at) = RouteOfTheDay.wayOn(RouteOfTheDay.thisWay(trips, followed), poles, departedSec) ?: run {
             FileLogger.i(TAG, "Timetable: at stop ${boarded.id}, around $clock, no trip of the line due, " +
                 "or they go on different ways — as followed")
             return
@@ -2859,6 +2866,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val aside = setAsideDestination.takeIf { destinationIdx == null }
         val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId } ?: aside?.first
         val poles = (polesNow ?: aside)?.takeIf { it.first == destinationStopId }?.second
+        // The order followed before and the vehicle's, for telling a reversal.
+        val previousOrder = RouteOfTheDay.TodaysTrip("", headsign, orderedStops.indices.mapNotNull { i ->
+            stopLatLon.getOrNull(i)?.let { RouteOfTheDay.Stop(orderedStops[i].stopId, it.first, it.second) }
+        })
+        val newOrder = RouteOfTheDay.TodaysTrip("", hs ?: "", stops.indices.map { i ->
+            RouteOfTheDay.Stop(stops[i].stopId, latLons[i].first, latLons[i].second)
+        })
 
         routeId        = v.routeId
         headsign       = hs
@@ -2898,8 +2912,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         leftOnFoot        = false
         leavingPeakKmh    = 0.0
         wrongLineNoticeGiven = false
-        val destinationOff = remapDestination(destinationStopId,
-            clear = !differentLine && differentDirection, poles = poles)
+        // A reversal of direction: the vehicle's order runs the opposite way
+        // of the one followed before — not merely another headsign.
+        val reversed = !differentLine && previousOrder.stops.isNotEmpty() && RouteOfTheDay.opposite(previousOrder, newOrder)
+        val destinationOff = remapDestination(destinationStopId, clear = reversed, poles = poles)
         // Said to be off the order before, it is on this one.
         val putBack = aside != null && destinationIdx != null
         if (putBack) setAsideDestination = null
@@ -3642,8 +3658,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * Matched by stop id, never by name: the stops on either side of a street
      * share their name. Where it occurs in the new order behind our position,
      * the usual check reports it as passed, which on this vehicle it is.
-     * [clear] — a reversal of direction on the same line — discards it as
-     * before: the stop that was chosen is on the other side of the street.
+     * Kept wherever the new order has it, whatever [clear] says — a reversal
+     * of direction on the same line: then its absence goes unsaid, the stop
+     * chosen being on the other side of the street. It used to be dropped on
+     * a reversal unlooked for, and a reversal was told by another headsign:
+     * a vehicle identified on a short run the same way (111 to БУЛ. НИКОЛА
+     * ПЕТКОВ), or after the timetable's guess, took the stop away unsaid
+     * though it went there (review of 28 Oct 2026).
      *
      * Or by another id of the same pole ([poles]): a bus and a trolley
      * stopping there have a stop each under one stop code (A1903 and TB1903;
@@ -3652,14 +3673,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * nearness or name: a pole 20 m off is another stop (the owner,
      * 28 Oct 2026), as is the one across the street.
      *
-     * True when there was a stop to get off at, not discarded by [clear], and
-     * the new order does not have it — for the caller to say so.
+     * True when there was a stop to get off at, the new order does not have
+     * it, and it is not a reversal ([clear]) — for the caller to say so.
      */
     private fun remapDestination(stopId: String?, clear: Boolean, poles: Set<String>? = null): Boolean {
         if (destinationIdx == null && stopId == null) return false
-        var idx = if (clear || stopId == null) -1
-                  else orderedStops.indexOfFirst { it.stopId == stopId }
-        if (idx < 0 && !clear && !poles.isNullOrEmpty()) idx = orderedStops.indexOfFirst { it.stopId in poles }
+        var idx = if (stopId == null) -1 else orderedStops.indexOfFirst { it.stopId == stopId }
+        if (idx < 0 && !poles.isNullOrEmpty()) idx = orderedStops.indexOfFirst { it.stopId in poles }
         destinationEtaEpoch = null
         etaSource = EtaSource.NONE
         if (idx >= 0) {
@@ -3675,7 +3695,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         destinationPoles = null
         if (destinationIdx != null) {
             FileLogger.i(TAG, "Alighting stop " +
-                (if (clear) "cleared: direction reversed" else "not on the new route — cleared"))
+                (if (clear) "cleared: direction reversed, not on the new route" else "not on the new route — cleared"))
         }
         destinationIdx = null
         alightWarningsFired.clear()
@@ -4531,6 +4551,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 if (source !== rideShadow || !journeyActive) continue
                 try {
                     followLock.withLock {
+                        // Checked again once held: tracking may have ended meanwhile.
+                        if (source !== rideShadow || !journeyActive) return@withLock
                         if (e != null) followModel(source, e)
                         else unadopted?.let { u -> adoptFromModel(source, u.key, u.tripId, u.routeId, u.metres, switched = false) }
                     }

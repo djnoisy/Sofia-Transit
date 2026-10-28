@@ -119,9 +119,11 @@ object RouteOfTheDay {
      * Whether routes [a] and [b] run the opposite ways: the stops of [a]
      * that have one of [b] near (OPPOSITE_M — across the street), taken in
      * order, meet those of [b] mostly backwards. So every line with two
-     * directions, every day of the feeds of 5 and 28 Oct 2026.
+     * directions, every day of the feeds of 5 and 28 Oct 2026. Also what a
+     * reversal of direction is, on identifying a vehicle
+     * (JourneyService.adoptVehicle): not another headsign.
      */
-    private fun opposite(a: TodaysTrip, b: TodaysTrip): Boolean {
+    fun opposite(a: TodaysTrip, b: TodaysTrip): Boolean {
         val at = a.stops.mapNotNull { s ->
             b.stops.indices.minByOrNull { distance(s, b.stops[it]) }?.takeIf { distance(s, b.stops[it]) <= OPPOSITE_M }
         }
