@@ -25,6 +25,9 @@ import kotlin.math.hypot
  * headsign came to differ from the direction it was on (reviews of
  * 28 Oct 2026).
  *
+ * And, before a vehicle is identified, the way on from the stop we boarded
+ * at, by the timetable (wayOn).
+ *
  * Pure Kotlin, so it can be tested on the feed itself
  * (tools/test-harness/run_route_tests.sh).
  */
@@ -32,8 +35,12 @@ object RouteOfTheDay {
 
     class Stop(val id: String, val lat: Double, val lon: Double)
 
-    /** A trip that runs today: its headsign, trimmed, and its stops in order. */
-    class TodaysTrip(val tripId: String, val headsign: String, val stops: List<Stop>)
+    /**
+     * A trip that runs today: its headsign, trimmed, its stops in order, and
+     * when it leaves each — seconds after midnight of today's service day
+     * (secondsOf; -1 where not given), none when not looked up.
+     */
+    class TodaysTrip(val tripId: String, val headsign: String, val stops: List<Stop>, val times: List<Int> = emptyList())
 
     /**
      * The first two of [ranking] — the line's headsigns, busiest over all
@@ -122,10 +129,82 @@ object RouteOfTheDay {
         return back >= 2 && back > at.zipWithNext().count { (x, y) -> y > x }
     }
 
+    /**
+     * The way on from the stop we boarded at, by the timetable — for tracking
+     * before a vehicle is identified, and for one never identified, reporting
+     * no positions (step 2, the owner, 28 Oct 2026): the trips of the line due
+     * at that stop ([poles]: the ids of its pole) from DUE_BEFORE_S before our
+     * departure ([departedSec], as TodaysTrip.times) to DUE_AFTER_S after it,
+     * when they all go on from there by the same stops — the first of them by
+     * trip id, and where in it we boarded. Null when none is due, or they go
+     * on different ways: the direction's route then, as before.
+     *
+     * By the timetable, not the predictions: for a vehicle reporting no
+     * positions they know no more, and may not have its trip at all. The
+     * window takes in a vehicle up to 20 min late or 5 min early; beyond, the
+     * trip due may be another's. Every stop of every trip of the feed of
+     * 28 Oct 2026 boarded once (tools/test-harness/run_route_tests.sh), on a
+     * weekday: on wrong stops 3892 → 1583, a run's end not known 3939 → 2109;
+     * none worse than the direction's route from 5 min early to 20 min late,
+     * about 0.5 % beyond. Short runs and full ones every few minutes (111) are
+     * mostly not told apart.
+     */
+    fun wayOn(trips: List<TodaysTrip>, poles: Set<String>, departedSec: Int): Pair<TodaysTrip, Int>? {
+        val due = ArrayList<Pair<TodaysTrip, Int>>()
+        for (t in trips) {
+            if (t.times.size != t.stops.size) continue
+            // Not where it ends: there is no way on.
+            for (i in 0 until t.stops.lastIndex) {
+                val at = t.times[i]
+                if (at >= 0 && t.stops[i].id in poles && at in departedSec - DUE_BEFORE_S..departedSec + DUE_AFTER_S) due += t to i
+            }
+        }
+        val ways = due.map { (t, i) -> t.stops.subList(i + 1, t.stops.size).map { it.id } }.toSet()
+        return if (ways.size == 1) due.minByOrNull { it.first.tripId } else null
+    }
+
+    /**
+     * The stop we boarded at, for the way on (wayOn), and its index in
+     * [followed] (-1 when not of it): of its stops, the one [near] picks —
+     * the stop nearest where we waited, within reach — else, the stop we
+     * waited at not being on it, of the stops of the line's other routes
+     * today that run its way (thisWay): 63's runs from ЗЛАТНИ МОСТОВЕ, whose
+     * first 7 stops the route of the day to БУЛ. ЦАР БОРИС ІІІ does not have;
+     * trams 21 and 22 to and from the depot. Its own stops first, as the
+     * early rule by the boarding stop has it (JourneyService.findBoardingStop).
+     * Null when neither.
+     */
+    fun boardedAt(followed: TodaysTrip, trips: List<TodaysTrip>, near: (List<Stop>) -> Int?): Pair<Stop, Int>? {
+        near(followed.stops)?.let { return followed.stops[it] to it }
+        val others = thisWay(trips, followed).flatMap { it.stops }.distinctBy { it.id }
+        return near(others)?.let { others[it] to -1 }
+    }
+
+    /**
+     * Of [trips], those not running the opposite way of [route] (opposite):
+     * not the way back, whose stops are across the street from ours.
+     */
+    fun thisWay(trips: List<TodaysTrip>, route: TodaysTrip): List<TodaysTrip> {
+        val verdict = HashMap<List<String>, Boolean>()
+        return trips.filter { t -> verdict.getOrPut(t.stops.map { it.id }) { !opposite(t, route) } }
+    }
+
+    /** "H:MM:SS" (past 24:00 for after midnight) in seconds; -1 when not a time. */
+    fun secondsOf(hms: String?): Int {
+        val p = hms?.trim()?.split(":") ?: return -1
+        if (p.size != 3) return -1
+        val (h, m, s) = p.map { it.toIntOrNull() ?: return -1 }
+        return if (h < 0 || m !in 0..59 || s !in 0..59) -1 else h * 3600 + m * 60 + s
+    }
+
     private fun distance(a: Stop, b: Stop): Double =
         hypot((a.lat - b.lat) * M_PER_DEG, (a.lon - b.lon) * M_PER_DEG * cos(Math.toRadians((a.lat + b.lat) / 2)))
 
     /** A stop of the way back is this near its counterpart of the way there, across the street, at most. */
     const val OPPOSITE_M = 150.0
+    /** The trips due where we boarded: from this long before our departure… (wayOn) */
+    const val DUE_BEFORE_S = 20 * 60
+    /** …to this long after it. */
+    const val DUE_AFTER_S = 5 * 60
     private const val M_PER_DEG = 111_195.0
 }

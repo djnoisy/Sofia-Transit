@@ -893,7 +893,7 @@ class GtfsRepository @Inject constructor(
     }
 
     /**
-     * The trips of [routeId] running today, with their stops, for
+     * The trips of [routeId] running today, with their stops and times, for
      * RouteOfTheDay; empty when none. Kept for the last few lines asked
      * about, for the day and until the next import: a journey's start asks
      * about one line several times.
@@ -906,13 +906,34 @@ class GtfsRepository @Inject constructor(
         val trips = tripDao.getByRoute(routeId).filter { it.serviceId in services }
         val rows = trips.map { it.tripId }.chunked(TRIP_IDS_PER_QUERY).flatMap { stopTimeDao.getStopsOfTrips(it) }
         val todays = withContext(Dispatchers.Default) {
-            val stops = rows.groupBy({ it.tripId }, { RouteOfTheDay.Stop(it.stopId, it.stopLat, it.stopLon) })
+            val byTrip = rows.groupBy { it.tripId }
             trips.mapNotNull { t ->
-                stops[t.tripId]?.let { RouteOfTheDay.TodaysTrip(t.tripId, t.tripHeadsign?.trim() ?: "", it) }
+                byTrip[t.tripId]?.let { r ->
+                    RouteOfTheDay.TodaysTrip(t.tripId, t.tripHeadsign?.trim() ?: "",
+                        r.map { RouteOfTheDay.Stop(it.stopId, it.stopLat, it.stopLon) },
+                        r.map { s -> RouteOfTheDay.secondsOf(s.departureTime).takeIf { it >= 0 } ?: RouteOfTheDay.secondsOf(s.arrivalTime) })
+                }
             }
         }
         synchronized(todaysTripsCache) { todaysTripsCache[key] = todays }
         return todays
+    }
+
+    /**
+     * Today's trips of [routeId], with their stops and times, and the second
+     * of today's service day — in Sofia — that [epochMs] falls at, for the
+     * way on from the stop we boarded at (RouteOfTheDay.wayOn). Null when
+     * that moment is not of today (a journey begun before midnight), or none
+     * runs. After midnight, before the day's first trips, none is due: the
+     * night's trips are the day before's (past 24:00), not looked up.
+     */
+    suspend fun todaysTimetable(routeId: String, epochMs: Long): Pair<List<RouteOfTheDay.TodaysTrip>, Int>? {
+        val at = java.time.Instant.ofEpochMilli(epochMs).atZone(java.time.ZoneId.of("Europe/Sofia"))
+        val trips = todaysTrips(routeId)
+        // The day the trips are of, as looked up: not another, should midnight
+        // have passed meanwhile.
+        if (trips.isEmpty() || servicesTodayCache?.first != at.toLocalDate().format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)) return null
+        return trips to at.toLocalTime().toSecondOfDay()
     }
 
     /** todaysTrips by line, day and import; the eldest go. */

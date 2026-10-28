@@ -28,6 +28,7 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import bg.sofia.transit.data.repository.RealtimeRepository
+import bg.sofia.transit.data.repository.RouteOfTheDay
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -40,6 +41,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -798,6 +801,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * the passenger their stop.
      */
     private var setAsideDestination: Pair<String, Set<String>>? = null
+    /** The way on by the timetable has been asked for this journey (askTimetableWay). */
+    private var timetableWayAsked = false
     /** Which of the "2 stops / 1 stop / next stop" warnings already fired. */
     private val alightWarningsFired = mutableSetOf<Int>()
     /**
@@ -987,6 +992,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * conclusion: try again to adopt the vehicle that could not be (unadopted).
      */
     private val modelEvents = Channel<Pair<RideShadow, RideModel.Event?>>(Channel.UNLIMITED)
+    /**
+     * Held while one of the model's conclusions is followed, and while the
+     * way on by the timetable is (followTimetableWay): both replace the stop
+     * order, waiting on the database meanwhile, and neither is to find it
+     * half replaced by the other.
+     */
+    private val followLock = Mutex()
     /**
      * The vehicle the model holds as ours that the app could not adopt —
      * its trip not in the static data, the direction not known yet (see
@@ -1792,6 +1804,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         if (orderedStops.isEmpty()) return
 
+        askTimetableWay()
         locateOnRoad(loc)
         if (watchOffRoad(loc, accurateFix)) {
             publish(distance = null)
@@ -2500,6 +2513,135 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     }
 
     /**
+     * The way on from the stop we boarded at, by the timetable
+     * (RouteOfTheDay.wayOn; step 2, the owner, 28 Oct 2026): before a vehicle
+     * is identified — and for one never identified, reporting no positions,
+     * the whole journey — the stops of the trips of the line due there around
+     * our departure, when they all go on the same way, rather than the
+     * direction's route: tram 22's runs to and from the depot, 63's from
+     * ЗЛАТНИ МОСТОВЕ, short runs that end before the stop to get off at.
+     * Asked once a journey, on the first fix after departure with the
+     * direction known; a vehicle identified takes over, as ever
+     * (adoptVehicle). With no stop where we waited — tracking begun aboard —
+     * nothing changes.
+     */
+    private fun askTimetableWay() {
+        if (timetableWayAsked || identified || movingSinceMs == 0L || candidates.isNotEmpty() ||
+            orderedStops.isEmpty() || tripId.isNotBlank()) return
+        timetableWayAsked = true
+        val source = rideShadow ?: return
+        serviceScope.launch(Dispatchers.Main) {
+            try {
+                followLock.withLock { followTimetableWay(source) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "Timetable: the way on not worked out: ${e.message}")
+            }
+        }
+    }
+
+    /** See askTimetableWay. On the main thread, under followLock. */
+    private suspend fun followTimetableWay(source: RideShadow) {
+        if (source !== rideShadow || !journeyActive || identified || candidates.isNotEmpty()) return
+        val route = routeId
+        val followedStops = orderedStops
+        val followedLatLons = stopLatLon
+        if (followedStops.isEmpty() || followedLatLons.size != followedStops.size) return
+        // The metro aside, as in the tests: its trips are not one order of
+        // stops a day each.
+        val line = try { gtfsRepo.getRouteById(route) } catch (e: Exception) { null } ?: return
+        if (line.routeType == 1) return
+        val (trips, departedSec) = gtfsRepo.todaysTimetable(route, movingSinceMs) ?: run {
+            FileLogger.i(TAG, "Timetable: no trips of the line today to tell the way on by")
+            return
+        }
+        // The lookups wait: the journey, or the order followed, may have changed.
+        if (source !== rideShadow || !journeyActive || identified || orderedStops !== followedStops) return
+        val followed = RouteOfTheDay.TodaysTrip("", headsign, followedStops.indices.map { i ->
+            RouteOfTheDay.Stop(followedStops[i].stopId, followedLatLons[i].first, followedLatLons[i].second)
+        })
+        val (boarded, followedIdx) = RouteOfTheDay.boardedAt(followed, trips) { stops ->
+            nearestToWaiting(stops.map { it.lat to it.lon })?.takeIf { it.second <= BOARDING_REF_MAX_DIST }?.first
+        } ?: run {
+            FileLogger.i(TAG, "Timetable: no stop of the line where we waited — the way on not told")
+            return
+        }
+        val clock = "%02d:%02d".format(Locale.ROOT, departedSec / 3600 % 24, departedSec / 60 % 60)
+        val poles = try { gtfsRepo.stopIdsOfSamePlace(boarded.id).toSet() } catch (e: Exception) { setOf(boarded.id) }
+        val (trip, at) = RouteOfTheDay.wayOn(trips, poles, departedSec) ?: run {
+            FileLogger.i(TAG, "Timetable: at stop ${boarded.id}, around $clock, no trip of the line due, " +
+                "or they go on different ways — as followed")
+            return
+        }
+        val wayOnIds = trip.stops.subList(at + 1, trip.stops.size).map { it.id }
+        if (followedIdx >= 0 &&
+            followedStops.subList(followedIdx + 1, followedStops.size).map { it.stopId } == wayOnIds) {
+            FileLogger.i(TAG, "Timetable: the trips due at ${followedStops[followedIdx].stopName} around $clock " +
+                "go on as followed")
+            return
+        }
+        val stops = gtfsRepo.getRemainingStops(trip.tripId, fromSequence = 0)
+        if (stops.map { it.stopId } != trip.stops.map { it.id }) return
+        val latLons = trip.stops.map { it.lat to it.lon }
+        val word = try {
+            bg.sofia.transit.util.VehicleLabels.singular(line.routeType, gtfsRepo.isTrolleyRoute(route))
+        } catch (e: Exception) { "Превозно средство" }
+        // Every id of the pole of the stop to get off at, for keeping it on
+        // the new order below.
+        val polesNow = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId }?.let { id ->
+            id to (try { gtfsRepo.stopIdsOfSamePlace(id).toSet() } catch (e: Exception) { setOf(id) })
+        }
+        if (source !== rideShadow || !journeyActive || identified || orderedStops !== followedStops) return
+
+        val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId }
+        val destinationPolesNow = polesNow?.takeIf { it.first == destinationStopId }?.second
+        val before = headsign
+        val hs = trip.headsign.ifBlank { stops.last().stopName }
+        FileLogger.i(TAG, "Timetable: the trips due at ${stops[at].stopName} around $clock go on to $hs — " +
+            "the stops of trip ${trip.tripId} from #$at followed" +
+            (if (followedIdx < 0) "; boarded off the direction's route" else ""))
+        headsign = hs
+        routeLabel = "${routeLabel.substringBefore(" → ")} → $hs"
+        orderedStops = stops
+        stopLatLon = latLons
+        // Placed afresh from where we boarded on.
+        currentIdx = at
+        awaitingFirstFix = true
+        repeatGuardArmed = true
+        atStop = false
+        approachAnnounced = false
+        snapWaitStartedMs = 0L
+        offRoute = false
+        lostSinceMs = 0L
+        windowMin.clear()
+        unattachedMin = -1.0
+        leftOnFoot = false
+        leavingPeakKmh = 0.0
+        // What tracking returns to, should a vehicle identified later prove
+        // not ours (revokeIdentification).
+        chosen = chosen?.copy(label = routeLabel, headsign = hs, stops = stops, latLons = latLons,
+            candidates = emptyList())
+        val destinationOff = remapDestination(destinationStopId, clear = false, poles = destinationPolesNow)
+        // Put back, should a vehicle identified later go there (adoptVehicle).
+        if (destinationOff && destinationStopId != null) {
+            setAsideDestination = destinationStopId to (destinationPolesNow ?: setOf(destinationStopId))
+        }
+        when {
+            announceResumedIfDoubted() -> {}
+            !hs.equals(before, ignoreCase = true) -> {
+                announce("По разписание курсът е до $hs.")
+                lastAnnouncedDirection = hs
+            }
+        }
+        if (destinationOff) announce(
+            if (word == "Превозно средство") "По разписание това превозно средство не минава през спирката за слизане."
+            else "По разписание този ${word.lowercase()} не минава през спирката за слизане.")
+        publishLastKnown()
+        restartEtaPolling()
+    }
+
+    /**
      * Follows one conclusion of the model, from the journey's [source]: the
      * vehicle identified, or switched to, is adopted — its line, direction
      * and stops; ours withdrawn, tracking returns to the line chosen; got
@@ -2712,9 +2854,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             "line changed=$differentLine)")
 
         // Taken before the stop order is replaced, for keeping the alighting
-        // stop below.
-        val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId }
-        val poles = polesNow?.takeIf { it.first == destinationStopId }?.second
+        // stop below — or the one set aside, off the order followed before
+        // (the timetable's, a vehicle's), should this vehicle's route have it.
+        val aside = setAsideDestination.takeIf { destinationIdx == null }
+        val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId } ?: aside?.first
+        val poles = (polesNow ?: aside)?.takeIf { it.first == destinationStopId }?.second
 
         routeId        = v.routeId
         headsign       = hs
@@ -2756,6 +2900,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         wrongLineNoticeGiven = false
         val destinationOff = remapDestination(destinationStopId,
             clear = !differentLine && differentDirection, poles = poles)
+        // Said to be off the order before, it is on this one.
+        val putBack = aside != null && destinationIdx != null
+        if (putBack) setAsideDestination = null
         if (destinationOff && destinationStopId != null) setAsideDestination = destinationStopId to (poles ?: setOf(destinationStopId))
 
         // The same switch is not announced twice.
@@ -2790,6 +2937,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (destinationOff) announce(
             if (word == "Превозно средство") "Това превозно средство не минава през спирката за слизане."
             else "Този ${word.lowercase()} не минава през спирката за слизане.")
+        if (putBack) announce(
+            if (word == "Превозно средство") "Спирката за слизане е по маршрута на това превозно средство."
+            else "Спирката за слизане е по маршрута на този ${word.lowercase()}.")
 
         publishLastKnown()
         restartEtaPolling()
@@ -3601,6 +3751,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastAnnouncedDirection = null
         directionFromVehicle = false
         absentFromSet = false
+        timetableWayAsked = false
     }
 
     /**
@@ -4379,8 +4530,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 // Only the journey's own: one ended or replaced since says nothing of this one.
                 if (source !== rideShadow || !journeyActive) continue
                 try {
-                    if (e != null) followModel(source, e)
-                    else unadopted?.let { u -> adoptFromModel(source, u.key, u.tripId, u.routeId, u.metres, switched = false) }
+                    followLock.withLock {
+                        if (e != null) followModel(source, e)
+                        else unadopted?.let { u -> adoptFromModel(source, u.key, u.tripId, u.routeId, u.metres, switched = false) }
+                    }
                 } catch (ce: CancellationException) {
                     throw ce
                 } catch (ex: Exception) {
