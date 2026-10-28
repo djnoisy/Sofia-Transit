@@ -1,0 +1,869 @@
+diff --git a/app/src/main/java/bg/sofia/transit/data/db/dao/StopTimeDao.kt b/app/src/main/java/bg/sofia/transit/data/db/dao/StopTimeDao.kt
+index 1e467d5..e3343dc 100644
+--- a/app/src/main/java/bg/sofia/transit/data/db/dao/StopTimeDao.kt
++++ b/app/src/main/java/bg/sofia/transit/data/db/dao/StopTimeDao.kt
+@@ -18,6 +18,9 @@ data class StopWithSequence(
+     val minutesFromStart: Int? = null
+ )
+ 
++/** One stop of a trip, by id and place — for telling the routes of trips apart (RouteOfTheDay). */
++data class TripStop(val tripId: String, val stopId: String, val stopLat: Double, val stopLon: Double)
++
+ @Dao
+ interface StopTimeDao {
+     @Insert(onConflict = OnConflictStrategy.REPLACE)
+@@ -26,6 +29,16 @@ interface StopTimeDao {
+     @Query("SELECT * FROM stop_times WHERE tripId = :tripId ORDER BY stopSequence")
+     suspend fun getForTrip(tripId: String): List<StopTime>
+ 
++    /** The stops of [tripIds], by trip and in order. */
++    @Query("""
++        SELECT st.tripId, st.stopId, s.stopLat, s.stopLon
++        FROM stop_times st
++        JOIN stops s ON s.stopId = st.stopId
++        WHERE st.tripId IN (:tripIds)
++        ORDER BY st.tripId, st.stopSequence
++    """)
++    suspend fun getStopsOfTrips(tripIds: List<String>): List<TripStop>
++
+     @Query("""
+         SELECT st.stopId, s.stopName, st.stopSequence, st.arrivalTime, st.departureTime
+         FROM stop_times st
+diff --git a/app/src/main/java/bg/sofia/transit/data/repository/GtfsRepository.kt b/app/src/main/java/bg/sofia/transit/data/repository/GtfsRepository.kt
+index b5a06c4..7bba9c3 100644
+--- a/app/src/main/java/bg/sofia/transit/data/repository/GtfsRepository.kt
++++ b/app/src/main/java/bg/sofia/transit/data/repository/GtfsRepository.kt
+@@ -38,6 +38,8 @@ class GtfsRepository @Inject constructor(
+ 
+     companion object {
+         private const val TAG = "GtfsRepository"
++        /** Trip ids asked about in one query, well within SQLite's limit on query parameters. */
++        private const val TRIP_IDS_PER_QUERY = 500
+         /** Directory where the update worker stores downloaded GTFS files. */
+         const val EXTERNAL_DIR_NAME = "gtfs"
+         private const val KEY_IMPORT_IN_PROGRESS = "in_progress"
+@@ -245,6 +247,7 @@ class GtfsRepository @Inject constructor(
+         // survive until the process restarts.
+         trolleyRouteIdsCache = null
+         trackableRoutesCache = null
++        forgetServicesToday()
+         try {
+             withContext(Dispatchers.IO) {
+                 val dataDir = getActiveDataDir()
+@@ -297,6 +300,7 @@ class GtfsRepository @Inject constructor(
+                 stopDao.markTrolleyStops()
+                 trolleyRouteIdsCache = null
+                 trackableRoutesCache = null
++                forgetServicesToday()
+                 val trolleyStops = stopDao.countTrolleyStops()
+                 FileLogger.i(TAG, "Marked $trolleyStops trolley stops")
+ 
+@@ -796,6 +800,14 @@ class GtfsRepository @Inject constructor(
+      */
+     suspend fun getHeadsignByTripIdPrefix(tripId: String): String? {
+         val prefix = tripIdDirectionPrefix(tripId) ?: return null
++        // As today's trips with that prefix spell it, when any runs today —
++        // the prefix begins with the route id — so that it names the
++        // direction of today (RouteOfTheDay): trolley 4's runs to Дружба 2
++        // are "Ж.к. Дружба 2" today, "Ж.К. ДРУЖБА-2" in most trips of all.
++        todaysTrips(prefix.substringBefore("-")).filter { it.tripId.startsWith(prefix) && it.headsign.isNotEmpty() }
++            .groupingBy { it.headsign }.eachCount()
++            .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
++            .firstOrNull()?.let { return it.key }
+         return tripDao.getHeadsignByTripIdPrefix(prefix)
+     }
+ 
+@@ -850,10 +862,89 @@ class GtfsRepository @Inject constructor(
+         routeId: String,
+         headsign: String
+     ): List<StopWithSequence> {
+-        val tripId = tripDao.getRepresentativeTrip(routeId, headsign) ?: return emptyList()
++        val tripId = representativeTrip(routeId, headsign) ?: return emptyList()
+         return getRemainingStops(tripId, fromSequence = 0)
+     }
+ 
++    /**
++     * Ordered stops of the route the variant of [tripId] takes today — its
++     * line and road shape, the first two parts of the id
++     * (RouteOfTheDay.routeOfVariant) — for a vehicle whose own trip is not
++     * in the static data (the feed's ids differ in their service-day part).
++     * Empty when no trip of that variant runs today.
++     */
++    suspend fun getStopsForTripVariant(tripId: String): List<StopWithSequence> {
++        val prefix = tripIdDirectionPrefix(tripId) ?: return emptyList()
++        val todays = todaysTrips(prefix.substringBefore("-"))
++        val trip = withContext(Dispatchers.Default) { RouteOfTheDay.routeOfVariant(todays, prefix) }
++            ?: return emptyList()
++        return getRemainingStops(trip.tripId, fromSequence = 0)
++    }
++
++    /**
++     * The trip whose route stands for [routeId] towards [headsign]: of the
++     * trips running today (RouteOfTheDay.routeFor); with none today, the
++     * fullest of all, as before — data too old to have today in it.
++     */
++    private suspend fun representativeTrip(routeId: String, headsign: String): String? {
++        val todays = todaysTrips(routeId)
++        return withContext(Dispatchers.Default) { RouteOfTheDay.routeFor(todays, headsign.trim())?.tripId }
++            ?: tripDao.getRepresentativeTrip(routeId, headsign)
++    }
++
++    /**
++     * The trips of [routeId] running today, with their stops, for
++     * RouteOfTheDay; empty when none. Kept for the last few lines asked
++     * about, for the day and until the next import: a journey's start asks
++     * about one line several times.
++     */
++    private suspend fun todaysTrips(routeId: String): List<RouteOfTheDay.TodaysTrip> {
++        val services = servicesToday()
++        if (services.isEmpty()) return emptyList()
++        val key = "$routeId|${servicesTodayCache?.first}|$servicesTodayGeneration"
++        synchronized(todaysTripsCache) { todaysTripsCache[key] }?.let { return it }
++        val trips = tripDao.getByRoute(routeId).filter { it.serviceId in services }
++        val rows = trips.map { it.tripId }.chunked(TRIP_IDS_PER_QUERY).flatMap { stopTimeDao.getStopsOfTrips(it) }
++        val todays = withContext(Dispatchers.Default) {
++            val stops = rows.groupBy({ it.tripId }, { RouteOfTheDay.Stop(it.stopId, it.stopLat, it.stopLon) })
++            trips.mapNotNull { t ->
++                stops[t.tripId]?.let { RouteOfTheDay.TodaysTrip(t.tripId, t.tripHeadsign?.trim() ?: "", it) }
++            }
++        }
++        synchronized(todaysTripsCache) { todaysTripsCache[key] = todays }
++        return todays
++    }
++
++    /** todaysTrips by line, day and import; the eldest go. */
++    private val todaysTripsCache = object : LinkedHashMap<String, List<RouteOfTheDay.TodaysTrip>>(8, 0.75f, true) {
++        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<RouteOfTheDay.TodaysTrip>>) = size > 4
++    }
++
++    /**
++     * The services running today in Sofia, whatever the phone's own time
++     * zone, looked up once a day — calendar_dates has no index on the date,
++     * so the lookup reads it whole — and again after every import (the
++     * static data is refreshed almost daily). A lookup begun before an
++     * import cleared the cache is not kept.
++     */
++    private suspend fun servicesToday(): Set<String> {
++        val today = java.time.LocalDate.now(java.time.ZoneId.of("Europe/Sofia"))
++            .format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
++        servicesTodayCache?.let { (date, services) -> if (date == today) return services }
++        val generation = servicesTodayGeneration
++        val services = calendarDateDao.getActiveServicesForDate(today).toSet()
++        if (generation == servicesTodayGeneration) servicesTodayCache = today to services
++        return services
++    }
++
++    private fun forgetServicesToday() {
++        servicesTodayGeneration++
++        servicesTodayCache = null
++    }
++
++    @Volatile private var servicesTodayCache: Pair<String, Set<String>>? = null
++    @Volatile private var servicesTodayGeneration = 0
++
+     /** The whole trolley route set, for callers labelling many rows at once. */
+     suspend fun trolleyRouteIds(): Set<String> = getTrolleyRouteIds()
+ 
+@@ -1104,6 +1195,20 @@ class GtfsRepository @Inject constructor(
+      * surfaced in the Journey screen via real-time trip_updates.
+      */
+     suspend fun getDirectionsForRoute(routeId: String): List<Trip> {
++        // The two busiest headsigns of all, as below, of those running today,
++        // each by the route it takes today (RouteOfTheDay) — not a diversion
++        // ended or still to come that the feed also carries. The order is
++        // reversed as below.
++        val ranking = tripDao.getHeadsignCountsForRoute(routeId)
++            .sortedWith(compareBy({ -it.tripCount }, { it.headsign }))
++            .map { it.headsign }
++        val todays = todaysTrips(routeId)
++        val directions = withContext(Dispatchers.Default) { RouteOfTheDay.directions(todays, ranking) }
++        if (directions.isNotEmpty()) {
++            val trips = tripDao.getByRoute(routeId)
++            return directions.reversed().mapNotNull { (_, t) -> trips.firstOrNull { it.tripId == t.tripId } }
++        }
++        // None of them today — data too old to have today in it: as before.
+         // Pick the two most-trafficked headsigns
+         val topHeadsigns = tripDao.getHeadsignCountsForRoute(routeId)
+                                    .take(2)
+@@ -1139,7 +1244,9 @@ class GtfsRepository @Inject constructor(
+      * "Балканкар АД" for bus 102) or gets edited inconsistently between
+      * feed updates. Deriving the subtitle from trip headsigns keeps the
+      * list consistent with the directions screen, which uses the same
+-     * top-2-headsign logic (getDirectionsForRoute).
++     * top-2-headsign logic (getDirectionsForRoute) — of the headsigns
++     * running today, there: when one of the two does not run today, the
++     * screen offers the next.
+      * One SQL query for all routes; top-2 picked in memory.
+      */
+     suspend fun getRouteSubtitles(): Map<String, String> {
+@@ -1189,7 +1296,7 @@ class GtfsRepository @Inject constructor(
+      * IS a stable property of the route.
+      */
+     suspend fun getStopsForDirection(routeId: String, headsign: String): List<StopWithSequence> {
+-        val tripId = tripDao.getRepresentativeTrip(routeId, headsign)
++        val tripId = representativeTrip(routeId, headsign)
+             ?: tripDao.getByRoute(routeId)
+                 .firstOrNull { it.tripHeadsign == headsign }?.tripId
+             ?: return emptyList()
+diff --git a/app/src/main/java/bg/sofia/transit/data/repository/RouteOfTheDay.kt b/app/src/main/java/bg/sofia/transit/data/repository/RouteOfTheDay.kt
+new file mode 100644
+index 0000000..3a1bd3c
+--- /dev/null
++++ b/app/src/main/java/bg/sofia/transit/data/repository/RouteOfTheDay.kt
+@@ -0,0 +1,131 @@
++package bg.sofia.transit.data.repository
++
++import kotlin.math.cos
++import kotlin.math.hypot
++
++/**
++ * The route a line takes today towards a headsign — for the Lines screen
++ * and for journey tracking alike, before a vehicle is identified and after
++ * (GtfsRepository.getDirectionsForRoute, the stops of a direction or of a
++ * vehicle's headsign).
++ *
++ * Not the fullest trip of all in the feed. The feed keeps diversions for
++ * weeks after they end, and carries planned ones weeks ahead, and the
++ * fullest trip was one of them more than once: on 28 Oct 2026 tram 3 to
++ * Кв. Орландовци was followed by a diversion through ЦЕНТРАЛНА ГАРА due
++ * from 7 Nov, tram 4 by one due from 4 Nov; in the data bundled on 5 Oct,
++ * tram 22 to Ж.К. КРАСНА ПОЛЯНА by a route via Гео Милев run on 5-7 Oct,
++ * 213, 305, 404 and 78 by one via УЛ. КЛОКОТНИЦА ended on 12 Oct.
++ *
++ * The directions themselves are named as before — the busiest headsigns
++ * over all trips — of those running today. Named instead by today's own
++ * trips, or by the routes they run along, they changed from day to day and
++ * hour to hour (63's short runs outnumber its full ones on weekdays; tram 8
++ * runs a short turn by day on Saturdays), and an identified vehicle's
++ * headsign came to differ from the direction it was on (reviews of
++ * 28 Oct 2026).
++ *
++ * Pure Kotlin, so it can be tested on the feed itself
++ * (tools/test-harness/run_route_tests.sh).
++ */
++object RouteOfTheDay {
++
++    class Stop(val id: String, val lat: Double, val lon: Double)
++
++    /** A trip that runs today: its headsign, trimmed, and its stops in order. */
++    class TodaysTrip(val tripId: String, val headsign: String, val stops: List<Stop>)
++
++    /**
++     * The first two of [ranking] — the line's headsigns, busiest over all
++     * its trips first — that run today, each with its route today
++     * (routeFor). Empty when none of them runs today, or when the two do not
++     * run the opposite ways (opposite): with one of the two not running
++     * today, the next may be a short run of the other way, and the way back
++     * would not be offered (review of 28 Oct 2026: never in 153 days of
++     * feeds, 63 of 120 lines when made so) — the busiest of all, as before,
++     * then.
++     */
++    fun directions(trips: List<TodaysTrip>, ranking: List<String>): List<Pair<String, TodaysTrip>> {
++        val out = ranking.asSequence().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
++            .mapNotNull { hs -> routeFor(trips, hs)?.let { hs to it } }
++            .take(2).toList()
++        return if (out.size == 2 && !opposite(out[0].second, out[1].second)) emptyList() else out
++    }
++
++    /**
++     * The trip whose route stands for [headsign] today: of today's trips
++     * with that very headsign — compared exactly: CGM spells "ГАРА ПОДУЯНЕ"
++     * for tram 22's runs from ДЕПО ИСКЪР and "Гара Подуяне" for those from
++     * Автостанция Изток — the one the most of them run along (along): the
++     * full run, of which today's short runs are parts (76 towards Гоце
++     * Делчев runs trips of 31 stops and of 16, starting halfway at УМБАЛ Св.
++     * Анна); of routes as busy, the one with most stops, then by trip id, so
++     * that the choice does not change from one call to the next. Null when
++     * none runs today.
++     */
++    fun routeFor(trips: List<TodaysTrip>, headsign: String): TodaysTrip? = busiest(trips.filter { it.headsign == headsign })
++
++    /**
++     * The route today of the variant [prefix] names — the first two parts
++     * of a trip id, the line and its road shape, which the vehicle feed
++     * carries: one route each, all but the metro's, on 28 Oct 2026. Exact
++     * where the headsign is not: 111's short runs to БУЛ. НИКОЛА ПЕТКОВ start
++     * from either end (A3-A2388- from Ж.К. ЛЮЛИН-1,2, A3-A1801- from Ж.К.
++     * МЛАДОСТ-1), and by the headsign the one end's vehicles were followed by
++     * the other's stops. Null when none runs today.
++     */
++    fun routeOfVariant(trips: List<TodaysTrip>, prefix: String): TodaysTrip? =
++        busiest(trips.filter { it.tripId.startsWith(prefix) })
++
++    /** Of [own], the route the most of them run along; see routeFor. */
++    private fun busiest(own: List<TodaysTrip>): TodaysTrip? =
++        own.sortedBy { it.tripId }.distinctBy { t -> t.stops.map { it.id } }
++            .map { r -> r to own.count { along(it, r) } }
++            .filter { it.second > 0 }
++            .maxWithOrNull(compareBy<Pair<TodaysTrip, Int>> { it.second }
++                .thenBy { it.first.stops.size }
++                .thenByDescending { it.first.tripId })
++            ?.first
++
++    /**
++     * Whether [trip] runs along [route]: each of its stops, in order, a stop
++     * of the route, by its id. Not by place: two poles are two stops, however
++     * near (the owner, 28 Oct 2026). So 63's short runs to БУЛ. ЦАР БОРИС ІІІ,
++     * from УЛ. БЯЛАТА ЧЕШМА (1839), are not along its full runs from ЗЛАТНИ
++     * МОСТОВЕ, which call at another pole 19 m off (6569), and on weekdays,
++     * 13 of them to 9, the short run is the route: the full runs' first 7
++     * stops are not known until the vehicle is identified. Of the 3119 routes
++     * chosen over 9 days of the feed of 28 Oct 2026, every direction every
++     * day, the only one that place (50 m) chose otherwise. In order, so that
++     * the stops of the way back are not taken for the way there.
++     */
++    fun along(trip: TodaysTrip, route: TodaysTrip): Boolean {
++        var i = 0
++        for (s in route.stops) {
++            if (i == trip.stops.size) break
++            if (trip.stops[i].id == s.id) i++
++        }
++        return i == trip.stops.size
++    }
++
++    /**
++     * Whether routes [a] and [b] run the opposite ways: the stops of [a]
++     * that have one of [b] near (OPPOSITE_M — across the street), taken in
++     * order, meet those of [b] mostly backwards. So every line with two
++     * directions, every day of the feeds of 5 and 28 Oct 2026.
++     */
++    private fun opposite(a: TodaysTrip, b: TodaysTrip): Boolean {
++        val at = a.stops.mapNotNull { s ->
++            b.stops.indices.minByOrNull { distance(s, b.stops[it]) }?.takeIf { distance(s, b.stops[it]) <= OPPOSITE_M }
++        }
++        val back = at.zipWithNext().count { (x, y) -> y < x }
++        return back >= 2 && back > at.zipWithNext().count { (x, y) -> y > x }
++    }
++
++    private fun distance(a: Stop, b: Stop): Double =
++        hypot((a.lat - b.lat) * M_PER_DEG, (a.lon - b.lon) * M_PER_DEG * cos(Math.toRadians((a.lat + b.lat) / 2)))
++
++    /** A stop of the way back is this near its counterpart of the way there, across the street, at most. */
++    const val OPPOSITE_M = 150.0
++    private const val M_PER_DEG = 111_195.0
++}
+diff --git a/app/src/main/java/bg/sofia/transit/service/JourneyService.kt b/app/src/main/java/bg/sofia/transit/service/JourneyService.kt
+index 8a79868..1ad8677 100644
+--- a/app/src/main/java/bg/sofia/transit/service/JourneyService.kt
++++ b/app/src/main/java/bg/sofia/transit/service/JourneyService.kt
+@@ -423,6 +423,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+          */
+         private const val VEHICLE_BESIDE_MEMORY_MS = 90_000L
+ 
++
+         /**
+          * The stop we board at is the one nearest where we waited — the
+          * last place we stood this close to a stop of the line before
+@@ -784,6 +785,20 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+ 
+     /** Chosen alighting stop; null until the user picks one. */
+     private var destinationIdx: Int? = null
++    /**
++     * The stop to get off at and every id of its pole — the same stop for a
++     * bus and for a trolley, under one stop code (stopIdsOfSamePlace) — as
++     * last looked up (adoptVehicle), for carrying it over to another order
++     * (remapDestination).
++     */
++    private var destinationPoles: Pair<String, Set<String>>? = null
++    /**
++     * The stop to get off at, with the ids of its pole, taken off on adopting
++     * a vehicle whose route does not have it — put back should that vehicle
++     * be withdrawn (revokeIdentification): taken wrongly, it would have cost
++     * the passenger their stop.
++     */
++    private var setAsideDestination: Pair<String, Set<String>>? = null
+     /** Which of the "2 stops / 1 stop / next stop" warnings already fired. */
+     private val alightWarningsFired = mutableSetOf<Int>()
+     /**
+@@ -1567,6 +1582,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+      */
+     fun setDestination(idx: Int?) {
+         destinationIdx = idx?.coerceIn(0, orderedStops.lastIndex)
++        setAsideDestination = null
++        destinationPoles = null
++        // Its pole's ids looked up now, so that a withdrawal — which cannot
++        // wait for the database — carries it over by them too (review of
++        // 28 Oct 2026).
++        destinationIdx?.let { orderedStops.getOrNull(it)?.stopId }?.let { id ->
++            serviceScope.launch {
++                val poles = try { gtfsRepo.stopIdsOfSamePlace(id).toSet() } catch (e: Exception) { return@launch }
++                withContext(Dispatchers.Main) {
++                    if (destinationIdx?.let { orderedStops.getOrNull(it)?.stopId } == id) destinationPoles = id to poles
++                }
++            }
++        }
+         alightWarningsFired.clear()
+         destinationArrivedMs = 0L
+         destinationEtaEpoch = null
+@@ -1621,6 +1649,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+         currentIdx   = 0
+         atStop       = false
+         destinationIdx = null
++        setAsideDestination = null
++        destinationPoles = null
+         destinationEtaEpoch = null
+         etaSource = EtaSource.NONE
+         alightWarningsFired.clear()
+@@ -2604,6 +2634,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+             emptyList()
+         }
+ 
++        // Whether the order taken below is this vehicle's own variant, other
++        // than the route its headsign stands for — not to be kept should the
++        // vehicle prove not ours (directionFromVehicle).
++        var ownOrder = false
+         if (stops.isEmpty() || hs == null) {
+             val directions = try {
+                 gtfsRepo.getDirectionHeadsigns(v.routeId)
+@@ -2617,8 +2651,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+                 ?: directions.firstOrNull { it.equals(headsign, ignoreCase = true) }
+                 ?: return false
+ 
++            // Its own variant first, by its trip id (getStopsForTripVariant):
++            // the route it takes, not the one its headsign stands for. 111's
++            // short runs to БУЛ. НИКОЛА ПЕТКОВ start from either end; tram 8's
++            // evening runs from Ж.К. ЛЮЛИН-5 on 31 Oct 2026 were followed from
++            // БУЛ. ВАРДАР on only, by the day's route to ПЛ. ЖУРНАЛИСТ. The stop
++            // to get off at goes over by its pole (remapDestination), and is
++            // said to be off it when it is.
+             val fallbackStops = try {
+-                gtfsRepo.getStopsForRouteDirection(v.routeId, fallbackHs)
++                val byHeadsign = gtfsRepo.getStopsForRouteDirection(v.routeId, fallbackHs)
++                val variant = gtfsRepo.getStopsForTripVariant(v.tripId)
++                ownOrder = variant.isNotEmpty() && variant.map { it.stopId } != byHeadsign.map { it.stopId }
++                variant.ifEmpty { byHeadsign }
+             } catch (e: Exception) { emptyList() }
+             if (fallbackStops.isEmpty()) {
+                 FileLogger.w(TAG, "Cannot adopt ${v.routeShortName}: no stops for " +
+@@ -2642,6 +2686,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+                 .singular(v.routeType, gtfsRepo.isTrolleyRoute(v.routeId))
+         } catch (e: Exception) { "Превозно средство" }
+ 
++        // Every id of the pole of the stop to get off at, for keeping it on
++        // the new order below.
++        val polesNow = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId }?.let { id ->
++            id to (try { gtfsRepo.stopIdsOfSamePlace(id).toSet() } catch (e: Exception) { setOf(id) })
++        }
++
+         // The lookups above wait: the journey may have ended, or another begun.
+         if (source !== rideShadow || !journeyActive) return false
+ 
+@@ -2665,6 +2715,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+         // Taken before the stop order is replaced, for keeping the alighting
+         // stop below.
+         val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId }
++        val poles = polesNow?.takeIf { it.first == destinationStopId }?.second
+ 
+         routeId        = v.routeId
+         headsign       = hs
+@@ -2679,9 +2730,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+         followedKey    = v.key
+ 
+         // The direction now followed comes from this vehicle when it was not
+-        // known before, or when the vehicle's differs from the one followed.
+-        // Should the vehicle prove not ours, the direction goes with it.
+-        directionFromVehicle = candidates.isNotEmpty() || differentDirection
++        // known before, or when the vehicle's differs from the one followed —
++        // or the order does, its own variant's (a short run's, say): should
++        // the vehicle prove not ours, it goes with it.
++        directionFromVehicle = candidates.isNotEmpty() || differentDirection || ownOrder
+ 
+         // Any pending direction work belongs to the discarded assumption.
+         candidates = emptyList()
+@@ -2703,8 +2755,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+         leftOnFoot        = false
+         leavingPeakKmh    = 0.0
+         wrongLineNoticeGiven = false
+-        remapDestination(destinationStopId,
+-            clear = !differentLine && differentDirection)
++        val destinationOff = remapDestination(destinationStopId,
++            clear = !differentLine && differentDirection, poles = poles)
++        if (destinationOff && destinationStopId != null) setAsideDestination = destinationStopId to (poles ?: setOf(destinationStopId))
+ 
+         // The same switch is not announced twice.
+         //
+@@ -2733,6 +2786,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+             else -> FileLogger.d(TAG, "Line and direction as announced — silent")
+         }
+         lastAnnouncedDirection = hs
++        // Not on its route, the stop to get off at goes — never unnoticed: a
++        // short run ends before it, and nothing would have been said.
++        if (destinationOff) announce(
++            if (word == "Превозно средство") "Това превозно средство не минава през спирката за слизане."
++            else "Този ${word.lowercase()} не минава през спирката за слизане.")
+ 
+         publishLastKnown()
+         restartEtaPolling()
+@@ -2841,7 +2899,12 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+             destinationEtaEpoch = null
+             etaSource = EtaSource.NONE
+         } else {
+-            val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId }
++            // The stop to get off at — or the one taken off for the vehicle
++            // now withdrawn, put back.
++            val aside = setAsideDestination.takeIf { destinationIdx == null }
++            setAsideDestination = null
++            val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId } ?: aside?.first
++            val poles = (aside ?: destinationPoles)?.takeIf { it.first == destinationStopId }?.second
+             tripId = c.tripId
+             routeId = c.routeId
+             headsign = c.headsign
+@@ -2869,7 +2932,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+             leavingPeakKmh = 0.0
+             // With the direction still to be determined there is no order to
+             // find the stop in, and it is cleared.
+-            remapDestination(destinationStopId, clear = c.stops.isEmpty())
++            val destinationOff = remapDestination(destinationStopId, clear = c.stops.isEmpty(), poles = poles)
+             wrongLineNoticeGiven = false
+             if (!sameLine) {
+                 // Back to the chosen line only if we are anywhere near it.
+@@ -2916,6 +2979,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+                 }
+                 lastAnnouncedDirection = c.headsign
+             }
++            if (destinationOff) announce("Спирката за слизане не е по маршрута на линия ${c.shortName}.")
+         }
+ 
+         // Already off the route: we are on neither that vehicle nor, it now
+@@ -3431,25 +3495,43 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
+      * the usual check reports it as passed, which on this vehicle it is.
+      * [clear] — a reversal of direction on the same line — discards it as
+      * before: the stop that was chosen is on the other side of the street.
++     *
++     * Or by another id of the same pole ([poles]): a bus and a trolley
++     * stopping there have a stop each under one stop code (A1903 and TB1903;
++     * stopIdsOfSamePlace) — by id alone, the stop was said not to be on a
++     * trolley's route that stops there (review of 28 Oct 2026). Never by
++     * nearness or name: a pole 20 m off is another stop (the owner,
++     * 28 Oct 2026), as is the one across the street.
++     *
++     * True when there was a stop to get off at, not discarded by [clear], and
++     * the new order does not have it — for the caller to say so.
+      */
+-    private fun remapDestination(stopId: String?, clear: Boolean) {
+-        if (destinationIdx == null && stopId == null) return
+-        val idx = if (clear || stopId == null) -1
++    private fun remapDestination(stopId: String?, clear: Boolean, poles: Set<String>? = null): Boolean {
++        if (destinationIdx == null && stopId == null) return false
++        var idx = if (clear || stopId == null) -1
+                   else orderedStops.indexOfFirst { it.stopId == stopId }
++        if (idx < 0 && !clear && !poles.isNullOrEmpty()) idx = orderedStops.indexOfFirst { it.stopId in poles }
+         destinationEtaEpoch = null
+         etaSource = EtaSource.NONE
+         if (idx >= 0) {
+             destinationIdx = idx
+-            FileLogger.i(TAG, "Alighting stop kept: ${orderedStops[idx].stopName} (#$idx)")
+-        } else {
+-            if (destinationIdx != null) {
+-                FileLogger.i(TAG, "Alighting stop " +
+-                    (if (clear) "cleared: direction reversed" else "not on the new route — cleared"))
+-            }
+-            destinationIdx = null
+-            alightWarningsFired.clear()
+-            destinationArrivedMs = 0L
++            // Without poles given, those looked up when it was chosen, if of this stop.
++            destinationPoles = poles?.let { orderedStops[idx].stopId to it }
++                ?: destinationPoles?.takeIf { it.first == orderedStops[idx].stopId }
++            FileLogger.i(TAG, "Alighting stop kept: ${orderedStops[idx].stopName} (#$idx)" +
++                (if (orderedStops[idx].stopId != stopId) ", under another id of its pole" else ""))
++            return false
+         }
++        val off = destinationIdx != null && !clear
++        destinationPoles = null
++        if (destinationIdx != null) {
++            FileLogger.i(TAG, "Alighting stop " +
++                (if (clear) "cleared: direction reversed" else "not on the new route — cleared"))
++        }
++        destinationIdx = null
++        alightWarningsFired.clear()
++        destinationArrivedMs = 0L
++        return off
+     }
+ 
+     /**
+diff --git a/tools/test-harness/README.md b/tools/test-harness/README.md
+index 9a6b57c..7e90354 100644
+--- a/tools/test-harness/README.md
++++ b/tools/test-harness/README.md
+@@ -13,6 +13,7 @@
+ | `run_reading_tests.sh` | **Кога и откъде се чете фийдът с превозните средства**: `readingFrom`, `readingAccepted`, `nextLookMs` от `service/JourneyService.kt` (цикълът на прочитите и `readVehicles`), в симулация с часовник и фийд, който пази копието си 20 s като `RealtimeRepository`: дълго чакане на спирката, пускане при потегляне, ново пускане веднага след пътуване, „Диагностика“, която тегли позициите, мрежа без връзка при потеглянето и по пътя, бавна мрежа — първият прочит до 5 s след потеглянето (до 26 s, ако копие отпреди потеглянето още се пази), никога копие отпреди потеглянето, после на 30 s, без поток от заявки | 20 | всички минават (26.10.2026) |
+ | `run_geometry_tests.sh` | **Геометрия на маршрутите**: `service/RouteGeometry.kt` върху истинския маршрут на 213 (завоят „ХМС“ → „Държавна печатница“, пътуване с GPS отклонения, крайни спирки, обиколки, повтарящи се точки) **излизане от маршрута по пътя** (`OffRoadWatch`) върху истинските пътища на 213 и 305 към Централна гара („УМБАЛ Св. Анна“ → „Хотел Плиска“ и нататък до „Ул. Бяло море“) и четенето на `shapes.txt` в `GtfsParser.kt`. **Компасът по пътя** (`geometry/CompassTests.kt`, 27.10.2026): по пътищата на курсовете на всички линии във вградените данни — колко точки посоката се казва вярно и грешно сега и с хордите между спирките; с `TRACE_DIR` — и 27.10 b. С `GTFS_DIR=<разархивиран пакет на ЦГМ>` проверява и че спирките на всеки курс в мрежата пасват на маршрута му | 12 + 9 + 3 (+ мрежата: 537 от 537) | всички минават (5.10.2026) |
+ | `run_waiting_tests.sh` | **Мястото на чакане** (`service/WaitingPlace.kt`): периодите на стоене, „отведени“ извън обсега на ходенето, последният период до спирка; измислени пътувания (светофар и пълзене след спирката, ходене до нея, засичане на 1–10 s, със и без скоростта на приемника, спирки на 100 m) срещу старото правило; с `TRACE_DIR` — записите, както са, разредени и без скоростта на приемника, по спирките на посоката, по която е пътувано (моделите на спирките от `stop_times.txt`) | измислени + записите | всички минават (27.10.2026) |
++| `run_route_tests.sh` | **Маршрутът на деня** (`data/repository/RouteOfTheDay.kt`): посоките на линията и курсът на всяка — от курсовете, които се движат днес, сравнени строго по номер на спирката. Измислени случаи: пълен курс и късите в него; къси курсове от друг стълб, по-чести от пълните (63 — печели късият, известна цена); обратната посока отсреща; точни надписи („Гара Подуяне“ и „ГАРА ПОДУЯНЕ“ на трамвай 22); рядко отклонение; курс с допълнителни спирки; посока, която днес не се движи; две посоки в една и съща посока; 111 от двата края (по варианта на возилото). После цял фийд ден по ден срещу досегашното правило: избор на посока, разпознато возило по своя вариант, „Посоката е коригирана“, посоки, които не са обратни. Вграденият фийд винаги, днешният — с `GTFS_DIR` | 11 + 6 на ден | всички минават — вграденият и този от 28.10.2026, за 28.10, 31.10, 1.11, 4.11 и 7.11 (28.10.2026) |
+ | `run_logger_test.sh` | `util/FileLogger.kt` при 16 нишки × 20 000 реда: без изключения към извикващия, без повредени часове | 1 | минава |
+ | `run_trace_test.sh` | **Запис на пътуването**: `util/JourneyTrace.kt` — формат на всеки ред (и редовете от Етап 3 (б): `B` — спирката на качване и разписаните там курсове, `O` — извън маршрута на нашето), кои превозни средства влизат в прочит (до 1000 m и следеното, където и да е), прочитите не се разкъсват от засичания от други нишки, ограничението от 4 MB с пренасяне на началния ред на пътуването, изчистване по време на пътуване, незатворено пътуване, нищо не стига до извикващия (и преди `init`) | 21 | всички минават (25.10.2026) |
+ | `run_model_tests.sh` | **Новият модел „метри, изминати заедно“** (`service/RideModel.kt`, Етап 1): пътувания, симулирани по истинските пътища на 213 и 304 (`model/Sim.kt`) — пътуването от 6.10 и варианти (един лош отчет, отчет на 150 m, раздяла–60 m–раздяла, автобус, дошъл с нас и стоящ на спирката ни, насрещен автобус от избраната линия при първия избор, загубен GPS при потегляне, тръгване от „Хотел Плиска“ с равенство и избрана линия, 304 избрана и смяна при раздялата, насрещен автобус на светофар, автобус на успоредна улица, лош сигнал в 8 вида × 5 варианта, кратък престой при всяка фаза на отчетите, стоене 10 min в автобуса, мълчащ автобус, превозно средство без данни, часовници, изгубено място на нашия автобус), мястото ни по редки и скачащи засичания, засичане с час в бъдещето (и първото засичане 10 min напред), часовник на телефона, поправен по средата, отчет преди мястото ни да е известно, поправка на часовника, научена късно, автобус, замлъкнал до нас, тичане напред-назад на спирката. **Етап 3 (а):** зоната напред за дълги превозни средства (седнал отзад; автобус на 36–50 m пред нашия — никога), ранното правило по спирката на качване в модела (само едно превозно средство на до 60 m, само при движение, веднъж; грешно взето — поправено), извън маршрута на нашето и то не е до нас 90 s (заобикаляне, мълчание, един пропуснат прочит, слизане при заобикаляне, общ път), слизане при неточни засичания след него и тунели (никога слизане). Всяко правило в модела е проверено с нарочна повреда: без него поне един тест се проваля. С `TRACE_DIR=<папка със записи от телефона>` преиграва и записаните пътувания (и ранното правило с всички превозни средства „разписани“, и 24.10 с нашите засичания, преместени 10–25 m назад). `MODEL_SEEDS=30` за по-дълъг пробег | 195 (+89 с 18-те записа), от тях 17 за `service/RideShadow.kt` (Етап 2; от Етап 3 (б) приложението следва събитията му): ранното правило по спирката на качване — действа, веднъж, затворено след първи избор по метрите или при неопределена спирка, името на спирката като в записа; събитията се връщат към приложението с id-тата на фийда; „нашето е до нас“ за таймерите; извън маршрута — отпадане; редовете в лога, закръгляне като в записа | всички минават (25.10.2026) |
+@@ -29,6 +30,7 @@ bash tools/test-harness/run_alight_tests.sh
+ bash tools/test-harness/run_logger_test.sh
+ bash tools/test-harness/run_geometry_tests.sh
+ TRACE_DIR=/папка/със/записи bash tools/test-harness/run_waiting_tests.sh   # мястото на чакане, и по записите
++GTFS_DIR=/папка/с/днешния/фийд bash tools/test-harness/run_route_tests.sh   # маршрутът на деня; фийдът — gtfs.sofiatraffic.bg/api/v1/static, разархивиран
+ bash tools/test-harness/run_trace_test.sh
+ bash tools/test-harness/run_model_tests.sh
+ TRACE_DIR=/папка/със/записи bash tools/test-harness/run_model_tests.sh   # и записаните пътувания
+diff --git a/tools/test-harness/route/RouteTests.kt b/tools/test-harness/route/RouteTests.kt
+new file mode 100644
+index 0000000..be3ff6e
+--- /dev/null
++++ b/tools/test-harness/route/RouteTests.kt
+@@ -0,0 +1,202 @@
++// The directions of a line and the route each takes (data/repository/RouteOfTheDay.kt): on made-up trips, and
++// on a whole static feed (route/route_extract.py), day by day, against the rule it replaced — the two headsigns
++// with most trips of all, and for each the trip with most stops of all; now the two of those running that day,
++// each by the route it takes that day. Also: lines whose two directions do not run opposite ways. Every trip running that day is ridden
++// twice: as a passenger choosing the direction it runs along (none offered: "not offered"), and as an
++// identified vehicle, named by its trip id's prefix as the app names it (getHeadsignByTripIdPrefix) and followed
++// by its variant, that prefix (JourneyService.adoptVehicle → getStopsForTripVariant), else by that name; and how often identifying the vehicle
++// says "Посоката е коригирана" for a trip followed by the direction it runs along.
++// Judged by the stops themselves, as the owner judges them — two poles are two stops, however near (28 Oct 2026):
++// right when each of its stops is a stop of the route followed, by id, in order; and how many stops of that route
++// it passes without calling ("said, not called").
++import bg.sofia.transit.data.repository.RouteOfTheDay
++import bg.sofia.transit.data.repository.RouteOfTheDay.Stop
++import bg.sofia.transit.data.repository.RouteOfTheDay.TodaysTrip
++import java.io.File
++
++var fails = 0
++fun check(n: String, ok: Boolean, detail: () -> String = { "" }) {
++    if (ok) println("PASS $n") else { fails++; println("FAIL $n ${detail()}") }
++}
++
++fun dist(a: Stop, b: Stop) = Math.hypot((a.lat - b.lat) * 111_195.0, (a.lon - b.lon) * 111_195.0 * Math.cos(Math.toRadians(a.lat)))
++/** The positions on [route] that [trip]'s stops are at, in order; null if it does not run along it. */
++fun matched(trip: TodaysTrip, route: TodaysTrip): List<Int>? {
++    val at = ArrayList<Int>(); var j = 0
++    for (s in trip.stops) {
++        while (j < route.stops.size && route.stops[j].id != s.id) j++
++        if (j == route.stops.size) return null
++        at += j; j++
++    }
++    return at
++}
++/** Stops of [route] between the first and the last of [trip]'s that it does not call at. */
++fun skipped(at: List<Int>) = if (at.isEmpty()) 0 else (at.last() - at.first() + 1) - at.size
++
++class FeedTrip(val route: String, val name: String, val kind: String, val trip: TodaysTrip, val service: String)
++fun kindOf(t: String) = when (t) { "0" -> "трамвай"; "3" -> "автобус"; "11" -> "тролей"; "1" -> "метро"; else -> "вид $t" }
++
++/** The rule replaced: TripDao.getHeadsignCountsForRoute (top 2) + getRepresentativeTrip (most stops), all trips. */
++fun oldFor(all: List<FeedTrip>, headsign: String): TodaysTrip? =
++    all.filter { it.trip.headsign == headsign }.maxByOrNull { it.trip.stops.size }?.trip
++fun oldDirections(all: List<FeedTrip>): List<TodaysTrip> =
++    all.filter { it.trip.headsign.isNotEmpty() }.groupBy { it.trip.headsign }.entries
++        .sortedByDescending { it.value.size }.take(2).mapNotNull { oldFor(all, it.key) }
++
++fun prefixOf(tripId: String) = tripId.split("-").let { if (it.size < 2) "" else "${it[0]}-${it[1]}-" }
++fun mostCommon(names: List<String>) = names.filter { it.isNotEmpty() }.groupingBy { it }.eachCount()
++    .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).firstOrNull()?.key
++
++/** Whether two routes run the opposite ways: their stops near one another (150 m, across the street) meet mostly backwards. */
++fun opposite(a: TodaysTrip, b: TodaysTrip): Boolean {
++    val at = a.stops.mapNotNull { s -> b.stops.indices.minByOrNull { dist(s, b.stops[it]) }?.takeIf { dist(s, b.stops[it]) <= 150.0 } }
++    val back = at.zipWithNext().count { (x, y) -> y < x }
++    return back >= 2 && back > at.zipWithNext().count { (x, y) -> y > x }
++}
++
++class Tally { var right = 0; var notOffered = 0; var wrong = 0; var said = 0
++    override fun toString() = "right $right, wrong stops $wrong, not offered $notOffered, stops said but not called $said" }
++fun ride(trip: TodaysTrip, route: TodaysTrip?, t: Tally): Boolean {
++    if (route == null) { t.notOffered++; return false }
++    val at = matched(trip, route) ?: run { t.wrong++; return false }
++    t.right++; t.said += skipped(at); return true
++}
++/** As a passenger: the direction its trip runs along, if one is offered. */
++fun chosen(trip: TodaysTrip, dirs: List<TodaysTrip>): TodaysTrip? = dirs.firstOrNull { matched(trip, it) != null }
++
++fun main(args: Array<String>) {
++    fun s(id: String, y: Double) = Stop(id, 42.7 + y / 111_195.0, 23.3)
++    fun t(id: String, hs: String, vararg st: Stop) = TodaysTrip(id, hs, st.toList())
++    val a = s("a", 0.0); val b = s("b", 400.0); val c = s("c", 800.0); val d = s("d", 1200.0); val e = s("e", 1600.0)
++    // Made up.
++    run {
++        val full = t("f", "E", a, b, c, d, e); val short = t("s", "E", c, d, e)
++        check("a full run and its short runs: the full run", RouteOfTheDay.routeFor(listOf(short, short, short, full), "E") === full)
++    }
++    run {
++        val full = t("f", "Z", a, b, c, d, e); val fromPole = t("s", "Z", s("c2", 825.0), d, e)   // another pole of c, 25 m off
++        check("short runs from another pole of a stop, more of them than full runs: the short run — two poles are two stops (63, known)",
++            RouteOfTheDay.routeFor(listOf(fromPole, fromPole, fromPole, full), "Z") === fromPole)
++    }
++    run {
++        val there = t("t", "E", a, b, c, d, e)
++        val back = t("r", "A", s("e'", 1600.0), s("d'", 1200.0), s("c'", 800.0), s("b'", 400.0), s("a'", 0.0))  // across the street
++        check("the way back across the street is not along the way there", !RouteOfTheDay.along(back, there))
++    }
++    run {
++        val fromDepot = t("x", "ГАРА ПОДУЯНЕ", a, b, c, d, e); val fromIztok = t("y", "Гара Подуяне", d, e)
++        val all = listOf(fromDepot, fromIztok, fromIztok)
++        check("headsigns compared exactly: 'Гара Подуяне' and 'ГАРА ПОДУЯНЕ' are runs from different ends (tram 22)",
++            RouteOfTheDay.routeFor(all, "Гара Подуяне") === fromIztok && RouteOfTheDay.routeFor(all, "ГАРА ПОДУЯНЕ") === fromDepot)
++    }
++    run {
++        val main = t("m", "E", a, b, c, e); val detour = t("v", "E", a, b, s("x", 900.0), s("y", 1000.0), e)
++        check("a detour run now and then under the same headsign: the route most of them take",
++            RouteOfTheDay.routeFor(listOf(main, main, main, detour), "E") === main)
++    }
++    run {
++        val school = t("s", "E", a, b, s("x", 600.0), c, d, e); val usual = t("u", "E", a, b, c, d, e)
++        check("a run calling at extra stops takes in the usual ones too, and is followed (known: they hear its extra stops)",
++            RouteOfTheDay.routeFor(listOf(usual, usual, usual, school), "E") === school)
++    }
++    run {
++        val there = t("t", "E", a, b, c, d, e); val back = t("r", "A", e, d, c, b, a); val other = t("o", "Ш", a, b)
++        val dirs = RouteOfTheDay.directions(listOf(there, back, other), listOf("E", "X", "A", "Ш"))
++        check("the busiest headsigns of all, of those running today: one that does not run today gives way to the next",
++            dirs.map { it.first } == listOf("E", "A")) { "${dirs.map { it.first }}" }
++        check("none of them running today: no directions (the rule of all trips decides)",
++            RouteOfTheDay.directions(listOf(there), listOf("X", "Y")).isEmpty())
++    }
++    run {
++        // The way back's headsign not running today: the next is a short run of the way there.
++        val there = t("t", "E", a, b, c, d, e); val short = t("s", "C", a, b, c)
++        check("the next headsign a short run the same way: not offered as the way back — the rule of all trips decides",
++            RouteOfTheDay.directions(listOf(there, short), listOf("E", "A", "C")).isEmpty())
++    }
++    run {
++        val fromL = t("A3-A2388-1", "БУЛ. НИКОЛА ПЕТКОВ", a, b, c); val fromM = t("A3-A1801-1", "БУЛ. НИКОЛА ПЕТКОВ", e, d, c)
++        val all = listOf(fromL, fromL, fromM)
++        check("a headsign served from both ends: each vehicle by its variant (111 to БУЛ. НИКОЛА ПЕТКОВ)",
++            RouteOfTheDay.routeOfVariant(all, "A3-A1801-") === fromM && RouteOfTheDay.routeOfVariant(all, "A3-A2388-") === fromL)
++    }
++    check("no trips today: no route", RouteOfTheDay.routeFor(emptyList(), "E") == null)
++
++    // A whole feed, day by day.
++    val file = args.getOrNull(0)?.let { File(it) }
++    if (file == null || !file.isFile) { println("(no feed extract)"); return finish() }
++    val label = args.getOrNull(1) ?: ""
++    val days = ArrayList<Pair<String, Set<String>>>(); val feed = ArrayList<FeedTrip>()
++    file.forEachLine { l -> val p = l.split("|")
++        if (p[0] == "D") days += p[1] to (if (p[2].isEmpty()) emptySet() else p[2].split(",").toSet())
++        else feed += FeedTrip(p[1], p[2], p[3], TodaysTrip(p[4], p[5], p[7].split(";").map { x -> x.split(":").let { Stop(it[0], it[1].toDouble(), it[2].toDouble()) } }), p[6])
++    }
++    val byRoute = feed.groupBy { it.route }
++    val oldDirs = byRoute.mapValues { oldDirections(it.value) }
++    for ((date, services) in days) {
++        val pOld = Tally(); val pNew = Tally(); val vOld = Tally(); val vNew = Tally()
++        val worse = HashMap<String, Int>(); val vWorse = HashMap<String, Int>()
++        var trips = 0; var falseOld = 0; var falseNew = 0; val falseNewBy = HashMap<String, Int>()
++        val notOppositeNew = ArrayList<String>(); var notOppositeOld = 0
++        for ((route, all) in byRoute) {
++            val today = all.filter { it.service in services }
++            if (today.isEmpty()) continue
++            val todays = today.map { it.trip }
++            val ranking = all.filter { it.trip.headsign.isNotEmpty() }.groupingBy { it.trip.headsign }.eachCount()
++                .entries.sortedWith(compareBy({ -it.value }, { it.key })).map { it.key }
++            val named = RouteOfTheDay.directions(todays, ranking)
++            // With none of them running today, the app keeps the rule of all trips (getDirectionsForRoute).
++            val newDirs = if (named.isEmpty()) oldDirs[route]!! else named.map { it.second }
++            val newNames = if (named.isEmpty()) oldDirs[route]!!.map { it.headsign } else named.map { it.first }
++            if (newDirs.size == 2 && !opposite(newDirs[0], newDirs[1])) notOppositeNew += "$route ${newNames}"
++            val od = oldDirs[route]!!
++            if (od.size == 2 && !opposite(od[0], od[1])) notOppositeOld++
++            val who = "${kindOf(all[0].kind)} ${all[0].name}"
++            val prefixAll = all.groupBy { prefixOf(it.trip.tripId) }.mapValues { e -> mostCommon(e.value.map { it.trip.headsign }) }
++            val prefixToday = today.groupBy { prefixOf(it.trip.tripId) }.mapValues { e -> mostCommon(e.value.map { it.trip.headsign }) }
++            for (x in today) {
++                trips++
++                val po = ride(x.trip, chosen(x.trip, oldDirs[route]!!), pOld); val pn = ride(x.trip, chosen(x.trip, newDirs), pNew)
++                if (po && !pn) worse.merge("$who → ${x.trip.headsign}", 1, Int::plus)
++                // As an identified vehicle: named by its trip id's prefix, as GtfsRepository.getHeadsignByTripIdPrefix.
++                val hsOld = prefixAll[prefixOf(x.trip.tripId)] ?: x.trip.headsign
++                val hsNew = prefixToday[prefixOf(x.trip.tripId)] ?: hsOld
++                val vo = ride(x.trip, oldFor(all, hsOld), vOld)
++                // Its own variant, by the trip id's prefix (getStopsForTripVariant), then its headsign (JourneyService.adoptVehicle).
++                val vn = ride(x.trip, RouteOfTheDay.routeOfVariant(todays, prefixOf(x.trip.tripId))
++                    ?: RouteOfTheDay.routeFor(todays, hsNew) ?: oldFor(all, hsNew), vNew)
++                if (vo && !vn) vWorse.merge("$who → ${x.trip.headsign}", 1, Int::plus)
++                // Followed by the direction it runs along, then identified: "Посоката е коригирана" (and the stop
++                // to get off at cleared) when the two differ by name and — now — by way (JourneyService.adoptVehicle).
++                // Of the trips followed by a direction under both rules, so that more trips followed is not counted against.
++                val dOld = oldDirs[route]!!.indexOfFirst { matched(x.trip, it) != null }
++                val dNew = newDirs.indexOfFirst { matched(x.trip, it) != null }
++                if (dOld >= 0 && dNew >= 0) {
++                    if (!oldDirs[route]!![dOld].headsign.equals(hsOld, ignoreCase = true)) falseOld++
++                    if (!newNames[dNew].equals(hsNew, ignoreCase = true)) { falseNew++; falseNewBy.merge("$who → ${x.trip.headsign}", 1, Int::plus) }
++                }
++            }
++        }
++        println("$label, $date: $trips trips")
++        println("  choosing a direction — before: $pOld; now: $pNew")
++        println("  identified vehicle  — before: $vOld; now: $vNew")
++        fun top(m: Map<String, Int>) = m.entries.sortedByDescending { it.value }.take(12).joinToString("; ") { "${it.key} ${it.value}" }
++        if (worse.isNotEmpty()) println("  right before, not now, choosing (${worse.values.sum()}): ${top(worse)}")
++        if (vWorse.isNotEmpty()) println("  right before, not now, as a vehicle (${vWorse.values.sum()}): ${top(vWorse)}")
++        println("  direction said to change on identifying the vehicle (trips followed by a direction under both rules) — before: $falseOld; now: $falseNew" +
++            (if (falseNewBy.isEmpty()) "" else " (${top(falseNewBy)})"))
++        check("$label, $date: more trips right choosing a direction than before", pNew.right >= pOld.right) { "${pNew.right} < ${pOld.right}" }
++        check("$label, $date: more trips right as an identified vehicle than before", vNew.right >= vOld.right) { "${vNew.right} < ${vOld.right}" }
++        check("$label, $date: fewer trips on wrong stops, both ways", pNew.wrong <= pOld.wrong && vNew.wrong <= vOld.wrong)
++        check("$label, $date: no more stops said but not called", pNew.said <= pOld.said && vNew.said <= vOld.said) {
++            "choosing ${pNew.said} vs ${pOld.said}, as a vehicle ${vNew.said} vs ${vOld.said}" }
++        check("$label, $date: fewer direction changes said on identifying the vehicle", falseNew <= falseOld) { "$falseNew vs $falseOld" }
++        println("  lines whose two directions do not run opposite ways — before: $notOppositeOld; now: ${notOppositeNew.size} ${notOppositeNew.take(8)}")
++        check("$label, $date: no more lines whose two directions do not run opposite ways", notOppositeNew.size <= notOppositeOld)
++    }
++    finish()
++}
++
++fun finish() {
++    if (fails == 0) println("ALL PASS") else println("$fails FAILED")
++    kotlin.system.exitProcess(if (fails == 0) 0 else 1)
++}
+diff --git a/tools/test-harness/route/route_extract.py b/tools/test-harness/route/route_extract.py
+new file mode 100644
+index 0000000..8550cd2
+--- /dev/null
++++ b/tools/test-harness/route/route_extract.py
+@@ -0,0 +1,21 @@
++# The trips of every line in a static feed, for route/RouteTests.kt. Lines:
++#   T|route_id|short name|route_type|trip_id|headsign (trimmed)|service_id|stop_id:lat:lon;... in order
++#   D|date|service_id,...  — the services running on each of the DATES given (YYYYMMDD, comma-separated)
++import csv, sys, collections
++g, dates, out = sys.argv[1], sys.argv[2].split(","), sys.argv[3]
++runs = collections.defaultdict(set)
++for r in csv.DictReader(open(f"{g}/calendar_dates.txt", encoding="utf-8")):
++    if r["exception_type"] == "1" and r["date"] in dates: runs[r["date"]].add(r["service_id"])
++routes = {r["route_id"]: (r["route_short_name"], r["route_type"]) for r in csv.DictReader(open(f"{g}/routes.txt", encoding="utf-8"))}
++place = {r["stop_id"]: (r["stop_lat"], r["stop_lon"]) for r in csv.DictReader(open(f"{g}/stops.txt", encoding="utf-8"))}
++seq = collections.defaultdict(list)
++for r in csv.DictReader(open(f"{g}/stop_times.txt", encoding="utf-8")):
++    seq[r["trip_id"]].append((int(r["stop_sequence"]), r["stop_id"]))
++with open(out, "w", encoding="utf-8") as f:
++    for d in dates: f.write(f"D|{d}|{','.join(sorted(runs[d]))}\n")
++    for t in csv.DictReader(open(f"{g}/trips.txt", encoding="utf-8")):
++        s = seq.get(t["trip_id"])
++        if not s: continue
++        name, kind = routes.get(t["route_id"], ("?", "?"))
++        stops = ";".join(f"{x}:{place[x][0]}:{place[x][1]}" for _, x in sorted(s))
++        f.write("|".join(["T", t["route_id"], name, kind, t["trip_id"], (t["trip_headsign"] or "").strip(), t["service_id"], stops]) + "\n")
+diff --git a/tools/test-harness/run_route_tests.sh b/tools/test-harness/run_route_tests.sh
+new file mode 100755
+index 0000000..bf5985c
+--- /dev/null
++++ b/tools/test-harness/run_route_tests.sh
+@@ -0,0 +1,25 @@
++#!/usr/bin/env bash
++# The directions of a line and the route each takes, from the trips running that day
++# (data/repository/RouteOfTheDay.kt; see route/RouteTests.kt): on made-up trips, and on the bundled
++# feed for DATES (YYYYMMDD, comma-separated; default today and the six days after, in Sofia) against the rule it
++# replaced. With GTFS_DIR set to an unpacked static feed (e.g. today's, from gtfs.sofiatraffic.bg/api/v1/static),
++# on that one as well.
++# Compiles the REAL source file; needs kotlinc, a JDK and python3, no Android SDK.
++set -euo pipefail
++HERE="$(cd "$(dirname "$0")" && pwd)"
++ROOT="$(cd "$HERE/../.." && pwd)"
++SRC="$ROOT/app/src/main/java/bg/sofia/transit"
++KOTLINC="${KOTLINC:-kotlinc}"
++KLIB="${KOTLIN_LIB:-$(dirname "$(dirname "$(readlink -f "$(command -v "$KOTLINC")")")")/lib}"
++OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT
++DATES="${DATES:-$(for i in 0 1 2 3 4 5 6; do TZ=Europe/Sofia date -d "+$i day" +%Y%m%d; done | paste -sd,)}"
++"$KOTLINC" "$SRC/data/repository/RouteOfTheDay.kt" "$HERE/route/RouteTests.kt" -d "$OUT/c" 2>&1 | grep -A3 "error:" || true
++run() { java -Xmx4g -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -cp "$OUT/c:$KLIB/kotlin-stdlib.jar" RouteTestsKt "$@" | grep -v "^PASS"; }
++status=0
++python3 "$HERE/route/route_extract.py" "$ROOT/app/src/main/assets/gtfs" "$DATES" "$OUT/bundled.txt"
++run "$OUT/bundled.txt" "bundled feed ($(cat "$ROOT/app/src/main/assets/gtfs/bundle_date.txt"))" || status=1
++if [ -n "${GTFS_DIR:-}" ]; then
++    python3 "$HERE/route/route_extract.py" "$GTFS_DIR" "$DATES" "$OUT/feed.txt"
++    run "$OUT/feed.txt" "GTFS_DIR feed" || status=1
++fi
++exit $status
