@@ -3777,6 +3777,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         directionFromVehicle = false
         absentFromSet = false
         timetableWayAsked = false
+        // A journey begun over another: its stop to get off at is not this one's.
+        setAsideDestination = null
+        destinationPoles = null
     }
 
     /**
