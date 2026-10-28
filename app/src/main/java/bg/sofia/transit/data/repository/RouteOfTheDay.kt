@@ -146,9 +146,11 @@ object RouteOfTheDay {
      * window takes in a vehicle up to 20 min late or 5 min early; beyond, the
      * trip due may be another's. Every stop of every trip of the feed of
      * 28 Oct 2026 boarded once (tools/test-harness/run_route_tests.sh), on a
-     * weekday: on wrong stops 3892 → 1583, a run's end not known 3939 → 2109;
-     * none worse than the direction's route from 5 min early to 20 min late,
-     * about 0.5 % beyond. Short runs and full ones every few minutes (111) are
+     * weekday, of the trips that run the direction's way (thisWay — the
+     * caller's to give): on wrong stops 3892 → 1597, a run's end not known
+     * 3939 → 2109; none worse than the direction's route from 5 min early to
+     * 20 min late, nor with where we waited 25 m off the stop; about 0.4 %
+     * worse beyond. Short runs and full ones every few minutes (111) are
      * mostly not told apart.
      */
     fun wayOn(trips: List<TodaysTrip>, poles: Set<String>, departedSec: Int): Pair<TodaysTrip, Int>? {

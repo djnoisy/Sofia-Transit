@@ -13,7 +13,8 @@
 // every trip running that day boarded once, the metro aside, departing on time, 20 min late and 5 min early — the
 // window's edges — and on time with where we waited 25 m off the stop, four ways: never worse than the direction's
 // route followed; reported only, beyond the window, where the trip taken ends before the bus does ("Крайна спирка"
-// said too early).
+// said too early). And a reversal on identifying a vehicle (JourneyService.adoptVehicle: RouteOfTheDay.opposite of the
+// order followed and the vehicle's): never a trip running the way followed, nor its variant's route.
 import bg.sofia.transit.data.repository.RouteOfTheDay
 import bg.sofia.transit.data.repository.RouteOfTheDay.Stop
 import bg.sofia.transit.data.repository.RouteOfTheDay.TodaysTrip
@@ -52,12 +53,7 @@ fun prefixOf(tripId: String) = tripId.split("-").let { if (it.size < 2) "" else 
 fun mostCommon(names: List<String>) = names.filter { it.isNotEmpty() }.groupingBy { it }.eachCount()
     .entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).firstOrNull()?.key
 
-/** Whether two routes run the opposite ways: their stops near one another (150 m, across the street) meet mostly backwards. */
-fun opposite(a: TodaysTrip, b: TodaysTrip): Boolean {
-    val at = a.stops.mapNotNull { s -> b.stops.indices.minByOrNull { dist(s, b.stops[it]) }?.takeIf { dist(s, b.stops[it]) <= 150.0 } }
-    val back = at.zipWithNext().count { (x, y) -> y < x }
-    return back >= 2 && back > at.zipWithNext().count { (x, y) -> y > x }
-}
+fun opposite(a: TodaysTrip, b: TodaysTrip) = RouteOfTheDay.opposite(a, b)
 
 class Tally { var right = 0; var notOffered = 0; var wrong = 0; var said = 0
     override fun toString() = "right $right, wrong stops $wrong, not offered $notOffered, stops said but not called $said" }
@@ -125,6 +121,13 @@ fun main(args: Array<String>) {
             RouteOfTheDay.routeOfVariant(all, "A3-A1801-") === fromM && RouteOfTheDay.routeOfVariant(all, "A3-A2388-") === fromL)
     }
     check("no trips today: no route", RouteOfTheDay.routeFor(emptyList(), "E") == null)
+    run {
+        val there = t("t", "E", a, b, c, d, e); val short = t("s", "C", a, b, c)
+        val back = t("r", "A", s("e'", 1600.0), s("d'", 1200.0), s("c'", 800.0), s("b'", 400.0), s("a'", 0.0))
+        check("a reversal: the way back is one, a short run the same way is not (111 to БУЛ. НИКОЛА ПЕТКОВ), nor two stops back",
+            RouteOfTheDay.opposite(there, back) && !RouteOfTheDay.opposite(there, short) &&
+            !RouteOfTheDay.opposite(there, t("2", "A", s("c'", 800.0), s("b'", 400.0))))
+    }
 
     // The way on by the timetable.
     run {
@@ -190,6 +193,7 @@ fun main(args: Array<String>) {
         var trips = 0; var falseOld = 0; var falseNew = 0; val falseNewBy = HashMap<String, Int>()
         val notOppositeNew = ArrayList<String>(); var notOppositeOld = 0
         val firstDay = date == days.first().first
+        var falseReversals = 0; val falseReversalBy = HashMap<String, Int>()
         val boardings = LinkedHashMap<String, Boarding>()
         for (dl in listOf(0, 20 * 60, -5 * 60) + (if (firstDay) listOf(25 * 60, -6 * 60) else emptyList()))
             boardings["departing ${dl / 60} min late"] = Boarding(dl, null)
@@ -210,6 +214,14 @@ fun main(args: Array<String>) {
             if (od.size == 2 && !opposite(od[0], od[1])) notOppositeOld++
             val who = "${kindOf(all[0].kind)} ${all[0].name}"
             if (all[0].kind != "1") board(today.map { it.trip }, newDirs, boardings.values)
+            // Identifying a vehicle that runs the way followed: never a reversal (adoptVehicle), by its trip or its variant's route.
+            for (x in today) {
+                val d = newDirs.firstOrNull { matched(x.trip, it) != null } ?: continue
+                val v = RouteOfTheDay.routeOfVariant(todays, prefixOf(x.trip.tripId)) ?: x.trip
+                if (opposite(d, x.trip) || (matched(x.trip, v) != null && opposite(d, v))) {
+                    falseReversals++; falseReversalBy.merge("$who → ${x.trip.headsign}", 1, Int::plus)
+                }
+            }
             val prefixAll = all.groupBy { prefixOf(it.trip.tripId) }.mapValues { e -> mostCommon(e.value.map { it.trip.headsign }) }
             val prefixToday = today.groupBy { prefixOf(it.trip.tripId) }.mapValues { e -> mostCommon(e.value.map { it.trip.headsign }) }
             for (x in today) {
@@ -251,6 +263,9 @@ fun main(args: Array<String>) {
         check("$label, $date: fewer direction changes said on identifying the vehicle", falseNew <= falseOld) { "$falseNew vs $falseOld" }
         println("  lines whose two directions do not run opposite ways — before: $notOppositeOld; now: ${notOppositeNew.size} ${notOppositeNew.take(8)}")
         check("$label, $date: no more lines whose two directions do not run opposite ways", notOppositeNew.size <= notOppositeOld)
+        println("  a vehicle running the way followed taken for a reversal: $falseReversals" +
+            (if (falseReversalBy.isEmpty()) "" else " (${top(falseReversalBy)})"))
+        check("$label, $date: no vehicle running the way followed is taken for a reversal", falseReversals == 0)
         println("  the way on by the timetable, boarding at every stop (the metro aside) — on wrong stops / the run's end not known, now -> by the timetable:")
         for ((name, b) in boardings) {
             println("    $name: ${b.n} boardings; ${b.now[2]} -> ${b.new[2]} / ${b.now[1]} -> ${b.new[1]}; worse ${b.worse}" +

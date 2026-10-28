@@ -795,10 +795,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      */
     private var destinationPoles: Pair<String, Set<String>>? = null
     /**
-     * The stop to get off at, with the ids of its pole, taken off on adopting
-     * a vehicle whose route does not have it — put back should that vehicle
-     * be withdrawn (revokeIdentification): taken wrongly, it would have cost
-     * the passenger their stop.
+     * The stop to get off at, with the ids of its pole, taken off by a new
+     * stop order that does not have it (remapDestination) — a vehicle's, the
+     * timetable's — put back by the next that has it: on that vehicle's
+     * withdrawal (revokeIdentification), on adopting another (adoptVehicle).
+     * Taken wrongly, it would have cost the passenger their stop.
      */
     private var setAsideDestination: Pair<String, Set<String>>? = null
     /** The way on by the timetable has been asked for this journey (askTimetableWay). */
@@ -2629,11 +2630,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // not ours (revokeIdentification).
         chosen = chosen?.copy(label = routeLabel, headsign = hs, stops = stops, latLons = latLons,
             candidates = emptyList())
+        // Not on it, set aside: put back should a vehicle identified later go there (adoptVehicle).
         val destinationOff = remapDestination(destinationStopId, clear = false, poles = destinationPolesNow)
-        // Put back, should a vehicle identified later go there (adoptVehicle).
-        if (destinationOff && destinationStopId != null) {
-            setAsideDestination = destinationStopId to (destinationPolesNow ?: setOf(destinationStopId))
-        }
         when {
             announceResumedIfDoubted() -> {}
             !hs.equals(before, ignoreCase = true) -> {
@@ -2918,8 +2916,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val destinationOff = remapDestination(destinationStopId, clear = reversed, poles = poles)
         // Said to be off the order before, it is on this one.
         val putBack = aside != null && destinationIdx != null
-        if (putBack) setAsideDestination = null
-        if (destinationOff && destinationStopId != null) setAsideDestination = destinationStopId to (poles ?: setOf(destinationStopId))
 
         // The same switch is not announced twice.
         //
@@ -2953,7 +2949,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (destinationOff) announce(
             if (word == "Превозно средство") "Това превозно средство не минава през спирката за слизане."
             else "Този ${word.lowercase()} не минава през спирката за слизане.")
-        if (putBack) announce(
+        // Not on a reversal: the stop found there may be behind us, said to
+        // be passed at once (a terminus both ways share).
+        if (putBack && !reversed) announce(
             if (word == "Превозно средство") "Спирката за слизане е по маршрута на това превозно средство."
             else "Спирката за слизане е по маршрута на този ${word.lowercase()}.")
 
@@ -3673,6 +3671,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * nearness or name: a pole 20 m off is another stop (the owner,
      * 28 Oct 2026), as is the one across the street.
      *
+     * Not on the new order, it is set aside (setAsideDestination), to be put
+     * back by a later order that has it — whatever cleared it: a withdrawal
+     * returning to the timetable's trip, which by then lacked it, lost it for
+     * good (review of 28 Oct 2026); found, nothing is aside any more.
+     *
      * True when there was a stop to get off at, the new order does not have
      * it, and it is not a reversal ([clear]) — for the caller to say so.
      */
@@ -3684,6 +3687,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         etaSource = EtaSource.NONE
         if (idx >= 0) {
             destinationIdx = idx
+            setAsideDestination = null
             // Without poles given, those looked up when it was chosen, if of this stop.
             destinationPoles = poles?.let { orderedStops[idx].stopId to it }
                 ?: destinationPoles?.takeIf { it.first == orderedStops[idx].stopId }
@@ -3692,6 +3696,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return false
         }
         val off = destinationIdx != null && !clear
+        if (stopId != null) setAsideDestination = stopId to (poles ?: setOf(stopId))
         destinationPoles = null
         if (destinationIdx != null) {
             FileLogger.i(TAG, "Alighting stop " +
