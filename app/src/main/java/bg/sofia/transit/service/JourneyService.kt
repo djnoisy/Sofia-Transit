@@ -3703,12 +3703,13 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         destinationEtaEpoch = null
         etaSource = EtaSource.NONE
         if (idx >= 0) {
+            val putBack = destinationIdx == null
             destinationIdx = idx
             setAsideDestination = null
             // Without poles given, those looked up when it was chosen, if of this stop.
             destinationPoles = poles?.let { orderedStops[idx].stopId to it }
                 ?: destinationPoles?.takeIf { it.first == orderedStops[idx].stopId }
-            FileLogger.i(TAG, "Alighting stop kept: ${orderedStops[idx].stopName} (#$idx)" +
+            FileLogger.i(TAG, "Alighting stop ${if (putBack) "put back" else "kept"}: ${orderedStops[idx].stopName} (#$idx)" +
                 (if (orderedStops[idx].stopId != stopId) ", under another id of its pole" else ""))
             return false
         }
