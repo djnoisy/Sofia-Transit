@@ -802,6 +802,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * Taken wrongly, it would have cost the passenger their stop.
      */
     private var setAsideDestination: Pair<String, Set<String>>? = null
+    /**
+     * The order the stop set aside was on, when it was set aside unsaid — on
+     * a return to the direction to be determined (revokeIdentification) —
+     * for saying, once, that the order followed next does not have it either
+     * (unsaidAsideOff): it went without a word (review of 28 Oct 2026; the
+     * owner: "Да").
+     */
+    private var setAsideUnsaidFrom: RouteOfTheDay.TodaysTrip? = null
     /** The way on by the timetable has been asked for this journey (askTimetableWay). */
     private var timetableWayAsked = false
     /** Which of the "2 stops / 1 stop / next stop" warnings already fired. */
@@ -1501,6 +1509,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             if (destinationIdx != null) {
                 announce("Спирката за слизане е по маршрута.")
                 restartEtaPolling()
+            } else if (unsaidAsideOff(orderOf(orderedStops, stopLatLon))) {
+                // Set aside unsaid on the withdrawal: said now, as with a direction chosen.
+                announce(this.chosen?.let { "Спирката за слизане не е по маршрута на линия ${it.shortName}." }
+                    ?: "Спирката за слизане не е по маршрута.")
             }
         }
         // The readings keep their own pace: the model wants them evenly
@@ -1605,6 +1617,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     fun setDestination(idx: Int?) {
         destinationIdx = idx?.coerceIn(0, orderedStops.lastIndex)
         setAsideDestination = null
+        setAsideUnsaidFrom = null
         destinationPoles = null
         // Its pole's ids looked up now, so that a withdrawal — which cannot
         // wait for the database — carries it over by them too (review of
@@ -2573,9 +2586,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
         // The lookups wait: the journey, or the order followed, may have changed.
         if (source !== rideShadow || !journeyActive || identified || orderedStops !== followedStops) return
-        val followed = RouteOfTheDay.TodaysTrip("", headsign, followedStops.indices.map { i ->
-            RouteOfTheDay.Stop(followedStops[i].stopId, followedLatLons[i].first, followedLatLons[i].second)
-        })
+        val followed = orderOf(followedStops, followedLatLons, headsign)
         val (boarded, followedIdx) = RouteOfTheDay.boardedAt(followed, trips) { stops ->
             nearestToWaiting(stops.map { it.lat to it.lon })?.takeIf { it.second <= BOARDING_REF_MAX_DIST }?.first
         } ?: run {
@@ -2646,6 +2657,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // Not on it, set aside: put back should a vehicle identified later go there (adoptVehicle).
         val destinationOff = remapDestination(destinationStopId, clear = false, poles = destinationPolesNow)
         val putBack = aside != null && destinationIdx != null
+        val unsaidOff = unsaidAsideOff(orderOf(stops, latLons))
         when {
             announceResumedIfDoubted() -> {}
             !hs.equals(before, ignoreCase = true) -> {
@@ -2653,7 +2665,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 lastAnnouncedDirection = hs
             }
         }
-        if (destinationOff) announce(
+        if (destinationOff || unsaidOff) announce(
             if (word == "Превозно средство") "По разписание това превозно средство не минава през спирката за слизане."
             else "По разписание този ${word.lowercase()} не минава през спирката за слизане.")
         if (putBack) announce("Спирката за слизане е по маршрута.")
@@ -2880,12 +2892,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId } ?: aside?.first
         val poles = (polesNow ?: aside)?.takeIf { it.first == destinationStopId }?.second
         // The order followed before and the vehicle's, for telling a reversal.
-        val previousOrder = RouteOfTheDay.TodaysTrip("", headsign, orderedStops.indices.mapNotNull { i ->
-            stopLatLon.getOrNull(i)?.let { RouteOfTheDay.Stop(orderedStops[i].stopId, it.first, it.second) }
-        })
-        val newOrder = RouteOfTheDay.TodaysTrip("", hs ?: "", stops.indices.map { i ->
-            RouteOfTheDay.Stop(stops[i].stopId, latLons[i].first, latLons[i].second)
-        })
+        val previousOrder = orderOf(orderedStops, stopLatLon, headsign)
+        val newOrder = orderOf(stops, latLons, hs ?: "")
 
         routeId        = v.routeId
         headsign       = hs
@@ -2931,6 +2939,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val destinationOff = remapDestination(destinationStopId, clear = reversed, poles = poles)
         // Said to be off the order before, it is on this one.
         val putBack = aside != null && destinationIdx != null
+        // Set aside unsaid before (a withdrawal), and not on this one either.
+        val unsaidOff = unsaidAsideOff(newOrder)
 
         // The same switch is not announced twice.
         //
@@ -2961,7 +2971,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         lastAnnouncedDirection = hs
         // Not on its route, the stop to get off at goes — never unnoticed: a
         // short run ends before it, and nothing would have been said.
-        if (destinationOff) announce(
+        if (destinationOff || unsaidOff) announce(
             if (word == "Превозно средство") "Това превозно средство не минава през спирката за слизане."
             else "Този ${word.lowercase()} не минава през спирката за слизане.")
         // Said, as every put-back is — on a reversal too, though the stop found
@@ -3083,6 +3093,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             val aside = setAsideDestination.takeIf { destinationIdx == null }
             val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId } ?: aside?.first
             val poles = (aside ?: destinationPoles)?.takeIf { it.first == destinationStopId }?.second
+            // The order the stop chosen is on, should it be set aside unsaid below.
+            val chosenOn = if (destinationIdx != null) orderOf(orderedStops, stopLatLon) else null
             tripId = c.tripId
             routeId = c.routeId
             headsign = c.headsign
@@ -3112,6 +3124,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // find the stop in: set aside, unsaid, until it is (resolveDirectionTo).
             val destinationOff = remapDestination(destinationStopId, clear = c.stops.isEmpty(), poles = poles)
             val putBack = aside != null && destinationIdx != null
+            if (chosenOn != null && c.stops.isEmpty() && setAsideDestination != null) setAsideUnsaidFrom = chosenOn
             wrongLineNoticeGiven = false
             if (!sameLine) {
                 // Back to the chosen line only if we are anywhere near it.
@@ -3659,6 +3672,25 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         endJourney()
     }
 
+    /** A stop order, with the places of its stops, as RouteOfTheDay takes it. */
+    private fun orderOf(stops: List<StopWithSequence>, latLons: List<Pair<Double, Double>>, headsign: String = "") =
+        RouteOfTheDay.TodaysTrip("", headsign, stops.indices.mapNotNull { i ->
+            latLons.getOrNull(i)?.let { RouteOfTheDay.Stop(stops[i].stopId, it.first, it.second) }
+        })
+
+    /**
+     * Whether a stop set aside unsaid (setAsideUnsaidFrom) is to be said now
+     * not to be on [order], just taken and found without it — unless [order]
+     * runs the opposite way of the one it was on: the stop chosen is then
+     * across the street, as a reversal has it (remapDestination). Once.
+     */
+    private fun unsaidAsideOff(order: RouteOfTheDay.TodaysTrip): Boolean {
+        val from = setAsideUnsaidFrom ?: return false
+        if (destinationIdx != null || setAsideDestination == null) return false
+        setAsideUnsaidFrom = null
+        return !RouteOfTheDay.opposite(from, order)
+    }
+
     /**
      * Carries the alighting stop over to a stop order that has just replaced
      * the previous one — on adopting a vehicle, or on returning to the chosen
@@ -3706,6 +3738,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             val putBack = destinationIdx == null
             destinationIdx = idx
             setAsideDestination = null
+            setAsideUnsaidFrom = null
             // Without poles given, those looked up when it was chosen, if of this stop.
             destinationPoles = poles?.let { orderedStops[idx].stopId to it }
                 ?: destinationPoles?.takeIf { it.first == orderedStops[idx].stopId }
@@ -3714,7 +3747,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             return false
         }
         val off = destinationIdx != null && !clear
-        if (stopId != null) setAsideDestination = stopId to (poles ?: setOf(stopId))
+        if (stopId != null) {
+            if (setAsideDestination?.first != stopId) setAsideUnsaidFrom = null
+            setAsideDestination = stopId to (poles ?: setOf(stopId))
+        }
         destinationPoles = null
         if (destinationIdx != null) {
             FileLogger.i(TAG, "Alighting stop " +
@@ -3798,6 +3834,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         timetableWayAsked = false
         // A journey begun over another: its stop to get off at is not this one's.
         setAsideDestination = null
+        setAsideUnsaidFrom = null
         destinationPoles = null
     }
 
