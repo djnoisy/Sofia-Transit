@@ -1493,6 +1493,16 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             else -> announce("Посоката е коригирана. Посока ${chosen.headsign}.")
         }
         lastAnnouncedDirection = chosen.headsign
+        // A stop to get off at set aside — on a return to the direction to be
+        // determined (revokeIdentification) — put back by this order if it has
+        // it; said, as every put-back is (review of 28 Oct 2026).
+        setAsideDestination?.takeIf { destinationIdx == null }?.let { (id, poles) ->
+            remapDestination(id, clear = false, poles = poles)
+            if (destinationIdx != null) {
+                announce("Спирката за слизане е по маршрута.")
+                restartEtaPolling()
+            }
+        }
         // The readings keep their own pace: the model wants them evenly
         // spaced, and one taken soon after another sees the same reports.
         return true
@@ -2602,8 +2612,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
         if (source !== rideShadow || !journeyActive || identified || orderedStops !== followedStops) return
 
-        val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId }
-        val destinationPolesNow = polesNow?.takeIf { it.first == destinationStopId }?.second
+        // The stop to get off at — or one set aside (a vehicle withdrawn before
+        // departure), put back if this order has it.
+        val aside = setAsideDestination.takeIf { destinationIdx == null }
+        val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId } ?: aside?.first
+        val destinationPolesNow = (polesNow ?: aside)?.takeIf { it.first == destinationStopId }?.second
         val before = headsign
         val hs = trip.headsign.ifBlank { stops.last().stopName }
         FileLogger.i(TAG, "Timetable: the trips due at ${stops[at].stopName} around $clock go on to $hs — " +
@@ -2632,6 +2645,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             candidates = emptyList())
         // Not on it, set aside: put back should a vehicle identified later go there (adoptVehicle).
         val destinationOff = remapDestination(destinationStopId, clear = false, poles = destinationPolesNow)
+        val putBack = aside != null && destinationIdx != null
         when {
             announceResumedIfDoubted() -> {}
             !hs.equals(before, ignoreCase = true) -> {
@@ -2642,6 +2656,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (destinationOff) announce(
             if (word == "Превозно средство") "По разписание това превозно средство не минава през спирката за слизане."
             else "По разписание този ${word.lowercase()} не минава през спирката за слизане.")
+        if (putBack) announce("Спирката за слизане е по маршрута.")
         publishLastKnown()
         restartEtaPolling()
     }
@@ -2949,9 +2964,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         if (destinationOff) announce(
             if (word == "Превозно средство") "Това превозно средство не минава през спирката за слизане."
             else "Този ${word.lowercase()} не минава през спирката за слизане.")
-        // Not on a reversal: the stop found there may be behind us, said to
-        // be passed at once (a terminus both ways share).
-        if (putBack && !reversed) announce(
+        // Said, as every put-back is — on a reversal too, though the stop found
+        // there may be behind us and be said to be passed next (a terminus
+        // both ways share): both are true (review of 28 Oct 2026).
+        if (putBack) announce(
             if (word == "Превозно средство") "Спирката за слизане е по маршрута на това превозно средство."
             else "Спирката за слизане е по маршрута на този ${word.lowercase()}.")
 
@@ -3065,7 +3081,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // The stop to get off at — or the one taken off for the vehicle
             // now withdrawn, put back.
             val aside = setAsideDestination.takeIf { destinationIdx == null }
-            setAsideDestination = null
             val destinationStopId = destinationIdx?.let { orderedStops.getOrNull(it)?.stopId } ?: aside?.first
             val poles = (aside ?: destinationPoles)?.takeIf { it.first == destinationStopId }?.second
             tripId = c.tripId
@@ -3094,8 +3109,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             leftOnFoot = false
             leavingPeakKmh = 0.0
             // With the direction still to be determined there is no order to
-            // find the stop in, and it is cleared.
+            // find the stop in: set aside, unsaid, until it is (resolveDirectionTo).
             val destinationOff = remapDestination(destinationStopId, clear = c.stops.isEmpty(), poles = poles)
+            val putBack = aside != null && destinationIdx != null
             wrongLineNoticeGiven = false
             if (!sameLine) {
                 // Back to the chosen line only if we are anywhere near it.
@@ -3143,6 +3159,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 lastAnnouncedDirection = c.headsign
             }
             if (destinationOff) announce("Спирката за слизане не е по маршрута на линия ${c.shortName}.")
+            if (putBack) announce("Спирката за слизане е по маршрута на линия ${c.shortName}.")
         }
 
         // Already off the route: we are on neither that vehicle nor, it now
@@ -3700,7 +3717,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         destinationPoles = null
         if (destinationIdx != null) {
             FileLogger.i(TAG, "Alighting stop " +
-                (if (clear) "cleared: direction reversed, not on the new route" else "not on the new route — cleared"))
+                (if (clear) "not on the new order (a reversal, or the direction to be determined) — set aside, unsaid"
+                 else "not on the new route — set aside"))
         }
         destinationIdx = null
         alightWarningsFired.clear()
