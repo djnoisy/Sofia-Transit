@@ -16,7 +16,8 @@
 // bus near us at the first reading or far behind; ours silent for a while
 // off its route, and off its route while beside us. 40 journeys, each from
 // its own seed. Written with the reviewer of stage 2 (8 Oct 2026); B and O
-// added in stage 3 (b).
+// added in stage 3 (b); B asked between readings too, at a fix — as when the
+// direction is settled (JourneyService.resolveDirectionTo, 3 Nov 2026).
 import android.content.Context
 import android.location.Location
 import bg.sofia.transit.data.repository.VehicleInfo
@@ -71,6 +72,16 @@ fun main(args: Array<String>) {
             }
         }
         var lastLat = 0.0; var lastLon = 0.0
+        // In a third of the journeys, the rule is first asked at a fix 1-20 s
+        // after the first reading — the direction settled then — not after it.
+        val askBetween = seed % 3 == 2
+        val askAt = 41.0 + rnd.nextInt(20)
+        var askedBetween = false
+        fun ask(at: Long) {
+            if (!shadow.wantsBoarding()) return
+            JourneyTrace.boarding(at, "БУЛ. ЦАРИГРАДСКО, ШОСЕ", due)
+            follow(shadow.onBoarding(at, "БУЛ. ЦАРИГРАДСКО, ШОСЕ", due))
+        }
         var t = 0.0
         while (t <= 900.0) {
             if (rnd.nextInt(10) != 0) {
@@ -91,6 +102,8 @@ fun main(args: Array<String>) {
                     if (loc.hasAccuracy()) loc.accuracy.toDouble() else null,
                     if (loc.hasSpeed()) loc.speed.toDouble() else null))
                 lastLat = loc.latitude; lastLon = loc.longitude
+                // As JourneyService.resolveDirectionTo: asked at the fix the direction is settled at.
+                if (askBetween && !askedBetween && t >= askAt) { askedBetween = true; ask(receivedMs + 30) }
             }
             if (t >= 10 && (t.toLong() % 30L) == 10L) {
                 val infos = vehicles.mapNotNull { (id, trip, pos) ->
@@ -106,12 +119,9 @@ fun main(args: Array<String>) {
                 JourneyTrace.vehicles(snap, lastLat, lastLon, listed)
                 follow(shadow.onReading(snap.fetchedAtMs, snap.serverDateMs, listed.map { v ->
                     RideShadow.Seen(v.vehicleId, v.tripId, v.routeId, v.timestamp, v.lat, v.lon) }))
-                // As JourneyService.askBoarding, a moment after the reading.
-                if (shadow.wantsBoarding()) {
-                    val at = fetched + 150
-                    JourneyTrace.boarding(at, "БУЛ. ЦАРИГРАДСКО, ШОСЕ", due)
-                    follow(shadow.onBoarding(at, "БУЛ. ЦАРИГРАДСКО, ШОСЕ", due))
-                }
+                // As JourneyService.askBoarding, a moment after the reading —
+                // once the direction is known (from the start, or settled since).
+                if (!askBetween || askedBetween) ask(fetched + 150)
             }
             t += 1.0
         }
