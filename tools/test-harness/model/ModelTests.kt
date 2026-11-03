@@ -2292,6 +2292,27 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "A3114" }
         check("27.10 c bus 76: no other vehicle reaches 150 m (280 in the jam: 83 m)", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // 2 Nov 2026 (№116): tram 22 (TM4145, two coupled), trolley 1 chosen on
+    // purpose, direction to be determined, from УЛ. ОПЪЛЧЕНСКА; the passenger
+    // at the very back, its reports 31-62 m ahead. No boarding stop told (no
+    // direction of 1), so the metres alone: its first report (18:05:28, 33 m)
+    // came while it pulled away — we had gone 9 m in the 5 s before, the zone
+    // ahead needs 10 — and the run began with the second; 181 m at the third
+    // reading (18:06:33). Off at ЦЕНТРАЛНИ ХАЛИ (22 left 18:10:03), no stop
+    // chosen: the app ended at 18:11:33 as the model concluded.
+    "2026-11-02_22.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("2.11 tram 22 (1 chosen): 22 taken by the metres by 18:06:33",
+            (id?.event as? Event.Identified)?.let { it.key == "TM4145" && !it.byBoardingStop } == true &&
+            clock(id!!.atMs) <= "18:06:33") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        val off = rp.events.getOrNull(1)
+        check("2.11 tram 22: got off between 18:11:00 and 18:12:00, nothing else", rp.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "18:11:00".."18:12:00") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "TM4145" }
+        check("2.11 tram 22: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     }
 )
 
