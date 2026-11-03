@@ -3300,9 +3300,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      *
      * Walking does not count. A passenger who got off unnoticed and walks
      * away is not on another line, and telling them so would be wrong.
+     * Nor once done at the chosen stop, the last (doneAtChosenLast).
      */
     private fun watchOffRoute(loc: Location, end: Int): Boolean {
-        if (offRoute) return false
+        if (offRoute || doneAtChosenLast()) return false
         val window = currentIdx..end
         windowMin.keys.retainAll { it in window }
 
@@ -3335,10 +3336,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * Not having left a stop on foot (handleLeftOnFoot): travel elsewhere then
      * is another vehicle, boarded after getting off, and "Изглежда не
      * пътувате с линия …" was said in it, the journey then ended as a line
-     * never established (review of 3 Nov 2026).
+     * never established (review of 3 Nov 2026). Nor, for the same reason,
+     * once done at the chosen stop, the last (doneAtChosenLast).
      */
     private fun watchOffRoad(loc: Location, accurateFix: Boolean): Boolean {
-        if (offRoute || leftOnFoot || awaitingFirstFix || geometry == null) {
+        if (offRoute || leftOnFoot || doneAtChosenLast() || awaitingFirstFix || geometry == null) {
             offRoadWatch.reset()
             return false
         }
@@ -3456,6 +3458,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             giveWrongLineNotice("moving away from the route")
         }
     }
+
+    /**
+     * "Слизате тук" said at the chosen stop, the last of the line, and we are
+     * at it or gone on from it: nothing of the line lies ahead to be off.
+     * Gone on at vehicle speed — to the depot, or in another vehicle boarded
+     * there — "Изглежда не пътувате с линия …" was said some 300 m on, after
+     * "Слизате тук" (review of 3 Nov 2026; the owner: „Да, добави го“). The
+     * off-route watches wait; the end is the model's getting off, or the limit
+     * at the chosen stop (checkJourneyTimers).
+     */
+    private fun doneAtChosenLast(): Boolean =
+        destinationArrivedMs != 0L && destinationIdx == orderedStops.lastIndex &&
+            currentIdx == orderedStops.lastIndex
 
     /** On foot from the stop we are at, as of [loc] (handleLeftOnFoot). */
     private fun onFootFrom(loc: Location) {
