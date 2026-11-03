@@ -2295,7 +2295,8 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
     },
     // 2 Nov 2026 (№116): tram 22 (TM4145, two coupled), trolley 1 chosen on
     // purpose, direction to be determined, from УЛ. ОПЪЛЧЕНСКА; the passenger
-    // at the very back, its reports 31-62 m ahead. No boarding stop told (no
+    // at the very back, its reports 31-62 m ahead (the tram ~30 m; more where
+    // the phone's place stood still, 29 m short, at БУЛ. ХРИСТО БОТЕВ). No boarding stop told (no
     // direction of 1), so the metres alone: its first report (18:05:28, 33 m)
     // came while it pulled away — we had gone 9 m in the 5 s before, the zone
     // ahead needs 10 — and the run began with the second; 181 m at the third
