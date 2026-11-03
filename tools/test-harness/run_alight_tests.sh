@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The no-progress limit of JourneyService — what counts as vehicle speed, and where the limit applies — and
-# leaving a stop on foot (leavingOnFoot; see alight/AlightTests.kt). The real functions are copied out of the source, since JourneyService itself cannot be
+# leaving a stop on foot and getting back aboard (leavingOnFoot, resumesAboard; see alight/AlightTests.kt). The real functions are copied out of the source, since JourneyService itself cannot be
 # compiled without the Android SDK.
 # Getting off is the model's since stage 3 (run_model_tests.sh).
 set -euo pipefail
@@ -20,7 +20,8 @@ def grab(sig):
 open(out, "w").write(open(tmpl).read()
     .replace("// @@ATSPEED@@", grab("atVehicleSpeed("))
     .replace("// @@NOPROGRESS@@", grab("noProgressLimitApplies("))
-    .replace("// @@LEAVING@@", grab("leavingOnFoot(")))
+    .replace("// @@LEAVING@@", grab("leavingOnFoot("))
+    .replace("// @@RESUME@@", grab("resumesAboard(")))
 PY
 "$KOTLINC" "$OUT/AlightTests.kt" -d "$OUT/c" 2>&1 | grep -A3 "error:" || true
 java -cp "$OUT/c:$KLIB/kotlin-stdlib.jar" AlightTestsKt | grep -v "^PASS"

@@ -9,9 +9,11 @@ object J {
 // @@ATSPEED@@
 // @@NOPROGRESS@@
 // @@LEAVING@@
+// @@RESUME@@
 }
 
 const val VEHICLE_KMH = 10.0     // JourneyService.MIN_SPEED_FOR_IDENTIFY
+const val NEARER_M = 20.0        // JourneyService.RESUME_NEARER_M
 const val NO_PROGRESS = 10 * 60 * 1000L  // JourneyService.INACTIVITY_TIMEOUT_MS
 
 /**
@@ -45,6 +47,14 @@ fun onFoot(toNext: Double?, stopToNext: Double?, peak: Double = 5.0, gone: Boole
            onRoad: Boolean = false) =
     J.leavingOnFoot(accurate, peak, VEHICLE_KMH, toNext, stopToNext, onRoad, gone)
 
+/**
+ * Back aboard after leaving a stop on foot (JourneyService.resumesAboard): at
+ * [kmh], accurate unless said, the stop we would head for [then] m from where
+ * we were taken to be on foot and [now] m from here; null: none (the last).
+ */
+fun aboard(then: Double?, now: Double?, kmh: Double = 25.0, accurate: Boolean = true) =
+    J.resumesAboard(accurate, kmh, VEHICLE_KMH, then, now, NEARER_M)
+
 fun main() {
     // ── Leaving a stop on foot (3 Nov 2026) ──
     // The 14 departures by vehicle of 2 Nov 2026 (22, 18, 76; the app judged
@@ -76,6 +86,18 @@ fun main() {
         onFoot(300.0, 217.0, peak = 6.0, onRoad = true))
     eq("walking on along the road ahead, ours still with us: a departure", false, onFoot(220.0, 300.0, onRoad = true))
     eq("walking on along the road ahead, ours gone: on foot", true, onFoot(220.0, 300.0, onRoad = true, gone = true))
+
+    // ── Back aboard after leaving a stop on foot (3 Nov 2026) ──
+    // Vehicle speed alone was taken for ours crawling out; another vehicle,
+    // boarded after getting off, said the stops of the line left behind.
+    eq("ours crawling out, then 12 km/h, 25 m nearer the stop ahead: aboard", true, aboard(210.0, 185.0, kmh = 12.0))
+    eq("ours, 10 km/h and 20 m nearer (the thresholds): aboard", true, aboard(210.0, 190.0, kmh = 10.0))
+    eq("ours, at speed but only 12 m nearer yet: not yet", false, aboard(210.0, 198.0))
+    eq("another vehicle the other way, from across the street: on foot", false, aboard(380.0, 420.0, kmh = 30.0))
+    eq("another vehicle turning off, across: on foot", false, aboard(300.0, 295.0, kmh = 30.0))
+    eq("walking on towards the stop ahead, 40 m nearer: on foot", false, aboard(300.0, 260.0, kmh = 5.0))
+    eq("an inaccurate fix at 30 km/h, 50 m nearer: on foot", false, aboard(300.0, 250.0, kmh = 30.0, accurate = false))
+    eq("from the last stop, nothing ahead: on foot", false, aboard(null, null, kmh = 30.0))
 
     // 6 Oct 2026, 09:04:28: walking through underpasses, fixes 56-300 m out
     // read as 14 km/h. Inaccurate fixes are no vehicle speed.

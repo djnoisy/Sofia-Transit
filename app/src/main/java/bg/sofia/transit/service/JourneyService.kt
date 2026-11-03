@@ -140,6 +140,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         const val PASSED_STOP_MARGIN = 30.0
 
         /**
+         * Having left a stop on foot, vehicle speed is taken for ours with us
+         * aboard only once it has also brought us this much nearer the stop
+         * we would head for than where we were taken to be on foot
+         * (resumesAboard). Well over the scatter of accurate fixes.
+         */
+        const val RESUME_NEARER_M = 20.0
+
+        /**
          * Road geometry (see [RouteGeometry]): a place on the road older than
          * this is not built on; the next fix is searched for afresh.
          */
@@ -211,7 +219,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * jam still moves now and then, so it is not cut short, while a
          * passenger who got off unnoticed and walks never reaches that speed.
          * Travel at vehicle speed somewhere else is not this limit's case:
-         * the off-route watches deal with it.
+         * the off-route watches deal with it. Except having left a stop on
+         * foot: vehicle speed is progress then only once it has brought us
+         * back aboard (handleLeftOnFoot) — riding off in another vehicle is
+         * none on this journey, and the watch by the stops waits meanwhile.
          */
         private const val INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000L
 
@@ -232,14 +243,32 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * own road too it may bend away first, through a U-turn or a loop (66
          * pairs of stops in the feed of 28 Oct, 204 at ДЪРЖАВНА ПЕЧАТНИЦА), so
          * on that road ahead of the stop it is a departure (review of 3 Nov
-         * 2026). Vehicle speed after it says we were aboard after all
-         * (handleLeftOnFoot).
+         * 2026). Vehicle speed after it, nearing the stop we would head for,
+         * says we were aboard after all (handleLeftOnFoot, resumesAboard).
          */
         internal fun leavingOnFoot(accurateFix: Boolean, peakKmh: Double, vehicleKmh: Double,
                                    toNextNow: Double?, stopToNext: Double?, onRoadAhead: Boolean,
                                    oursGone: Boolean): Boolean =
             accurateFix && peakKmh < vehicleKmh &&
                 (oursGone || (!onRoadAhead && (toNextNow == null || stopToNext == null || toNextNow >= stopToNext)))
+
+        /**
+         * Whether, having left a stop on foot, this fix says we were aboard
+         * after all (handleLeftOnFoot): vehicle speed ([kmh], [vehicleKmh]) on
+         * an accurate fix, bringing us [nearerM] nearer the stop we would head
+         * for than where we were taken to be on foot — [refToStop] from there,
+         * [toStopNow] from here; null: no stop to head for, the stop left
+         * being the last. Vehicle speed alone was taken for ours crawling out
+         * in traffic, but it is as well another vehicle boarded after getting
+         * off — the other way, or turning off — and "Следваща спирка" of the
+         * line left behind was said in it (review of 3 Nov 2026; the owner:
+         * "ако съм в друго возило и то прави завой, … обявяването … също ще е
+         * неправилно").
+         */
+        internal fun resumesAboard(accurateFix: Boolean, kmh: Double, vehicleKmh: Double,
+                                   refToStop: Double?, toStopNow: Double?, nearerM: Double): Boolean =
+            accurateFix && kmh >= vehicleKmh && refToStop != null && toStopNow != null &&
+                refToStop - toStopNow >= nearerM
 
         /** Where a reading after departure is taken from (readVehicles). */
         internal enum class ReadingFrom { FETCH, CACHED, NONE }
@@ -1067,6 +1096,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var leftOnFoot = false
     /** The stop that was left on foot. */
     private var footStopIdx = 0
+    /** Where we were taken to be on foot — for nearing the stop we would head for (resumesAboard). */
+    private var footRefLat = 0.0
+    private var footRefLon = 0.0
+    /** Vehicle speed while on foot, not bringing us back aboard, logged for this spell. */
+    private var footHeldLogged = false
 
     /**
      * Between a journey's start and its end. Nothing may report the journey
@@ -1806,8 +1840,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
 
         // A moment at vehicle speed: progress for the no-progress limit,
-        // between stops too (see INACTIVITY_TIMEOUT_MS).
-        if (movingSinceMs != 0L && atVehicleSpeed(accurateFix, shortSpeedKmh(), MIN_SPEED_FOR_IDENTIFY)) {
+        // between stops too (see INACTIVITY_TIMEOUT_MS) — not while left on
+        // foot, until it brings us back aboard (handleLeftOnFoot).
+        if (movingSinceMs != 0L && !leftOnFoot && atVehicleSpeed(accurateFix, shortSpeedKmh(), MIN_SPEED_FOR_IDENTIFY)) {
             lastProgressMs = System.currentTimeMillis()
         }
         if (!loc.hasAccuracy() || loc.accuracy <= SNAP_ACCURACY_LOOSE) {
@@ -2133,7 +2168,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
 
         // Having left a stop on foot, the stop logic stays silent unless
-        // vehicle speed shows we were aboard after all.
+        // vehicle speed, nearing the stop we would head for, shows we were
+        // aboard after all.
         if (leftOnFoot && handleLeftOnFoot(loc, accurateFix)) return
 
         // Look-ahead window: nearest stop among current..current+LOOKAHEAD.
@@ -2220,8 +2256,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     leavingPeakKmh < MIN_SPEED_FOR_IDENTIFY -> {
                 atStop = false
                 approachAnnounced = false
-                leftOnFoot = true
-                footStopIdx = currentIdx
+                onFootFrom(loc)
                 FileLogger.i(TAG, "Left ${orderedStops[currentIdx].stopName} at walking pace " +
                     "(peak ${leavingPeakKmh.toInt()} km/h) — taken as alighted; announcements paused")
             }
@@ -2253,8 +2288,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     try { rideShadow?.oursGoneSince(atStopSinceMs) == true } catch (_: Throwable) { false }
                 if (leavingOnFoot(accurateFix, leavingPeakKmh, MIN_SPEED_FOR_IDENTIFY, toNextNow, stopToNext,
                         onRoadAhead, oursGone)) {
-                    leftOnFoot = true
-                    footStopIdx = currentIdx
+                    onFootFrom(loc)
                     FileLogger.i(TAG, "Left ${orderedStops[currentIdx].stopName} at walking pace " +
                         "(peak ${leavingPeakKmh.toInt()} km/h), " +
                         (if (oursGone) "ours gone from us" else "no nearer the next stop " +
@@ -3412,56 +3446,92 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    /** On foot from the stop we are at, as of [loc] (handleLeftOnFoot). */
+    private fun onFootFrom(loc: Location) {
+        leftOnFoot = true
+        footStopIdx = currentIdx
+        footRefLat = loc.latitude
+        footRefLon = loc.longitude
+        footHeldLogged = false
+    }
+
     /**
      * What follows leaving a stop at walking pace. Returns true when this fix
      * has been dealt with here; false to let the ordinary stop logic process
      * it.
      *
      * Only one outcome is looked for: movement at vehicle speed, on an
-     * accurate fix, which means the vehicle was crawling out of the stop in
-     * traffic with us aboard — we are then placed on the stop we head for,
-     * by this fix, and it is said; the stop logic goes on from there.
-     * Anything else is taken as the passenger having got off, and nothing is
-     * announced: no "Следваща спирка", no "Спирката за слизане е подмината".
-     * Ending the journey is left to the timers — see checkJourneyTimers —
-     * and to the model's getting off (followModel), since the automatic end
-     * exists to spare the battery, not to time the alighting to the second.
+     * accurate fix, that brings us nearer the stop we would head for
+     * (resumesAboard) — the vehicle was crawling out of the stop in traffic
+     * with us aboard. We are then placed on that stop, by this fix, and it
+     * is said; the stop logic goes on from there. Vehicle speed elsewhere —
+     * away from it, or across — is another vehicle, boarded after getting
+     * off; and from the last stop there is none to head for. Anything else
+     * is taken as the passenger having got off, and nothing is announced: no
+     * "Следваща спирка", no "Спирката за слизане е подмината". Ending the
+     * journey is left to the timers — see checkJourneyTimers; vehicle speed
+     * is no progress meanwhile — and to the model's getting off
+     * (followModel), since the automatic end exists to spare the battery,
+     * not to time the alighting to the second.
      */
     private fun handleLeftOnFoot(loc: Location, accurateFix: Boolean): Boolean {
+        if (footStopIdx !in orderedStops.indices) {
+            publish(distance = null)
+            return true
+        }
         val kmh = shortSpeedKmh() ?: 0.0
-        if (!accurateFix || kmh < MIN_SPEED_FOR_IDENTIFY ||
-            footStopIdx !in orderedStops.indices) {
+        val best = if (footStopIdx < orderedStops.lastIndex) stopHeadedFor(loc) else null
+        val refToStop = best?.let { i ->
+            stopLatLon.getOrNull(i)?.let { (lat, lon) -> LocationHelper.distanceMetres(footRefLat, footRefLon, lat, lon) }
+        }
+        val toStopNow = best?.let { distTo(loc, it) }
+        if (best == null ||
+            !resumesAboard(accurateFix, kmh, MIN_SPEED_FOR_IDENTIFY, refToStop, toStopNow, RESUME_NEARER_M)) {
+            if (accurateFix && kmh >= MIN_SPEED_FOR_IDENTIFY && !footHeldLogged) {
+                footHeldLogged = true
+                FileLogger.i(TAG, "Vehicle speed (${kmh.toInt()} km/h) after leaving " +
+                    "${orderedStops[footStopIdx].stopName} on foot, " +
+                    (if (best == null) "the last stop" else "not nearing ${orderedStops[best].stopName} " +
+                        "(${refToStop?.toInt() ?: "-"} m then, ${toStopNow?.toInt() ?: "-"} m now)") +
+                    " — another vehicle; announcements stay paused")
+            }
             publish(distance = null)
             return true
         }
         leftOnFoot = false
         FileLogger.i(TAG, "Vehicle speed (${kmh.toInt()} km/h) after leaving " +
-            "${orderedStops[footStopIdx].stopName} slowly — a crawl in traffic, not alighting")
-        if (footStopIdx < orderedStops.lastIndex) {
-            // The stop we head for, by this fix, as at the first fix: on the
-            // road, the first not behind us; else the one after the stop left,
-            // unless we lie beyond it — a crawl may have taken us past it, and
-            // "Следваща спирка" named a stop behind us (review of 3 Nov 2026).
-            var best = footStopIdx + 1
-            val road = geometry
-            val roadAt = fixRoadPos
-            if (road != null && roadAt != null) {
-                best = (road.nextStop(roadAt, best, PASSED_STOP_MARGIN) ?: orderedStops.lastIndex)
-                    .coerceAtMost(orderedStops.lastIndex)
-            } else if (best < orderedStops.lastIndex) {
-                val (bLat, bLon) = stopLatLon.getOrNull(best) ?: Pair(0.0, 0.0)
-                val (nLat, nLon) = stopLatLon.getOrNull(best + 1) ?: Pair(0.0, 0.0)
-                val segment = LocationHelper.distanceMetres(bLat, bLon, nLat, nLon)
-                if (segment > 0 && distTo(loc, best + 1) < segment - PASSED_STOP_MARGIN) best += 1
-            }
-            currentIdx = best
-            approachAnnounced = false
-            // Within its arrival circle, its arrival is said by the stop logic next.
-            if (stopDist(loc, best) > ARRIVAL_RADIUS) announceNextStop(currentIdx, loc)
-        }
+            "${orderedStops[footStopIdx].stopName} slowly, nearing ${orderedStops[best].stopName} " +
+            "(${refToStop?.toInt()} m then, ${toStopNow?.toInt()} m now) — a crawl in traffic, not alighting")
+        currentIdx = best
+        approachAnnounced = false
+        // Within its arrival circle, its arrival is said by the stop logic next.
+        if (stopDist(loc, best) > ARRIVAL_RADIUS) announceNextStop(currentIdx, loc)
         // The stop logic goes on from here on this fix — the countdown to the
         // stop to get off at, and its being passed, with it.
         return false
+    }
+
+    /**
+     * The stop we would head for, by this fix, after the stop left on foot
+     * (footStopIdx, not the last), as at the first fix: on the road, the
+     * first not behind us; else the one after the stop left, unless we lie
+     * beyond it — a crawl may have taken us past it, and "Следваща спирка"
+     * named a stop behind us (review of 3 Nov 2026).
+     */
+    private fun stopHeadedFor(loc: Location): Int {
+        var best = footStopIdx + 1
+        val road = geometry
+        val roadAt = fixRoadPos
+        if (road != null && roadAt != null) {
+            best = (road.nextStop(roadAt, best, PASSED_STOP_MARGIN) ?: orderedStops.lastIndex)
+                .coerceAtMost(orderedStops.lastIndex)
+        } else if (best < orderedStops.lastIndex) {
+            val (bLat, bLon) = stopLatLon.getOrNull(best) ?: Pair(0.0, 0.0)
+            val (nLat, nLon) = stopLatLon.getOrNull(best + 1) ?: Pair(0.0, 0.0)
+            val segment = LocationHelper.distanceMetres(bLat, bLon, nLat, nLon)
+            if (segment > 0 && distTo(loc, best + 1) < segment - PASSED_STOP_MARGIN) best += 1
+        }
+        return best
     }
 
     /**
