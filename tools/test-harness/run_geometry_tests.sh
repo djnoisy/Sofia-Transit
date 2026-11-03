@@ -20,7 +20,14 @@ OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT
 status=0
 
 echo "== GeometryTests =="
-"$KOTLINC" "$SRC/service/RouteGeometry.kt" "$HERE/geometry/Data213.kt" "$HERE/geometry/GeometryTests.kt" \
+# JourneyService.leavingOnFoot, copied out of the source as run_alight_tests.sh does (Android types elsewhere in it).
+python3 - "$SRC/service/JourneyService.kt" "$OUT/Leaving.kt" <<'PY'
+import sys
+js = open(sys.argv[1]).read()
+i = js.index("        internal fun leavingOnFoot(")
+open(sys.argv[2], "w").write("object JS {\n" + js[i:js.index("\n\n", i)] + "\n}\n")
+PY
+"$KOTLINC" "$SRC/service/RouteGeometry.kt" "$HERE/geometry/Data213.kt" "$OUT/Leaving.kt" "$HERE/geometry/GeometryTests.kt" \
     -d "$OUT/g" 2>&1 | grep -A3 "error:" || true
 java -cp "$OUT/g:$KLIB/kotlin-stdlib.jar" GeometryTestsKt | grep -v "^PASS" || status=1
 

@@ -214,23 +214,22 @@ fun main() {
     }
 
     // Leaving a stop (JourneyService, "Left the stop"): at the first fix
-    // over DEPART_RADIUS from it in a straight line, placed as there — near
-    // the last place on the road, or, with that lost, from the stop before
-    // on — it is on foot when placed behind the stop (pastStop false), on an
-    // accurate fix, without vehicle speed since leaving; anything else is a
-    // departure. Walking 90 m back along the road from ЦЕНТРАЛНИ ХАЛИ was
-    // announced as a departure (7 Oct 2026); here at ХЕРМЕС ПАРК on 213's road.
+    // over DEPART_RADIUS from it in a straight line, it is on foot at walking
+    // pace on an accurate fix when no nearer the next stop than the stop
+    // itself is, or with ours gone from us (JourneyService.leavingOnFoot, the
+    // REAL function, copied out by run_geometry_tests.sh); anything else is
+    // a departure. Walking 90 m back from ЦЕНТРАЛНИ ХАЛИ (7 Oct 2026) and off
+    // sideways from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ (2 Nov 2026 c) were announced as
+    // departures; here at ХЕРМЕС ПАРК on 213's road.
     val hp = dp + 1
     /** True: departed, the next stop is said; false: on foot, the stops fall silent. */
     fun departs(fixes: List<Pair<Double, Double>>, accurate: Boolean = true,
-                peakKmh: Double = 4.0, tracked: Boolean = true): Boolean {
-        var last: Double? = if (tracked) g.stopAlong[hp] else null
+                peakKmh: Double = 4.0, oursGone: Boolean = false): Boolean {
+        val stopToNext = straight(stops[hp].first, stops[hp].second, stops[hp + 1].first, stops[hp + 1].second)
         for ((lat, lon) in fixes) {
-            val pos = g.place(lat, lon, last, 1.0, g.stopAlong[hp - 1] - RouteGeometry.BACK_MARGIN, g.length)
-            last = if (tracked) pos ?: last else null
             if (straight(lat, lon, stops[hp].first, stops[hp].second) <= DEPART_RADIUS) continue
-            val backOnFoot = g.pastStop(pos, hp) == false && accurate && peakKmh < MIN_SPEED_FOR_IDENTIFY
-            return !backOnFoot
+            val toNext = straight(lat, lon, stops[hp + 1].first, stops[hp + 1].second)
+            return !JS.leavingOnFoot(accurate, peakKmh, MIN_SPEED_FOR_IDENTIFY, toNext, stopToNext, oursGone)
         }
         throw AssertionError("never left the stop")
     }
@@ -243,12 +242,11 @@ fun main() {
 
     t("G13 walking 150 m back along the road from a stop, 5 m GPS scatter: on foot, no departure") {
         yes("on foot", !departs(back))
-        yes("on foot, road tracking lost", !departs(back, tracked = false))
     }
 
-    t("G14 leaving ahead along the road, 8 m GPS scatter: a departure, at walking pace too") {
+    t("G14 leaving ahead along the road, 8 m GPS scatter: a departure, at walking pace too — unless ours is gone") {
         yes("departed", departs(ahead))
-        yes("departed, road tracking lost", departs(ahead, tracked = false))
+        yes("ours gone from us: on foot", !departs(ahead, oursGone = true))
     }
 
     t("G15 behind the stop but an inaccurate fix, or vehicle speed since leaving: a departure, as before") {
@@ -256,7 +254,7 @@ fun main() {
         yes("vehicle speed seen", departs(back, peakKmh = 15.0))
     }
 
-    t("G16 off the road, or unknown: a departure, as before; pastStop has no answer there") {
+    t("G16 straight off the road, across it, from the stop: on foot (2 Nov 2026 c); at vehicle speed, a departure") {
         // Straight off the road, across it, from the stop.
         val a = road.first { it.first >= g.stopAlong[hp] - 10 }
         val b = road.first { it.first >= g.stopAlong[hp] + 10 }
@@ -266,9 +264,8 @@ fun main() {
         val aside = (1..150).map { m -> shift(stops[hp].first, stops[hp].second, -n / len * m, e / len * m) }
         val at91 = aside[90]
         yes("91 m aside is off the road", g.locate(at91.first, at91.second, 0.0, g.length)!!.offset > RouteGeometry.MAX_OFFSET)
-        yes("departed", departs(aside))
-        yes("unplaced → null", g.pastStop(null, hp) == null)
-        yes("unknown stop → null", g.pastStop(g.stopAlong[hp] + 100, 999) == null)
+        yes("on foot", !departs(aside))
+        yes("vehicle speed seen: departed", departs(aside, peakKmh = 15.0))
     }
 
     println("\n$ok passed, ${bad.size} failed"); bad.forEach { println("  ✗ $it") }

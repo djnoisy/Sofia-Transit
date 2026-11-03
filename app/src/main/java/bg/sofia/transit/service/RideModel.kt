@@ -206,6 +206,13 @@ class RideModel(
         return lastFix.timeMs + (nowMs - lastFix.receivedMs) - o.lastBesideMs <= withinMs
     }
 
+    /**
+     * Whether the latest report of ours was clearly apart from us (APART_M):
+     * it has gone without us. False with no vehicle ours. Read only: for the
+     * app's leaving a stop on foot (JourneyService.leavingOnFoot).
+     */
+    fun ourLatestApart(): Boolean = !alighted && ours?.lastApart == true
+
     /** One position of ours. Returns what that concluded, if anything. */
     fun onFix(f: Fix): List<Event> {
         // A fix stamped out of step with when it arrived — a network fix on a

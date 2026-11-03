@@ -219,6 +219,23 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         internal fun atVehicleSpeed(accurateFix: Boolean, kmh: Double?, vehicleKmh: Double): Boolean =
             accurateFix && (kmh ?: 0.0) >= vehicleKmh
 
+        /**
+         * Whether leaving a stop — DEPART_RADIUS from it — is on foot, so that
+         * "Следваща спирка" is not said: at walking pace since leaving it
+         * ([peakKmh] under [vehicleKmh]) on an accurate fix, and either no
+         * nearer the next stop ([toNextNow], null: none) than the stop itself
+         * is ([stopToNext]) — a vehicle of the line leaves towards it, 76-96 m
+         * nearer at that point in 16 departures of 2 Nov 2026, walking away
+         * 64-77 m further; a vehicle turning another way is not on the line —
+         * or ours gone from us ([oursGone]): ridden with us, it has left
+         * without us (the owner, 3 Nov 2026). Vehicle speed after it says we
+         * were aboard after all (handleLeftOnFoot).
+         */
+        internal fun leavingOnFoot(accurateFix: Boolean, peakKmh: Double, vehicleKmh: Double,
+                                   toNextNow: Double?, stopToNext: Double?, oursGone: Boolean): Boolean =
+            accurateFix && peakKmh < vehicleKmh &&
+                (oursGone || toNextNow == null || stopToNext == null || toNextNow >= stopToNext)
+
         /** Where a reading after departure is taken from (readVehicles). */
         internal enum class ReadingFrom { FETCH, CACHED, NONE }
 
@@ -2201,26 +2218,33 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     "(peak ${leavingPeakKmh.toInt()} km/h) — taken as alighted; announcements paused")
             }
 
-            // Left the stop. Back along the line's road, on an accurate fix
-            // and without vehicle speed since leaving it, that is someone on
-            // foot: a vehicle leaves ahead. Walking 90 m back from ЦЕНТРАЛНИ
-            // ХАЛИ was announced as the tram departing — "Следваща спирка,
-            // Младежки театър" (7 Oct 2026). It is taken as at the chosen
-            // stop above: the stops fall silent unless vehicle speed follows.
-            // Anything else — ahead, off the road, an inaccurate fix, no road
-            // shape — is a departure, as before: holding the stop until a fix
-            // on the road said which way stopped the catch-up and the approach
-            // warning while the fixes stayed off the road.
+            // Left the stop. At walking pace on an accurate fix, no nearer the
+            // next stop than the stop itself is, or with ours gone from us,
+            // that is someone on foot (leavingOnFoot): walking 90 m back from
+            // ЦЕНТРАЛНИ ХАЛИ was announced as the tram departing — "Следваща
+            // спирка, Младежки театър" (7 Oct 2026) — and walking off sideways
+            // from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, 76 gone, "Следваща спирка, БЛ.
+            // 222" (2 Nov 2026 c). It is taken as at the chosen stop above:
+            // the stops fall silent unless vehicle speed follows. Anything
+            // else — faster, nearer the next stop with ours not gone, an
+            // inaccurate fix — is a departure, as before.
             atStop && distTo(loc, currentIdx) > DEPART_RADIUS -> {
                 atStop = false
                 approachAnnounced = false
-                val backOnFoot = geometry?.pastStop(fixRoadPos, currentIdx) == false &&
-                    accurateFix && leavingPeakKmh < MIN_SPEED_FOR_IDENTIFY
-                if (backOnFoot) {
+                val next = currentIdx + 1
+                val toNextNow = if (next <= orderedStops.lastIndex) distTo(loc, next) else null
+                val stopToNext = stopLatLon.getOrNull(currentIdx)?.let { (aLat, aLon) ->
+                    stopLatLon.getOrNull(next)?.let { (bLat, bLon) -> LocationHelper.distanceMetres(aLat, aLon, bLat, bLon) }
+                }
+                val oursGone = identified && try { rideShadow?.oursGone() == true } catch (_: Throwable) { false }
+                if (leavingOnFoot(accurateFix, leavingPeakKmh, MIN_SPEED_FOR_IDENTIFY, toNextNow, stopToNext, oursGone)) {
                     leftOnFoot = true
                     footStopIdx = currentIdx
-                    FileLogger.i(TAG, "Left ${orderedStops[currentIdx].stopName} back " +
-                        "along the road at walking pace — on foot; announcements paused")
+                    FileLogger.i(TAG, "Left ${orderedStops[currentIdx].stopName} at walking pace " +
+                        "(peak ${leavingPeakKmh.toInt()} km/h), " +
+                        (if (oursGone) "ours gone from us" else "no nearer the next stop " +
+                            "(${toNextNow?.toInt() ?: "-"} m, the stop ${stopToNext?.toInt() ?: "-"} m)") +
+                        " — on foot; announcements paused")
                 } else if (currentIdx < orderedStops.lastIndex) {
                     currentIdx += 1
                     announceNextStop(currentIdx, loc)

@@ -8,6 +8,7 @@
 object J {
 // @@ATSPEED@@
 // @@NOPROGRESS@@
+// @@LEAVING@@
 }
 
 const val VEHICLE_KMH = 10.0     // JourneyService.MIN_SPEED_FOR_IDENTIFY
@@ -39,7 +40,33 @@ fun min(m: Int) = m * 60_000L
 var fails = 0
 fun eq(n: String, e: Any?, a: Any?) { if (e != a) { fails++; println("FAIL $n: expected $e got $a") } else println("PASS $n") }
 
+/** Leaving a stop (JourneyService.leavingOnFoot) at walking speed 5 km/h or [peak], accurate unless said. */
+fun onFoot(toNext: Double?, stopToNext: Double?, peak: Double = 5.0, gone: Boolean = false, accurate: Boolean = true) =
+    J.leavingOnFoot(accurate, peak, VEHICLE_KMH, toNext, stopToNext, gone)
+
 fun main() {
+    // ── Leaving a stop on foot (3 Nov 2026) ──
+    // The 16 departures of 2 Nov 2026 (22, 18, 76), at 90 m from the stop:
+    // to the next stop, the stop to it, the top speed since leaving.
+    for ((n, d) in listOf("ул. Опълченска" to Triple(363.0, 459.0, 23.0), "бул. Христо Ботев" to Triple(141.0, 217.0, 22.0),
+            "Женски пазар" to Triple(371.0, 459.0, 28.0), "Централни хали (18)" to Triple(296.0, 389.0, 26.0),
+            "пл. Св. Неделя" to Triple(308.0, 394.0, 22.0), "пл. Гарибалди" to Triple(208.0, 300.0, 21.0),
+            "пл. Славейков" to Triple(392.0, 485.0, 24.0), "бул. Васил Левски" to Triple(236.0, 328.0, 21.0),
+            "пл. Орлов мост" to Triple(477.0, 569.0, 36.0), "БТА" to Triple(1637.0, 1727.0, 35.0),
+            "Хотел Плиска" to Triple(1880.0, 1972.0, 39.0), "УМБАЛ Св. Анна" to Triple(837.0, 922.0, 35.0),
+            "ХМС" to Triple(347.0, 440.0, 31.0), "бл. 43 (stayed on)" to Triple(590.0, 680.0, 25.0)))
+        eq("2.11 by vehicle from $n: a departure", false, onFoot(d.first, d.second, d.third))
+    eq("2.11 c on foot from Метростанция Ал. Малинов, off the road, 76 gone: on foot", true, onFoot(279.0, 215.0, gone = true))
+    eq("2.11 c the same, by the next stop alone: on foot", true, onFoot(279.0, 215.0))
+    eq("2.11 on foot back from Централни хали (22): on foot", true, onFoot(343.0, 265.0))
+    eq("a crawl in a jam towards the next stop, 6 km/h: a departure, as before", false, onFoot(220.0, 300.0, peak = 6.0))
+    eq("walking on towards the next stop, ours still with us: a departure", false, onFoot(220.0, 300.0))
+    eq("walking on towards the next stop, ours gone: on foot", true, onFoot(220.0, 300.0, gone = true))
+    eq("vehicle speed since leaving, ours gone (its report wrong): a departure", false, onFoot(220.0, 300.0, peak = 15.0, gone = true))
+    eq("an inaccurate fix: a departure, as before", false, onFoot(343.0, 265.0, accurate = false))
+    eq("no next stop: on foot", true, onFoot(null, null))
+    eq("level with the stop (as far from the next as it): on foot", true, onFoot(300.0, 300.0))
+
     // 6 Oct 2026, 09:04:28: walking through underpasses, fixes 56-300 m out
     // read as 14 km/h. Inaccurate fixes are no vehicle speed.
     eq("noisy walk: inaccurate 14 km/h is no vehicle speed", false, J.atVehicleSpeed(false, 14.0, VEHICLE_KMH))

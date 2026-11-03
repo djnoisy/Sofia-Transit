@@ -120,6 +120,10 @@ class RideShadow(
     @Synchronized
     fun withUs(nowMs: Long, withinMs: Long): Boolean = model.ourBesideWithin(nowMs, withinMs)
 
+    /** Whether the latest report of ours was clearly apart from us (RideModel.ourLatestApart). */
+    @Synchronized
+    fun oursGone(): Boolean = model.ourLatestApart()
+
     /**
      * The trip and route ids of the vehicle the model knows as [key], as the
      * feed last gave them: the model's own have ';' for ','. Null if unseen.
