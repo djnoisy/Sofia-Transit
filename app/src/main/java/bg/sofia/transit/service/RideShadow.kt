@@ -120,9 +120,9 @@ class RideShadow(
     @Synchronized
     fun withUs(nowMs: Long, withinMs: Long): Boolean = model.ourBesideWithin(nowMs, withinMs)
 
-    /** Whether the latest report of ours was clearly apart from us (RideModel.ourLatestApart). */
+    /** Whether ours has gone without us since [sinceMs] (RideModel.ourGoneSince). */
     @Synchronized
-    fun oursGone(): Boolean = model.ourLatestApart()
+    fun oursGoneSince(sinceMs: Long): Boolean = model.ourGoneSince(sinceMs)
 
     /**
      * The trip and route ids of the vehicle the model knows as [key], as the

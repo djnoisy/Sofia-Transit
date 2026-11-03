@@ -215,10 +215,10 @@ fun main() {
 
     // Leaving a stop (JourneyService, "Left the stop"): at the first fix
     // over DEPART_RADIUS from it in a straight line, it is on foot at walking
-    // pace on an accurate fix when no nearer the next stop than the stop
-    // itself is, or with ours gone from us (JourneyService.leavingOnFoot, the
-    // REAL function, copied out by run_geometry_tests.sh); anything else is
-    // a departure. Walking 90 m back from ЦЕНТРАЛНИ ХАЛИ (7 Oct 2026) and off
+    // pace on an accurate fix with ours gone from us, or off the line's road
+    // ahead of the stop and no nearer the next stop than the stop itself is
+    // (JourneyService.leavingOnFoot, the REAL function, copied out by
+    // run_geometry_tests.sh); anything else is a departure. Walking 90 m back from ЦЕНТРАЛНИ ХАЛИ (7 Oct 2026) and off
     // sideways from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ (2 Nov 2026 c) were announced as
     // departures; here at ХЕРМЕС ПАРК on 213's road.
     val hp = dp + 1
@@ -226,10 +226,16 @@ fun main() {
     fun departs(fixes: List<Pair<Double, Double>>, accurate: Boolean = true,
                 peakKmh: Double = 4.0, oursGone: Boolean = false): Boolean {
         val stopToNext = straight(stops[hp].first, stops[hp].second, stops[hp + 1].first, stops[hp + 1].second)
+        var last: Double? = g.stopAlong[hp]
         for ((lat, lon) in fixes) {
+            // Placed on the road as JourneyService.locateOnRoad does, near the last place.
+            val pos = g.place(lat, lon, last, 1.0, g.stopAlong[hp - 1] - RouteGeometry.BACK_MARGIN, g.length)
+            last = pos ?: last
             if (straight(lat, lon, stops[hp].first, stops[hp].second) <= DEPART_RADIUS) continue
+            val off = g.locate(lat, lon, 0.0, g.length)?.offset ?: Double.MAX_VALUE
+            val onRoadAhead = pos != null && pos > g.stopAlong[hp] && off <= RouteGeometry.STOP_MAX_OFFSET
             val toNext = straight(lat, lon, stops[hp + 1].first, stops[hp + 1].second)
-            return !JS.leavingOnFoot(accurate, peakKmh, MIN_SPEED_FOR_IDENTIFY, toNext, stopToNext, oursGone)
+            return !JS.leavingOnFoot(accurate, peakKmh, MIN_SPEED_FOR_IDENTIFY, toNext, stopToNext, onRoadAhead, oursGone)
         }
         throw AssertionError("never left the stop")
     }

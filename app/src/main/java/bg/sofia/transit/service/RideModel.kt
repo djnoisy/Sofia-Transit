@@ -207,11 +207,20 @@ class RideModel(
     }
 
     /**
-     * Whether the latest report of ours was clearly apart from us (APART_M):
-     * it has gone without us. False with no vehicle ours. Read only: for the
-     * app's leaving a stop on foot (JourneyService.leavingOnFoot).
+     * Whether ours has gone without us: its latest two reports clearly apart
+     * from us (APART_M), the latest made after [sinceMs], a time on the
+     * phone's clock (as the fixes' arrival times are) — not one stray report
+     * of ours, nor an old one standing while it is silent (review of 3 Nov
+     * 2026). False with no vehicle ours. Read only: for the app's leaving a
+     * stop on foot (JourneyService.leavingOnFoot).
      */
-    fun ourLatestApart(): Boolean = !alighted && ours?.lastApart == true
+    fun ourGoneSince(sinceMs: Long): Boolean {
+        val o = ours ?: return false
+        if (alighted || !o.lastApart || o.apartRun < 2) return false
+        val lastFix = track.lastOrNull() ?: return false
+        // The report's time is on the fix clock: [sinceMs] moved onto it, as ourBesideWithin does.
+        return o.lastReportMs >= sinceMs - (lastFix.receivedMs - lastFix.timeMs)
+    }
 
     /** One position of ours. Returns what that concluded, if anything. */
     fun onFix(f: Fix): List<Event> {

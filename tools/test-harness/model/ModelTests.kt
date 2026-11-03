@@ -2438,6 +2438,22 @@ fun movedBack(lines: List<String>, back: Double): List<String> {
 
 /** Recorded journeys replayed as they would have been with poorer positions, by file name. */
 val variants: Map<String, (String, List<String>) -> Unit> = mapOf(
+    // 2 Nov 2026 c: ours gone from us (RideModel.ourGoneSince, for the app's
+    // leaving a stop on foot) — never while aboard, at any fix to 18:50:20,
+    // asked since 90 s before it; and so at 18:51:34, 90 m off from
+    // МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ on foot, since we arrived there (18:50:01.694).
+    "2026-11-02_76.txt" to { start, lines ->
+        val fixes = lines.withIndex().filter { it.value.startsWith("F,") }
+        val aboard = fixes.filter { it.value.split(",")[1].toLong() < 1793638220000L }
+        val wrong = aboard.filterIndexed { k, _ -> k % 10 == 0 }.mapNotNull { (i, l) ->
+            val at = l.split(",")[1].toLong()
+            if (replay(start, lines.subList(0, i + 1)).model.ourGoneSince(at - 90_000L)) clock(at) else null
+        }
+        check("2.11 c, ours gone: never while aboard", wrong.isEmpty()) { wrong.take(5).joinToString() }
+        val i = fixes.last { it.value.split(",")[1].toLong() <= 1793638294000L }.index
+        check("2.11 c, ours gone: so on foot from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ",
+            replay(start, lines.subList(0, i + 1)).model.ourGoneSince(1793638201694L))
+    },
     // 2 Nov 2026 b: the early rule asked as the direction of 3 was settled,
     // 18:19:10.684 (JourneyService.resolveDirectionTo, 3 Nov 2026), not only
     // after the next reading: 18 by the boarding stop then, 30 s before the

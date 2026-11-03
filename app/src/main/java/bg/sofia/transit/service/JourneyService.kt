@@ -222,19 +222,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /**
          * Whether leaving a stop — DEPART_RADIUS from it — is on foot, so that
          * "Следваща спирка" is not said: at walking pace since leaving it
-         * ([peakKmh] under [vehicleKmh]) on an accurate fix, and either no
+         * ([peakKmh] under [vehicleKmh]) on an accurate fix, and either ours
+         * gone from us ([oursGone]: ridden with us, it has left without us),
+         * or, off the line's road ahead of the stop ([onRoadAhead] false), no
          * nearer the next stop ([toNextNow], null: none) than the stop itself
-         * is ([stopToNext]) — a vehicle of the line leaves towards it, 76-96 m
-         * nearer at that point in 16 departures of 2 Nov 2026, walking away
-         * 64-77 m further; a vehicle turning another way is not on the line —
-         * or ours gone from us ([oursGone]): ridden with us, it has left
-         * without us (the owner, 3 Nov 2026). Vehicle speed after it says we
-         * were aboard after all (handleLeftOnFoot).
+         * is ([stopToNext]) — the owner, 3 Nov 2026. A vehicle of the line
+         * leaves towards the next stop, 76-96 m nearer at that point in the 14
+         * departures of 2 Nov 2026, walking away 64-77 m further; but on its
+         * own road too it may bend away first, through a U-turn or a loop (66
+         * pairs of stops in the feed of 28 Oct, 204 at ДЪРЖАВНА ПЕЧАТНИЦА), so
+         * on that road ahead of the stop it is a departure (review of 3 Nov
+         * 2026). Vehicle speed after it says we were aboard after all
+         * (handleLeftOnFoot).
          */
         internal fun leavingOnFoot(accurateFix: Boolean, peakKmh: Double, vehicleKmh: Double,
-                                   toNextNow: Double?, stopToNext: Double?, oursGone: Boolean): Boolean =
+                                   toNextNow: Double?, stopToNext: Double?, onRoadAhead: Boolean,
+                                   oursGone: Boolean): Boolean =
             accurateFix && peakKmh < vehicleKmh &&
-                (oursGone || toNextNow == null || stopToNext == null || toNextNow >= stopToNext)
+                (oursGone || (!onRoadAhead && (toNextNow == null || stopToNext == null || toNextNow >= stopToNext)))
 
         /** Where a reading after departure is taken from (readVehicles). */
         internal enum class ReadingFrom { FETCH, CACHED, NONE }
@@ -1056,6 +1061,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * never does.
      */
     private var leavingPeakKmh = 0.0
+    /** When we arrived at the stop we are at — for ours gone from us since (leavingOnFoot). */
+    private var atStopSinceMs = 0L
     /** True after leaving a stop at walking pace, until that is explained. */
     private var leftOnFoot = false
     /** The stop that was left on foot. */
@@ -2169,6 +2176,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     }
                     currentIdx = nearest
                     atStop = true
+                    atStopSinceMs = System.currentTimeMillis()
                     leavingPeakKmh = 0.0
                     approachAnnounced = false
                     FileLogger.i(TAG, "ARRIVE at ${nearestDist.toInt()} m" +
@@ -2204,8 +2212,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             // walking away: nothing is announced — "Следваща спирка" and
             // "Спирката за слизане е подмината" were both said to a passenger
             // already on the pavement — unless vehicle speed follows (see
-            // handleLeftOnFoot). Only there: at any other stop a slow
-            // departure is announced as usual, since a guess about getting
+            // handleLeftOnFoot). In any direction there; at any other stop
+            // only as leavingOnFoot has it (below), since a guess about getting
             // off must not silence the stops — it did so in a jam once.
             atStop && currentIdx == destinationIdx && destinationArrivedMs != 0L &&
                     distTo(loc, currentIdx) > DEPART_RADIUS &&
@@ -2218,16 +2226,17 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     "(peak ${leavingPeakKmh.toInt()} km/h) — taken as alighted; announcements paused")
             }
 
-            // Left the stop. At walking pace on an accurate fix, no nearer the
-            // next stop than the stop itself is, or with ours gone from us,
-            // that is someone on foot (leavingOnFoot): walking 90 m back from
-            // ЦЕНТРАЛНИ ХАЛИ was announced as the tram departing — "Следваща
-            // спирка, Младежки театър" (7 Oct 2026) — and walking off sideways
-            // from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, 76 gone, "Следваща спирка, БЛ.
-            // 222" (2 Nov 2026 c). It is taken as at the chosen stop above:
-            // the stops fall silent unless vehicle speed follows. Anything
-            // else — faster, nearer the next stop with ours not gone, an
-            // inaccurate fix — is a departure, as before.
+            // Left the stop. At walking pace on an accurate fix, with ours gone
+            // from us, or off the line's road ahead and no nearer the next stop
+            // than the stop itself is, that is someone on foot (leavingOnFoot):
+            // walking 90 m back from ЦЕНТРАЛНИ ХАЛИ was announced as the tram
+            // departing — "Следваща спирка, Младежки театър" (7 Oct 2026) — and
+            // walking off sideways from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, 76 gone,
+            // "Следваща спирка, БЛ. 222" (2 Nov 2026 c). It is taken as at the
+            // chosen stop above: the stops fall silent unless vehicle speed
+            // follows. Anything else — faster, on the road ahead or nearer the
+            // next stop with ours not gone, an inaccurate fix — is a
+            // departure, as before.
             atStop && distTo(loc, currentIdx) > DEPART_RADIUS -> {
                 atStop = false
                 approachAnnounced = false
@@ -2236,8 +2245,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 val stopToNext = stopLatLon.getOrNull(currentIdx)?.let { (aLat, aLon) ->
                     stopLatLon.getOrNull(next)?.let { (bLat, bLon) -> LocationHelper.distanceMetres(aLat, aLon, bLat, bLon) }
                 }
-                val oursGone = identified && try { rideShadow?.oursGone() == true } catch (_: Throwable) { false }
-                if (leavingOnFoot(accurateFix, leavingPeakKmh, MIN_SPEED_FOR_IDENTIFY, toNextNow, stopToNext, oursGone)) {
+                // On the line's road, past the stop, by this fix's place on it.
+                val onRoadAhead = fixRoadPos?.let { pos ->
+                    geometry?.stopAlong?.getOrNull(currentIdx)?.let { at -> pos > at }
+                } == true && (fixRoadOffset ?: Double.MAX_VALUE) <= RouteGeometry.STOP_MAX_OFFSET
+                val oursGone = identified &&
+                    try { rideShadow?.oursGoneSince(atStopSinceMs) == true } catch (_: Throwable) { false }
+                if (leavingOnFoot(accurateFix, leavingPeakKmh, MIN_SPEED_FOR_IDENTIFY, toNextNow, stopToNext,
+                        onRoadAhead, oursGone)) {
                     leftOnFoot = true
                     footStopIdx = currentIdx
                     FileLogger.i(TAG, "Left ${orderedStops[currentIdx].stopName} at walking pace " +
@@ -3404,7 +3419,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      *
      * Only one outcome is looked for: movement at vehicle speed, on an
      * accurate fix, which means the vehicle was crawling out of the stop in
-     * traffic with us aboard — the departure is then carried out as usual.
+     * traffic with us aboard — we are then placed afresh from the stop after
+     * it, on the next fix, and the next stop is said from there.
      * Anything else is taken as the passenger having got off, and nothing is
      * announced: no "Следваща спирка", no "Спирката за слизане е подмината".
      * Ending the journey is left to the timers — see checkJourneyTimers —
@@ -3421,12 +3437,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         leftOnFoot = false
         FileLogger.i(TAG, "Vehicle speed (${kmh.toInt()} km/h) after leaving " +
             "${orderedStops[footStopIdx].stopName} slowly — a crawl in traffic, not alighting")
-        if (currentIdx < orderedStops.lastIndex) {
-            currentIdx += 1
+        // Placed afresh from the stop after it, on the next fix, as after a
+        // change of stop order: a crawl may have taken us past that one too,
+        // and "Следваща спирка" named a stop behind us (review of 3 Nov 2026).
+        if (footStopIdx < orderedStops.lastIndex) {
+            currentIdx = footStopIdx + 1
+            atStop = false
             approachAnnounced = false
-            announceNextStop(currentIdx, loc)
+            awaitingFirstFix = true
+            snapWaitStartedMs = 0L
         }
-        return false
+        publish(distance = null)
+        return true
     }
 
     /**
