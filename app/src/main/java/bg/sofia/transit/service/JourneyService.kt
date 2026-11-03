@@ -3419,8 +3419,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      *
      * Only one outcome is looked for: movement at vehicle speed, on an
      * accurate fix, which means the vehicle was crawling out of the stop in
-     * traffic with us aboard — we are then placed afresh from the stop after
-     * it, on the next fix, and the next stop is said from there.
+     * traffic with us aboard — we are then placed on the stop we head for,
+     * by this fix, and it is said; the stop logic goes on from there.
      * Anything else is taken as the passenger having got off, and nothing is
      * announced: no "Следваща спирка", no "Спирката за слизане е подмината".
      * Ending the journey is left to the timers — see checkJourneyTimers —
@@ -3437,18 +3437,31 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         leftOnFoot = false
         FileLogger.i(TAG, "Vehicle speed (${kmh.toInt()} km/h) after leaving " +
             "${orderedStops[footStopIdx].stopName} slowly — a crawl in traffic, not alighting")
-        // Placed afresh from the stop after it, on the next fix, as after a
-        // change of stop order: a crawl may have taken us past that one too,
-        // and "Следваща спирка" named a stop behind us (review of 3 Nov 2026).
         if (footStopIdx < orderedStops.lastIndex) {
-            currentIdx = footStopIdx + 1
-            atStop = false
+            // The stop we head for, by this fix, as at the first fix: on the
+            // road, the first not behind us; else the one after the stop left,
+            // unless we lie beyond it — a crawl may have taken us past it, and
+            // "Следваща спирка" named a stop behind us (review of 3 Nov 2026).
+            var best = footStopIdx + 1
+            val road = geometry
+            val roadAt = fixRoadPos
+            if (road != null && roadAt != null) {
+                best = (road.nextStop(roadAt, best, PASSED_STOP_MARGIN) ?: orderedStops.lastIndex)
+                    .coerceAtMost(orderedStops.lastIndex)
+            } else if (best < orderedStops.lastIndex) {
+                val (bLat, bLon) = stopLatLon.getOrNull(best) ?: Pair(0.0, 0.0)
+                val (nLat, nLon) = stopLatLon.getOrNull(best + 1) ?: Pair(0.0, 0.0)
+                val segment = LocationHelper.distanceMetres(bLat, bLon, nLat, nLon)
+                if (segment > 0 && distTo(loc, best + 1) < segment - PASSED_STOP_MARGIN) best += 1
+            }
+            currentIdx = best
             approachAnnounced = false
-            awaitingFirstFix = true
-            snapWaitStartedMs = 0L
+            // Within its arrival circle, its arrival is said by the stop logic next.
+            if (stopDist(loc, best) > ARRIVAL_RADIUS) announceNextStop(currentIdx, loc)
         }
-        publish(distance = null)
-        return true
+        // The stop logic goes on from here on this fix — the countdown to the
+        // stop to get off at, and its being passed, with it.
+        return false
     }
 
     /**
