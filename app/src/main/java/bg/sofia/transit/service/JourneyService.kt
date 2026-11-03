@@ -222,7 +222,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * the off-route watches deal with it. Except having left a stop on
          * foot: vehicle speed is progress then only once it has brought us
          * back aboard (handleLeftOnFoot) — riding off in another vehicle is
-         * none on this journey, and the watch by the stops waits meanwhile.
+         * none on this journey, and the off-route watches wait meanwhile.
          */
         private const val INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000L
 
@@ -3325,9 +3325,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * true when that has just happened, having switched tracking into the
      * off-route state. Added to the watches by the stops, not instead of
      * them: those still work where the line has no road shape.
+     *
+     * Not having left a stop on foot (handleLeftOnFoot): travel elsewhere then
+     * is another vehicle, boarded after getting off, and "Изглежда не
+     * пътувате с линия …" was said in it, the journey then ended as a line
+     * never established (review of 3 Nov 2026).
      */
     private fun watchOffRoad(loc: Location, accurateFix: Boolean): Boolean {
-        if (offRoute || awaitingFirstFix || geometry == null) {
+        if (offRoute || leftOnFoot || awaitingFirstFix || geometry == null) {
             offRoadWatch.reset()
             return false
         }
@@ -3468,7 +3473,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * away from it, or across — is another vehicle, boarded after getting
      * off; and from the last stop there is none to head for. Anything else
      * is taken as the passenger having got off, and nothing is announced: no
-     * "Следваща спирка", no "Спирката за слизане е подмината". Ending the
+     * "Следваща спирка", no "Спирката за слизане е подмината", no "Изглежда
+     * не пътувате с линия …" (the off-route watches wait). Ending the
      * journey is left to the timers — see checkJourneyTimers; vehicle speed
      * is no progress meanwhile — and to the model's getting off
      * (followModel), since the automatic end exists to spare the battery,
