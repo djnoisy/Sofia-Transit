@@ -2351,7 +2351,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
             val destDist = stopDist(loc, dest)
 
-            // 1a) Announce at 60 m — early enough to signal the driver and
+            // 1a) Announce at ALIGHT_ANNOUNCE_RADIUS — early enough to signal the driver and
             //     reach the door.
             //
             //     The stop name is NOT repeated here: the ordinary "Спирка,
@@ -3643,7 +3643,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         // At the chosen stop. "Слизате тук" has been said; if the phone has
         // not since been carried off at vehicle speed — which would have
-        // been a departure, clearing the destination — the passenger got off.
+        // been a departure, clearing the destination; not at the last stop,
+        // with nothing past it — the passenger got off.
         // They already know they have arrived; only the end itself is told,
         // briefly.
         //
