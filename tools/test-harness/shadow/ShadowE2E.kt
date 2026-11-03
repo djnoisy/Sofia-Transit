@@ -17,7 +17,8 @@
 // off its route, and off its route while beside us. 40 journeys, each from
 // its own seed. Written with the reviewer of stage 2 (8 Oct 2026); B and O
 // added in stage 3 (b); B asked between readings too, at a fix — as when the
-// direction is settled (JourneyService.resolveDirectionTo, 3 Nov 2026).
+// direction is settled (JourneyService.resolveDirectionTo, 3 Nov 2026) — and
+// a vehicle taken there in some of them (checked below).
 import android.content.Context
 import android.location.Location
 import bg.sofia.transit.data.repository.VehicleInfo
@@ -36,6 +37,7 @@ fun main(args: Array<String>) {
     var same = 0
     var lines = 0
     var byStop = 0
+    var byStopBetween = 0
     var leftOffRoute = 0
     val differ = ArrayList<String>()
     for (seed in 1..40) {
@@ -72,15 +74,19 @@ fun main(args: Array<String>) {
             }
         }
         var lastLat = 0.0; var lastLon = 0.0
-        // In a third of the journeys, the rule is first asked at a fix 1-20 s
-        // after the first reading — the direction settled then — not after it.
-        val askBetween = seed % 3 == 2
+        // In half the journeys, the rule is first asked at a fix 1-20 s after
+        // the reading at 40 s, the first after we move off — the direction
+        // settled then — not after it; with the other bus far behind as well
+        // as near, so that it picks between readings too (review of 3 Nov 2026).
+        val askBetween = (seed / 3) % 2 == 1
         val askAt = 41.0 + rnd.nextInt(20)
         var askedBetween = false
-        fun ask(at: Long) {
-            if (!shadow.wantsBoarding()) return
+        fun ask(at: Long): Boolean {
+            if (!shadow.wantsBoarding()) return false
             JourneyTrace.boarding(at, "БУЛ. ЦАРИГРАДСКО, ШОСЕ", due)
-            follow(shadow.onBoarding(at, "БУЛ. ЦАРИГРАДСКО, ШОСЕ", due))
+            val events = shadow.onBoarding(at, "БУЛ. ЦАРИГРАДСКО, ШОСЕ", due)
+            follow(events)
+            return events.any { it is RideModel.Event.Identified }
         }
         var t = 0.0
         while (t <= 900.0) {
@@ -103,7 +109,7 @@ fun main(args: Array<String>) {
                     if (loc.hasSpeed()) loc.speed.toDouble() else null))
                 lastLat = loc.latitude; lastLon = loc.longitude
                 // As JourneyService.resolveDirectionTo: asked at the fix the direction is settled at.
-                if (askBetween && !askedBetween && t >= askAt) { askedBetween = true; ask(receivedMs + 30) }
+                if (askBetween && !askedBetween && t >= askAt) { askedBetween = true; if (ask(receivedMs + 30)) byStopBetween++ }
             }
             if (t >= 10 && (t.toLong() % 30L) == 10L) {
                 val infos = vehicles.mapNotNull { (id, trip, pos) ->
@@ -139,9 +145,10 @@ fun main(args: Array<String>) {
     }
     differ.forEach { println("FAIL $it") }
     println("$same of 40 journeys: the replay of the trace gives the app's lines ($lines lines; " +
-        "$byStop taken by the boarding stop, $leftOffRoute left us off its route)")
+        "$byStop taken by the boarding stop, $byStopBetween of them asked between readings, $leftOffRoute left us off its route)")
     // The B and O lines must have been put to the test, not only written.
     val exercised = byStop > 0 && leftOffRoute > 0
     if (!exercised) println("FAIL the early rule or the off-route rule never decided anything")
-    kotlin.system.exitProcess(if (same == 40 && exercised) 0 else 1)
+    if (byStopBetween == 0) println("FAIL the early rule asked between readings never took a vehicle")
+    kotlin.system.exitProcess(if (same == 40 && exercised && byStopBetween > 0) 0 else 1)
 }

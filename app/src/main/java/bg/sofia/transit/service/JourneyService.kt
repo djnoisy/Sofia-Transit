@@ -1508,7 +1508,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // 1.5 s after the first reading). The same rule on the same reading,
         // as with a direction chosen; judged once, as ever (the owner,
         // 3 Nov 2026).
-        if (movingSinceMs != 0L && lastTraceFeedMs != 0L) serviceScope.launch { askBoarding() }
+        val shadow = rideShadow
+        if (shadow != null && movingSinceMs != 0L && lastTraceFeedMs != 0L) serviceScope.launch { askBoarding(shadow) }
         // A stop to get off at set aside — on a return to the direction to be
         // determined (revokeIdentification) — put back by this order if it has
         // it; said, as every put-back is (review of 28 Oct 2026).
@@ -2431,7 +2432,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         }
         // A vehicle the model holds that could not be followed is tried again.
         if (unadopted != null) modelEvents.trySend(shadow to null)
-        askBoarding()
+        askBoarding(shadow)
     }
 
     // ── The model: which vehicle we are in, and when we get off ──────────
@@ -2514,11 +2515,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * it is open: once the boarding stop is known, the model is told it and
      * the trips due there — and the trace, for the replay. Looked up afresh
      * each time: before the direction is known it cannot be told yet. Asked
-     * from both at once, the model is told once (wantsBoarding, under
-     * traceFeedLock).
+     * from both at once, it is judged once (wantsBoarding, under
+     * traceFeedLock). [shadow]: the journey's model as it was when asked.
      */
-    private suspend fun askBoarding() {
-        val shadow = rideShadow ?: return
+    private suspend fun askBoarding(shadow: RideShadow) {
         try {
             if (!shadow.wantsBoarding()) return
             // The arrivals at the stops around us not in yet — tracking begun
