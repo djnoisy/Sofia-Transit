@@ -2230,9 +2230,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     // rather than on departure matters: a vehicle standing at
                     // its terminus may never trigger a "departed" event, which
                     // would leave tracking running indefinitely.
-                    // Skipped when the chosen alighting stop IS the terminus,
-                    // so the destination logic can own the ending (it warns at
-                    // 60 m and finishes at 30 m).
+                    // Skipped when the chosen alighting stop IS the terminus:
+                    // "Слизате тук" is said there, and getting off is then the
+                    // model's to tell, as at any chosen stop (followModel) —
+                    // or the limits' (checkJourneyTimers).
                     if (nearest == orderedStops.lastIndex &&
                         destinationIdx != orderedStops.lastIndex) {
                         announce("Крайна спирка. Пристигнахте.")
@@ -2297,9 +2298,14 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 } else if (currentIdx < orderedStops.lastIndex) {
                     currentIdx += 1
                     announceNextStop(currentIdx, loc)
+                } else {
+                    // Leaving the last stop aboard — the chosen one, as only
+                    // there does arriving not end the journey (above): there
+                    // is no stop ahead, and "Наближава спирка, <the last>" was
+                    // said as we drew away from it (review of 3 Nov 2026). Its
+                    // approach is taken as said.
+                    approachAnnounced = true
                 }
-                // No terminus case here any more — arriving at the final stop
-                // already ended the journey above.
             }
 
             // ── Moving; did we silently pass the current stop? ────────────
