@@ -223,6 +223,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * foot: vehicle speed is progress then only once it has brought us
          * back aboard (handleLeftOnFoot) — riding off in another vehicle is
          * none on this journey, and the off-route watches wait meanwhile.
+         * (Done at the chosen stop, the last, they wait too — doneAtChosenLast;
+         * the limit at the chosen stop ends it then.)
          */
         private const val INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000L
 
@@ -3463,7 +3465,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * "Слизате тук" said at the chosen stop, the last of the line, and we are
      * at it or gone on from it: nothing of the line lies ahead to be off.
      * Gone on at vehicle speed — to the depot, or in another vehicle boarded
-     * there — "Изглежда не пътувате с линия …" was said some 300 m on, after
+     * there — "Изглежда не пътувате с линия …" was said some 200-300 m on, after
      * "Слизате тук" (review of 3 Nov 2026; the owner: „Да, добави го“). The
      * off-route watches wait; the end is the model's getting off, or the limit
      * at the chosen stop (checkJourneyTimers).
