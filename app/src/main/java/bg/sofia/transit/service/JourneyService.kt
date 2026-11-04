@@ -224,7 +224,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * back aboard (handleLeftOnFoot) — riding off in another vehicle is
          * none on this journey, and the off-route watches wait meanwhile.
          * (Done at the chosen stop, the last, they wait too — doneAtChosenLast;
-         * the limit at the chosen stop ends it then.)
+         * the model or the limit at the chosen stop ends it then.)
          */
         private const val INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000L
 
@@ -2767,7 +2767,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * Follows one conclusion of the model, from the journey's [source]: the
      * vehicle identified, or switched to, is adopted — its line, direction
      * and stops; ours withdrawn, tracking returns to the line chosen — or,
-     * done at the chosen stop, the last (doneAtChosenLast), the journey ends;
+     * done at the chosen stop, the last, the journey may end (withdrawOurs);
      * got off, the journey ends. On the main thread, one at a time (onCreate).
      */
     private suspend fun followModel(source: RideShadow, e: RideModel.Event) {
@@ -2778,21 +2778,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                 adoptFromModel(source, e.toKey, e.toTripId, e.toRouteId, e.metres, switched = true)
             is RideModel.Event.Withdrawn -> {
                 if (unadopted?.key == e.key) unadopted = null
-                if (identified && e.key == followedKey && doneAtChosenLast()) {
-                    // We went on without it after "Слизате тук" at the end of
-                    // its line: changed vehicles there, most likely. Withdrawn,
-                    // it was taken for never ours — "Изглежда не пътувате с …"
-                    // was said, and with the direction from it, the line's
-                    // stops in the vehicle we went on in, or "Линията не беше
-                    // установена" (review of 3 Nov 2026; the owner, 4 Nov
-                    // 2026). The journey is over, as when getting off there.
-                    FileLogger.i(TAG, "The model withdrew ${e.key} after \"Слизате тук\" at the chosen stop, " +
-                        "the last — we went on without it; journey over")
-                    announce("Следенето приключи.")
-                    _events.tryEmit(JourneyEvent.DestinationReached)
-                    endJourney()
-                } else if (identified && e.key == followedKey) {
-                    revokeIdentification("The model withdrew it: it left us, or we left its route " +
+                if (identified && e.key == followedKey) {
+                    withdrawOurs("The model withdrew it: it left us, or we left its route " +
                         "without it, while we went on")
                 } else {
                     FileLogger.d(TAG, "The model withdrew ${e.key}, not the vehicle followed — nothing to undo")
@@ -2855,7 +2842,34 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         FileLogger.w(TAG, "Cannot follow the model's vehicle (route $route, trip $trip) — " +
             "tried again after each reading")
         if (switched && identified) {
-            revokeIdentification("The vehicle followed left us, and the one with us now cannot be followed")
+            withdrawOurs("The vehicle followed left us, and the one with us now cannot be followed")
+        }
+    }
+
+    /**
+     * Ours withdrawn ([why]: revokeIdentification) — or the journey ended,
+     * done at the chosen stop, the last (doneAtChosenLast), when withdrawing
+     * would be told: ours of another line than the chosen ("Изглежда не
+     * пътувате с …" at once), or the direction taken from it (afresh, and
+     * then "Изглежда не пътувате с линия …" and "Линията не беше установена",
+     * or the line's stops said in the vehicle we went on in). We went on
+     * without it after "Слизате тук" at the end of its line: changed vehicles
+     * there, most likely; the journey is over, as when getting off there
+     * (review of 3 Nov 2026; the owner, 4 Nov 2026). Ours of the line chosen,
+     * the direction the passenger's, withdrawing is silent, and as before: the
+     * vehicle we went on in may be identified and followed — the owner: that
+     * is the natural behaviour — or the limit at the chosen stop ends it.
+     */
+    private fun withdrawOurs(why: String) {
+        val c = chosen
+        if (doneAtChosenLast() && c != null && (c.routeId != routeId || directionFromVehicle)) {
+            FileLogger.i(TAG, "$why — after \"Слизате тук\" at the chosen stop, the last, " +
+                "with $routeLabel not the line and direction chosen; journey over")
+            announce("Следенето приключи.")
+            _events.tryEmit(JourneyEvent.DestinationReached)
+            endJourney()
+        } else {
+            revokeIdentification(why)
         }
     }
 
@@ -3482,7 +3496,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * there — "Изглежда не пътувате с линия …" was said some 200-300 m on, after
      * "Слизате тук" (review of 3 Nov 2026; the owner: „Да, добави го“). The
      * off-route watches wait; the end is the model's getting off, or its
-     * withdrawing ours as we go on without it (followModel), or the limit at
+     * withdrawing ours as we go on without it (withdrawOurs), or the limit at
      * the chosen stop (checkJourneyTimers).
      */
     private fun doneAtChosenLast(): Boolean =
