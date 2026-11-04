@@ -2850,13 +2850,15 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
      * Ours withdrawn ([why]: revokeIdentification) — or the journey ended,
      * done at the chosen stop, the last (doneAtChosenLast), when withdrawing
      * would be told: ours of another line than the chosen ("Изглежда не
-     * пътувате с …" at once), or the direction taken from it (afresh, and
-     * then "Изглежда не пътувате с линия …" and "Линията не беше установена",
-     * or the line's stops said in the vehicle we went on in). We went on
+     * пътувате с …" at once), or the direction taken from it (afresh: "Посоката
+     * е коригирана", or, to be determined, "Изглежда не пътувате с линия …"
+     * and "Линията не беше установена", "Посоката не беше определена", or the
+     * line's stops said in the vehicle we went on in). We went on
      * without it after "Слизате тук" at the end of its line: changed vehicles
      * there, most likely; the journey is over, as when getting off there
      * (review of 3 Nov 2026; the owner, 4 Nov 2026). Ours of the line chosen,
-     * the direction the passenger's, withdrawing is silent, and as before: the
+     * the direction not taken from it (the passenger's, or found from our
+     * movement or the timetable), withdrawing is silent, and as before: the
      * vehicle we went on in may be identified and followed — the owner: that
      * is the natural behaviour — or the limit at the chosen stop ends it.
      */
