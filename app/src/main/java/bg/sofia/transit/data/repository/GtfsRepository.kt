@@ -1206,6 +1206,15 @@ class GtfsRepository @Inject constructor(
     suspend fun getRoutesForStops(stopIds: List<String>) =
         routeDao.getRoutesForStops(stopIds)
 
+    /**
+     * The stop ids of each of [tripIds], in order, by trip id; a trip not in
+     * the static data is left out. See ReachedStops.
+     */
+    suspend fun stopOrdersOfTrips(tripIds: Collection<String>): Map<String, List<String>> {
+        val rows = tripIds.distinct().chunked(TRIP_IDS_PER_QUERY).flatMap { stopTimeDao.getStopsOfTrips(it) }
+        return rows.groupBy({ it.tripId }, { it.stopId })
+    }
+
     // ── Trips / Directions ────────────────────────────────────────────────
     /**
      * Returns at most TWO directions for the given route — the ones with the

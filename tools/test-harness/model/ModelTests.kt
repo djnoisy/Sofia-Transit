@@ -2516,6 +2516,26 @@ fun movedBack(lines: List<String>, back: Double): List<String> {
 
 /** Recorded journeys replayed as they would have been with poorer positions, by file name. */
 val variants: Map<String, (String, List<String>) -> Unit> = mapOf(
+    // 7 Nov 2026 b: 213 at ХЕРМЕС ПАРК as the arrivals were collected
+    // (19:00:50), its first stop ahead the next one — due there as of then
+    // (ReachedStops, 8 Nov 2026): the `B` line the app writes now. 213 by the
+    // boarding stop at the first reading, 30 s before the metres took it;
+    // getting off as before.
+    "2026-11-07_213.txt" to { start, lines ->
+        val b = lines.indexOfFirst { it.startsWith("B,") }
+        check("7.11 b: the B line as recorded, nothing due", b >= 0 && lines[b] == "B,1794070885449,ХЕРМЕС ПАРК") {
+            lines.getOrNull(b) ?: "none" }
+        val rp = replay(start, lines.toMutableList().also {
+            it[b] = "B,1794070885449,ХЕРМЕС ПАРК,A85-A4231-3-18-3762667380,1794070850" })
+        val id = rp.events.firstOrNull()
+        check("7.11 b, 213 due as reached: 213 by the boarding stop by 19:01:26",
+            (id?.event as? Event.Identified)?.let { it.key == "A3155" && it.byBoardingStop } == true &&
+            clock(id!!.atMs) <= "19:01:26") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        val off = rp.events.getOrNull(1)
+        check("7.11 b, so due: got off as before, nothing else", rp.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "19:03:50".."19:04:45") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+    },
     // 2 Nov 2026 c: ours gone from us (RideModel.ourGoneSince, for the app's
     // leaving a stop on foot) — never while aboard, at any fix to 18:50:20,
     // asked since 90 s before it; and so at 18:51:34, 90 m off from

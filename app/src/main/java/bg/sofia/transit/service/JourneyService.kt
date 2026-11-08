@@ -968,6 +968,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         java.util.concurrent.ConcurrentHashMap<Pair<String, String>, Long>()
     private var lastBoardingFetchMs = 0L
     private var boardingJob: Job? = null
+    /** The lines serving the stops around us, by their ids: for reachedAround, looked up once a place. */
+    @Volatile
+    private var boardingRoutes: Pair<Set<String>, Set<String>>? = null
 
     // ── Compass: which way we are heading ────────────────────────────────
     /** Recent accurate positions, for a heading when the receiver gives none. */
@@ -3798,14 +3801,49 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // Every id of each place, so that a bus row and a trolley row at the
         // same stop are both covered.
         val ids = stops.flatMap { gtfsRepo.stopIdsOfSamePlace(it.stopId) }.toSet()
+        val ahead = HashMap<String, Pair<String, String>>()
         val upcoming = realtimeRepo.getUpcomingTripsForStops(
-            ids, withinMinutes = 60, recentSeconds = EXPECTED_BEFORE_SEC)
+            ids, withinMinutes = 60, recentSeconds = EXPECTED_BEFORE_SEC, firstStopsAhead = ahead)
+        val atSec = System.currentTimeMillis() / 1000
+        // A vehicle already at one of these stops, or just past it, has no
+        // arrival there in the feed: due there now (ReachedStops) — tracking
+        // begun with it at the stop (7 Nov 2026, b).
+        val reached = reachedAround(ids, ahead)
         // Merged, not replaced: a vehicle that has already pulled in drops
-        // out of the next fetch, and it is exactly the one that matters.
+        // out of the next fetch, and it is exactly the one that matters. One
+        // still there, or just gone, at a later fetch is due as of then.
         withContext(Dispatchers.Main) {
             for (u in upcoming) expectedArrivals[u.tripId to u.stopId] = u.arrivalEpoch
+            for (key in reached) expectedArrivals.merge(key, atSec) { was, now -> maxOf(was, now) }
         }
-        FileLogger.d(TAG, "Boarding: ${upcoming.size} arrivals due at ${stops.size} stops nearby")
+        FileLogger.d(TAG, "Boarding: ${upcoming.size} arrivals due at ${stops.size} stops nearby" +
+            (if (reached.isEmpty()) "" else ", ${reached.size} at one of them or just past it"))
+    }
+
+    /**
+     * The trips at one of the stops [ids], or just past it, by the first stop
+     * still ahead of each trip in the feed ([ahead]: trip → route, stop) —
+     * as (trip, stop) keys of expectedArrivals. Only trips of the lines
+     * serving those stops are looked up. Nothing when it cannot be worked
+     * out: as before, those trips are then not due.
+     */
+    private suspend fun reachedAround(ids: Set<String>, ahead: Map<String, Pair<String, String>>):
+            Set<Pair<String, String>> {
+        if (ahead.isEmpty()) return emptySet()
+        return try {
+            val routes = boardingRoutes?.takeIf { it.first == ids }?.second
+                ?: gtfsRepo.getRoutesForStops(ids.toList()).map { it.routeId }.toSet()
+                    .also { boardingRoutes = ids to it }
+            val trips = ahead.filterValues { it.first in routes }
+            if (trips.isEmpty()) return emptySet()
+            val orders = gtfsRepo.stopOrdersOfTrips(trips.keys)
+            ReachedStops.of(ids, trips.mapValues { it.value.second }, orders)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "Boarding: trips at the stops nearby not worked out: ${e.message}")
+            emptySet()
+        }
     }
 
     /** The stop we boarded at: its name, how far from where we waited, and its ids. */
@@ -4024,6 +4062,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         notApproachingSinceMs = 0L
         expectedArrivals.clear()
         lastBoardingFetchMs = 0L
+        boardingRoutes = null
         headingSamples.clear()
         lastMovingHeading = null
         lastMovingHeadingAtMs = 0L

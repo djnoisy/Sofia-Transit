@@ -396,10 +396,19 @@ class RealtimeRepository @Inject constructor() {
         /**
          * Also keep arrivals up to this many seconds in the past. 0 — the
          * default, for lists of what is still to come — drops them. Tracking
-         * uses it to catch the vehicle already standing at the stop, whose
-         * predicted arrival there has just gone by.
+         * uses it to catch a vehicle not yet at the stop whose predicted
+         * arrival there has gone by. One already at the stop has no arrival
+         * there at all: the feed drops the stop a vehicle has reached (see
+         * [firstStopsAhead]).
          */
-        recentSeconds: Long = 0
+        recentSeconds: Long = 0,
+        /**
+         * When given, filled from the same feed with the first stop still
+         * ahead of each trip, by trip id: (route id, stop id) — for telling
+         * a vehicle at a stop, or just past it (ReachedStops). A trip with
+         * more than one update is left out: which is right is not known.
+         */
+        firstStopsAhead: MutableMap<String, Pair<String, String>>? = null
     ): List<UpcomingTripRaw> = withContext(Dispatchers.IO) {
         try {
             val feed = fetchTripUpdates() ?: return@withContext emptyList()
@@ -407,12 +416,17 @@ class RealtimeRepository @Inject constructor() {
             val cutoff = now + withinMinutes * 60
             val earliest = now - recentSeconds
             val result = mutableListOf<UpcomingTripRaw>()
+            val twice = HashSet<String>()
 
             for (entity in feed.entityList) {
                 if (!entity.hasTripUpdate()) continue
                 val tu = entity.tripUpdate
                 val tripId  = tu.trip.tripId.takeIf { it.isNotEmpty() } ?: continue
                 val routeId = tu.trip.routeId
+                if (firstStopsAhead != null && tu.stopTimeUpdateCount > 0) {
+                    val first = tu.getStopTimeUpdate(0).stopId
+                    if (firstStopsAhead.put(tripId, routeId to first) != null) twice.add(tripId)
+                }
 
                 for (stu in tu.stopTimeUpdateList) {
                     if (stu.stopId !in stopIds) continue
@@ -434,12 +448,14 @@ class RealtimeRepository @Inject constructor() {
                     )
                 }
             }
+            if (firstStopsAhead != null) for (t in twice) firstStopsAhead.remove(t)
             val byStop = result.groupBy { it.stopId }
             for (id in stopIds) noteVanished("upcoming", id, feed, now,
                 byStop[id].orEmpty().groupBy { it.tripId }.mapValues { (_, l) -> l.minOf { it.arrivalEpoch } })
             result
         } catch (e: Exception) {
             FileLogger.e(TAG, "Error fetching upcoming trips: ${e.message}")
+            firstStopsAhead?.clear()
             emptyList()
         }
     }
