@@ -1267,6 +1267,16 @@ class GtfsRepository @Inject constructor(
     }
 
     /**
+     * Each line's official colour from the static data (route_color,
+     * "RRGGBB"), by route id; lines without one are left out. For the line
+     * badges (LineColors, LineBadge).
+     */
+    suspend fun getRouteColors(): Map<String, String> =
+        routeDao.getAllRoutesOnce()
+            .mapNotNull { r -> r.routeColor?.takeIf { it.isNotBlank() }?.let { r.routeId to it } }
+            .toMap()
+
+    /**
      * Builds a subtitle for every route from its two most-trafficked
      * headsigns, e.g. "Ж.К. ОВЧА КУПЕЛ-2 - СТУДЕНТСКИ ГРАД". This is shown
      * in the Lines list INSTEAD of route_long_name, because CGM's long_name
@@ -1279,16 +1289,6 @@ class GtfsRepository @Inject constructor(
      * screen offers the next.
      * One SQL query for all routes; top-2 picked in memory.
      */
-    /**
-     * Each line's official colour from the static data (route_color,
-     * "RRGGBB"), by route id; lines without one are left out. For the line
-     * badges (LineColors, LineBadge).
-     */
-    suspend fun getRouteColors(): Map<String, String> =
-        routeDao.getAllRoutesOnce()
-            .mapNotNull { r -> r.routeColor?.takeIf { it.isNotBlank() }?.let { r.routeId to it } }
-            .toMap()
-
     suspend fun getRouteSubtitles(): Map<String, String> {
         val rows = tripDao.getHeadsignCountsAllRoutes()
         val result = mutableMapOf<String, String>()

@@ -7,7 +7,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginHorizontal="4dp"
-    android:layout_marginVertical="3dp"
+    android:layout_marginVertical="4dp"
     android:clickable="true"
     android:focusable="true">
 
@@ -21,8 +21,11 @@
         android:importantForAccessibility="no">
 
         <TextView android:id="@+id/tvSequence"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="40dp"
+            android:minHeight="40dp"
+            android:padding="4dp"
             android:gravity="center"
             android:background="@drawable/bg_sequence_circle"
             android:textSize="15sp"

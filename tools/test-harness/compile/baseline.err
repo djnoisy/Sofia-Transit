@@ -706,6 +706,7 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: clearFocus
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: contentDescription
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: dagger
@@ -718,6 +719,7 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: google
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: google
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: isFocusable
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: itemAnimator
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: layoutManager
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: onDestroyView
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: onPause
@@ -743,6 +745,7 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: viewModels
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: windowToken
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: variable expected
@@ -909,8 +912,10 @@ app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: un
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: databinding
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: getItem
-app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: notifyDataSetChanged
-app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: notifyDataSetChanged
+app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: itemCount
+app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: itemCount
+app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: notifyItemRangeChanged
+app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: notifyItemRangeChanged
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: 'getItemCount' overrides nothing

@@ -6,7 +6,7 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center"
-    android:minWidth="76dp"
+    android:minWidth="96dp"
     android:minHeight="44dp"
     android:paddingHorizontal="10dp"
     android:paddingVertical="6dp"

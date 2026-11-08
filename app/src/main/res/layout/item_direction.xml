@@ -33,6 +33,7 @@
             android:layout_weight="1"
             android:layout_marginStart="12dp"
             android:maxLines="3"
+            android:ellipsize="end"
             android:textSize="17sp"
             android:textColor="?attr/colorOnSurface"
             android:importantForAccessibility="no"/>

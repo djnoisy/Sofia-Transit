@@ -32,7 +32,7 @@ class UpcomingTripsAdapter(
     fun setTrolleyRouteIds(ids: Set<String>) {
         if (ids != trolleyRouteIds) {
             trolleyRouteIds = ids
-            notifyDataSetChanged()
+            notifyItemRangeChanged(0, itemCount)
         }
     }
 
@@ -40,9 +40,10 @@ class UpcomingTripsAdapter(
     private var routeColors: Map<String, String> = emptyMap()
 
     fun setRouteColors(colors: Map<String, String>) {
+        // Rows rebound in place, not the list rebuilt: TalkBack keeps its focus.
         if (colors != routeColors) {
             routeColors = colors
-            notifyDataSetChanged()
+            notifyItemRangeChanged(0, itemCount)
         }
     }
 

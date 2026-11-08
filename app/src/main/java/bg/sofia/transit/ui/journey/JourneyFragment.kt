@@ -71,6 +71,11 @@ class JourneyFragment : Fragment() {
             layoutManager = LinearLayoutManager(requireContext())
             adapter = upcomingAdapter
             contentDescription = "Идващи превозни средства"
+            // Rows updated in place (the lines' colours, the trolley lines)
+            // keep their view, so TalkBack keeps its focus — as on the
+            // arrivals board.
+            (itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)
+                ?.supportsChangeAnimations = false
         }
 
         binding.btnClearSearch.setOnClickListener {
