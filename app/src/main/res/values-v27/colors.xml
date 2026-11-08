@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 8.1 and later draw the navigation bar's buttons dark on a light
+     bar (windowLightNavigationBar): the bar takes the light container colour.
+     A dark theme takes values-night's, which outranks this. -->
+<resources>
+    <color name="nav_bar">@color/md_surface_container</color>
+</resources>

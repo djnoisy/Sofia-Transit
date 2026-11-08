@@ -25,6 +25,15 @@
         <item name="itemIconSize">26dp</item>
         <item name="itemTextAppearanceActive">@style/TextAppearance.SofiaTransit.NavLabel.Active</item>
         <item name="itemTextAppearanceInactive">@style/TextAppearance.SofiaTransit.NavLabel</item>
+        <item name="itemIconTint">@color/nav_item_icon</item>
+        <item name="itemTextColor">@color/nav_item_text</item>
+        <item name="itemActiveIndicatorStyle">@style/Widget.SofiaTransit.BottomNavigation.ActiveIndicator</item>
+    </style>
+
+    <!-- The pill of the active section: the primary colour, 5.5:1 on the bar
+         in light, 9.6:1 in dark, yellow on black in high contrast. -->
+    <style name="Widget.SofiaTransit.BottomNavigation.ActiveIndicator" parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
+        <item name="android:color">?attr/colorPrimary</item>
     </style>
 
     <style name="TextAppearance.SofiaTransit.NavLabel" parent="TextAppearance.Material3.LabelLarge">
@@ -38,15 +47,26 @@
     <!-- Cards: each item or section a clearly bounded block. -->
     <style name="Widget.SofiaTransit.Card" parent="Widget.Material3.CardView.Outlined">
         <item name="cardBackgroundColor">?attr/colorSurfaceContainerLow</item>
-        <item name="strokeColor">?attr/colorOutlineVariant</item>
+        <!-- colorOutline: 4:1 on the card in light, 5.4:1 in dark (the
+             variant was 1.5-1.8:1). -->
+        <item name="strokeColor">?attr/colorOutline</item>
         <item name="strokeWidth">?attr/lineDividerWidth</item>
         <item name="cardCornerRadius">16dp</item>
         <item name="cardElevation">0dp</item>
     </style>
 
     <style name="Widget.SofiaTransit.Divider" parent="Widget.Material3.MaterialDivider">
-        <item name="dividerColor">?attr/colorOutlineVariant</item>
+        <item name="dividerColor">?attr/colorOutline</item>
         <item name="dividerThickness">?attr/lineDividerWidth</item>
+    </style>
+
+    <!-- Menus: the overflow under "Още опции", and pop-up menus. -->
+    <style name="Widget.SofiaTransit.PopupMenu" parent="Widget.Material3.PopupMenu">
+        <item name="android:popupBackground">@drawable/bg_popup_outlined</item>
+    </style>
+
+    <style name="Widget.SofiaTransit.PopupMenu.Overflow" parent="Widget.Material3.PopupMenu.Overflow">
+        <item name="android:popupBackground">@drawable/bg_popup_outlined</item>
     </style>
 
     <!-- A section heading inside a screen or a card. -->

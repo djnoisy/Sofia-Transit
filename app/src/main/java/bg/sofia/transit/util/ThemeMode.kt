@@ -2,6 +2,8 @@ package bg.sofia.transit.util
 
 import android.app.Activity
 import android.content.Context
+import android.content.res.Configuration
+import android.content.res.Resources
 import androidx.appcompat.app.AppCompatDelegate
 import bg.sofia.transit.R
 
@@ -34,15 +36,25 @@ object ThemeMode {
 
     /**
      * A new look chosen, from [old]: the night mode set — AppCompat
-     * recreates the activities if it changes how they look — and, if high
-     * contrast is switched on or off, [activity] recreated, since a night
-     * mode alone does not change its theme (dark and high contrast are both
-     * dark).
+     * recreates the activities if it turns them from light to dark or back —
+     * and, if high contrast is switched on or off while they stay as dark
+     * (dark and high contrast are both dark) or as light, [activity]
+     * recreated here, since a night mode alone does not change its theme.
+     * Not both: twice, it flashes twice (review of 8 Nov 2026).
      */
     fun change(activity: Activity, old: Int, new: Int) {
+        val darkNow = isDark(activity.resources.configuration)
+        val darkThen = when (new) {
+            AppSettings.THEME_LIGHT -> false
+            AppSettings.THEME_DARK, AppSettings.THEME_HIGH_CONTRAST -> true
+            else -> isDark(Resources.getSystem().configuration)
+        }
         AppCompatDelegate.setDefaultNightMode(nightModeFor(new))
         val hcBefore = old == AppSettings.THEME_HIGH_CONTRAST
         val hcNow = new == AppSettings.THEME_HIGH_CONTRAST
-        if (hcBefore != hcNow) activity.recreate()
+        if (hcBefore != hcNow && darkNow == darkThen) activity.recreate()
     }
+
+    private fun isDark(config: Configuration): Boolean =
+        (config.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 }

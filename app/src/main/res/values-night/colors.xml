@@ -38,4 +38,5 @@
 
     <color name="arrival_time">#7FD88F</color>
     <bool name="light_system_bars">false</bool>
+    <color name="nav_bar">@color/md_surface_container</color>
 </resources>

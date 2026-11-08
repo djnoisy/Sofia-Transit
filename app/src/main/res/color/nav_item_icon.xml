@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Navigation bar icons: on the primary-coloured pill when active, so the
+     active section stands out (the default pill was 1.1:1 on the bar). -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:color="?attr/colorOnPrimary"/>
+    <item android:color="?attr/colorOnSurfaceVariant"/>
+</selector>

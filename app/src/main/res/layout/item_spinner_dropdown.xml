@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Dropdown row. Explicit app colours instead of the platform default,
      which follows the SYSTEM theme and therefore rendered light-on-dark
-     inside an otherwise light app. 48dp minimum keeps the touch target
+     inside an otherwise light app; the list's fill and edge are the spinner's
+     popupBackground (bg_popup_outlined). 48dp minimum keeps the touch target
      usable. -->
 <TextView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -12,4 +13,4 @@
     android:paddingVertical="12dp"
     android:textSize="16sp"
     android:textColor="?attr/colorOnSurface"
-    android:background="?attr/colorSurfaceContainerHigh"/>
+    android:background="?attr/selectableItemBackground"/>

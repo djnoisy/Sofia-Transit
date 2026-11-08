@@ -128,7 +128,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="56dp"
                     android:minHeight="48dp"
-                    android:popupBackground="?attr/colorSurfaceContainerHigh"/>
+                    android:popupBackground="@drawable/bg_popup_outlined"/>
 
                 <com.google.android.material.divider.MaterialDivider
                     android:layout_width="match_parent"
@@ -144,10 +144,16 @@
                     android:textStyle="bold"
                     android:textColor="?attr/colorOnSurface"/>
 
+                <!-- Track, progress and thumb in theme colours: the default
+                     unfilled track was 1.7-2.5:1, grey in high contrast. -->
                 <SeekBar android:id="@+id/seekRate"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"/>
+                    android:layout_marginTop="12dp"
+                    android:minHeight="48dp"
+                    android:progressBackgroundTint="?attr/colorOutline"
+                    android:progressTint="?attr/colorPrimary"
+                    android:thumbTint="?attr/colorPrimary"/>
 
                 <!-- All three are ordinary accessible elements: anything visible
                      on screen should be reachable by touch exploration, so the

@@ -15,6 +15,7 @@ import androidx.navigation.fragment.NavHostFragment
 import androidx.core.view.ViewCompat
 import androidx.core.view.children
 import androidx.navigation.ui.AppBarConfiguration
+import androidx.navigation.ui.NavigationUI
 import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
@@ -81,6 +82,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.bottomNav.setupWithNavController(navController)
+        // "Настройки" and "Диагностика" belong to no section: left before a
+        // section is chosen, or they would be kept as part of the section
+        // left — and come back with it, the section's own screen behind
+        // them (review of 8 Nov 2026). The section shown chosen again, from
+        // either of them: back to where it was; from its own screens:
+        // nothing, as before.
+        binding.bottomNav.setOnItemSelectedListener { item ->
+            leaveSettingsAndDiagnostics()
+            NavigationUI.onNavDestinationSelected(item, navController)
+        }
+        binding.bottomNav.setOnItemReselectedListener { leaveSettingsAndDiagnostics() }
 
         // Accessibility: describe the bottom navigation for TalkBack
         binding.bottomNav.contentDescription =
@@ -114,9 +126,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.actionSettings -> { navController.navigate(R.id.actionGlobalSettings); true }
-        R.id.actionDiagnostics -> { navController.navigate(R.id.actionGlobalDiagnostics); true }
+        // One over the other, not one on top of the other again and again.
+        R.id.actionSettings -> {
+            leaveSettingsAndDiagnostics()
+            navController.navigate(R.id.actionGlobalSettings); true
+        }
+        R.id.actionDiagnostics -> {
+            leaveSettingsAndDiagnostics()
+            navController.navigate(R.id.actionGlobalDiagnostics); true
+        }
         else -> super.onOptionsItemSelected(item)
+    }
+
+    /** Back out of "Настройки" and "Диагностика", if on one of them. */
+    private fun leaveSettingsAndDiagnostics() {
+        while (navController.currentDestination?.id.let {
+                it == R.id.settingsFragment || it == R.id.diagnosticsFragment }) {
+            if (!navController.popBackStack()) break
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean =

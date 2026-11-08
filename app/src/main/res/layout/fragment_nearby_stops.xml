@@ -2,14 +2,21 @@
 <!-- "Спирки": the title, "Настройки" and "Диагностика" are in the top app
      bar (activity_main.xml); here the two tabs and their pages. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- The selected tab: the primary colour and a 4dp bar (by default its
+         text differed from the other's by 1.0-1.4:1). -->
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayout"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"/>
+        android:layout_height="wrap_content"
+        app:tabTextColor="?attr/colorOnSurfaceVariant"
+        app:tabSelectedTextColor="?attr/colorPrimary"
+        app:tabIndicatorColor="?attr/colorPrimary"
+        app:tabIndicatorHeight="4dp"/>
 
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/viewPager"

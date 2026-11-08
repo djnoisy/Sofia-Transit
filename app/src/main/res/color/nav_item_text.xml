@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Navigation bar labels: the active one in the primary colour (and bold). -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:color="?attr/colorPrimary"/>
+    <item android:color="?attr/colorOnSurfaceVariant"/>
+</selector>

@@ -46,11 +46,12 @@
         <item name="colorSurfaceContainerHighest">@color/md_surface_container_highest</item>
 
         <item name="colorArrivalTime">@color/arrival_time</item>
+        <item name="colorHintText">@color/md_on_surface_variant</item>
         <item name="lineDividerWidth">1dp</item>
 
         <item name="android:windowBackground">@color/md_surface</item>
         <item name="android:statusBarColor">@color/md_surface_container</item>
-        <item name="android:navigationBarColor">@color/md_surface_container</item>
+        <item name="android:navigationBarColor">@color/nav_bar</item>
         <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_system_bars</item>
 
@@ -63,6 +64,8 @@
         <item name="bottomNavigationStyle">@style/Widget.SofiaTransit.BottomNavigation</item>
         <item name="materialCardViewStyle">@style/Widget.SofiaTransit.Card</item>
         <item name="materialDividerStyle">@style/Widget.SofiaTransit.Divider</item>
+        <item name="popupMenuStyle">@style/Widget.SofiaTransit.PopupMenu</item>
+        <item name="actionOverflowMenuStyle">@style/Widget.SofiaTransit.PopupMenu.Overflow</item>
     </style>
 
     <style name="Theme.SofiaTransit" parent="Base.Theme.SofiaTransit"/>
@@ -104,11 +107,14 @@
         <item name="colorSurfaceContainer">@color/hc_black</item>
         <item name="colorSurfaceContainerHigh">@color/hc_black</item>
         <item name="colorSurfaceContainerHighest">@color/hc_black</item>
-        <item name="android:textColorPrimary">@color/hc_white</item>
-        <item name="android:textColorSecondary">@color/hc_white</item>
-        <item name="android:textColorHint">@color/hc_white</item>
+        <!-- White, dimmed only when disabled; hints cyan, apart from the
+             white of text typed in. -->
+        <item name="android:textColorPrimary">@color/hc_text</item>
+        <item name="android:textColorSecondary">@color/hc_text</item>
+        <item name="android:textColorHint">@color/hc_cyan</item>
 
         <item name="colorArrivalTime">@color/hc_green</item>
+        <item name="colorHintText">@color/hc_cyan</item>
         <item name="lineDividerWidth">2dp</item>
 
         <item name="android:windowBackground">@color/hc_black</item>
@@ -124,5 +130,14 @@
         <item name="bottomNavigationStyle">@style/Widget.SofiaTransit.BottomNavigation</item>
         <item name="materialCardViewStyle">@style/Widget.SofiaTransit.Card</item>
         <item name="materialDividerStyle">@style/Widget.SofiaTransit.Divider</item>
+        <item name="popupMenuStyle">@style/Widget.SofiaTransit.PopupMenu</item>
+        <item name="actionOverflowMenuStyle">@style/Widget.SofiaTransit.PopupMenu.Overflow</item>
+        <!-- On black, a dialog's shadow and the dimming behind it do not show:
+             a white edge marks where it ends. -->
+        <item name="alertDialogTheme">@style/ThemeOverlay.SofiaTransit.HighContrast.Dialog</item>
+    </style>
+
+    <style name="ThemeOverlay.SofiaTransit.HighContrast.Dialog" parent="ThemeOverlay.Material3.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/bg_dialog_outlined</item>
     </style>
 </resources>

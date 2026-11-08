@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A dialog in high contrast: black, a white edge, the usual margin round it. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="24dp" android:insetTop="24dp"
+    android:insetRight="24dp" android:insetBottom="24dp">
+    <shape android:shape="rectangle">
+        <solid android:color="?attr/colorSurface"/>
+        <stroke android:width="2dp" android:color="?attr/colorOutline"/>
+        <corners android:radius="28dp"/>
+        <padding android:left="8dp" android:top="8dp" android:right="8dp" android:bottom="8dp"/>
+    </shape>
+</inset>

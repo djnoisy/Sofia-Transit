@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Menus and drop-down lists: a clear edge in every theme (on black in high
+     contrast a shadow does not show). The padding keeps rows off the edge. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="?attr/colorSurfaceContainerHigh"/>
+    <stroke android:width="?attr/lineDividerWidth" android:color="?attr/colorOutline"/>
+    <corners android:radius="8dp"/>
+    <padding android:left="2dp" android:top="4dp" android:right="2dp" android:bottom="4dp"/>
+</shape>
