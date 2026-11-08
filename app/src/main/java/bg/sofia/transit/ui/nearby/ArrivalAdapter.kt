@@ -90,7 +90,10 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
                 // Timetable times are marked as such. They carry no traffic
                 // information, so presenting them like live predictions would
                 // invite more trust than they deserve.
-                val timesText = info.arrivals.joinToString("  •  ")
+                // On screen without "след" ("5 мин", not "след 5 мин"): to a
+                // sighted reader it adds nothing and takes room (the owner,
+                // 8 Nov 2026). TalkBack still hears it (timesDesc below).
+                val timesText = info.arrivals.joinToString("  •  ") { it.removePrefix("след ") }
                 b.tvTimes.text = if (info.scheduled && info.arrivals.isNotEmpty())
                     "$timesText  (по разписание)"
                 else
