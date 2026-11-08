@@ -14,8 +14,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Разрешения"
-            android:textSize="22sp"
+            android:textSize="24sp"
             android:textStyle="bold"
+            android:textColor="?attr/colorOnSurface"
             android:accessibilityHeading="true"
             android:paddingBottom="12dp"/>
 
@@ -23,12 +24,22 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="За да работи пълноценно, приложението има нужда от следните разрешения:"
-            android:textSize="16sp"
+            android:textSize="17sp"
+            android:textColor="?attr/colorOnSurface"
             android:lineSpacingMultiplier="1.15"
             android:paddingBottom="20dp"/>
 
-        <include android:id="@+id/permissionRows"
-            layout="@layout/view_permission_rows"/>
+        <!-- The three permissions in a card, as in Settings. -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <include android:id="@+id/permissionRows"
+                layout="@layout/view_permission_rows"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="16dp"/>
+        </com.google.android.material.card.MaterialCardView>
 
         <Button android:id="@+id/btnAllowAll"
             android:layout_width="match_parent"

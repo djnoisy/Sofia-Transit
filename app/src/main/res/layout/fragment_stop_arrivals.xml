@@ -15,8 +15,9 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textSize="20sp"
+            android:textSize="21sp"
             android:textStyle="bold"
+            android:textColor="?attr/colorOnSurface"
             android:accessibilityHeading="true"/>
 
         <ProgressBar android:id="@+id/pbLoading"
@@ -38,7 +39,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Превозни средства, спиращи на тази спирка:"
-        android:textSize="14sp"
+        android:textSize="15sp"
         android:paddingHorizontal="12dp"
         android:paddingBottom="8dp"
         android:textColor="?attr/colorOnSurfaceVariant"/>
@@ -65,5 +66,7 @@
         android:id="@+id/rvArrivals"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"/>
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="8dp"/>
 </LinearLayout>

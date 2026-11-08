@@ -1,13 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- "Пътуване" (redesign, stage c, 8 Nov 2026). The title is in the top app
+     bar. Before a journey: the line picker — search, the lines near us as
+     cards. During one: the line, a large card with the stop we are at or
+     heading to, a card with the stop to get off at, the signal, and "Спри
+     пътуването" set apart at the bottom. TalkBack reads the same elements in
+     the same order as before. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- The title, "Пътуване", is in the top app bar (activity_main.xml). -->
     <!-- Hint when idle -->
     <TextView android:id="@+id/tvJourneyHint"
         android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:textSize="16sp" android:padding="16dp" android:visibility="gone"
+        android:textSize="17sp" android:padding="24dp" android:visibility="gone"
+        android:textColor="?attr/colorOnSurface"
+        android:lineSpacingMultiplier="1.15"
         android:gravity="center"/>
 
     <!-- Shown under the hint while there is no location access. -->
@@ -36,38 +44,46 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:layout_marginHorizontal="12dp"
-            android:layout_marginTop="8dp">
+            android:layout_marginTop="12dp">
 
-            <EditText android:id="@+id/etSearch"
+            <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:minHeight="48dp"
                 android:hint="Търсене на линия"
                 android:textColorHint="?attr/colorHintText"
-                android:inputType="textCapCharacters"
-                android:imeOptions="actionSearch"
-                android:maxLines="1"
-                android:importantForAutofill="no"/>
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etSearch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="56dp"
+                    android:textSize="17sp"
+                    android:inputType="textCapCharacters"
+                    android:imeOptions="actionSearch"
+                    android:maxLines="1"
+                    android:importantForAutofill="no"/>
+            </com.google.android.material.textfield.TextInputLayout>
 
             <Button android:id="@+id/btnClearSearch"
                 android:layout_width="wrap_content"
-                android:layout_height="48dp"
+                android:layout_height="56dp"
                 android:minWidth="48dp"
                 android:text="Изчисти"
-                android:layout_marginStart="4dp"
+                android:layout_marginStart="8dp"
                 android:visibility="gone"
-                style="@style/Widget.Material3.Button.TextButton"/>
+                style="@style/Widget.Material3.Button.TonalButton"/>
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical"
-            android:paddingHorizontal="12dp" android:paddingVertical="8dp">
+            android:paddingStart="16dp" android:paddingEnd="8dp" android:paddingVertical="8dp">
 
             <TextView android:id="@+id/tvUpcomingTitle"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textSize="16sp"
+                android:textAppearance="@style/TextAppearance.SofiaTransit.SectionTitle"
                 android:accessibilityHeading="true"/>
 
             <ProgressBar android:id="@+id/pbRefreshing"
@@ -86,78 +102,125 @@
         <TextView android:id="@+id/tvEmptyMessage"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="Няма идващи превозни средства в близост"
-            android:textSize="15sp"
+            android:textSize="16sp"
+            android:textColor="?attr/colorOnSurfaceVariant"
             android:padding="24dp"
             android:gravity="center"
             android:visibility="gone"/>
 
         <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvUpcoming"
-            android:layout_width="match_parent" android:layout_height="match_parent"/>
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:paddingBottom="8dp" android:clipToPadding="false"/>
     </LinearLayout>
 
     <!-- Active journey panel: deliberately minimal — one stop plus the
          alighting info, so a passenger (often using TalkBack) is not made to
-         wade through a list while riding. -->
-    <LinearLayout android:id="@+id/panelActiveJourney"
+         wade through a list while riding. Scrolls only if it does not fit
+         (a small screen, a large font). -->
+    <androidx.core.widget.NestedScrollView android:id="@+id/panelActiveJourney"
         android:layout_width="match_parent" android:layout_height="0dp"
-        android:layout_weight="1" android:orientation="vertical"
-        android:padding="16dp" android:visibility="gone">
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:visibility="gone">
 
-        <TextView android:id="@+id/tvJourneyRoute"
+        <LinearLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="15sp" android:textColor="?attr/colorOnSurfaceVariant" android:paddingBottom="16dp"/>
+            android:orientation="vertical"
+            android:padding="16dp">
 
-        <!-- Either "Спирка" (inside the radius) or "Следваща спирка" -->
-        <TextView android:id="@+id/tvStopCaption"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="14sp"
-            android:textAllCaps="true" android:textColor="?attr/colorOnSurfaceVariant"/>
-        <TextView android:id="@+id/tvCurrentStop"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="26sp" android:textStyle="bold"
-            android:paddingVertical="8dp"/>
+            <!-- The line and its direction -->
+            <TextView android:id="@+id/tvJourneyRoute"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textSize="18sp" android:textStyle="bold"
+                android:textColor="?attr/colorOnSurface"
+                android:paddingBottom="12dp"/>
 
-        <!-- Live distance; hidden while standing at a stop -->
-        <TextView android:id="@+id/tvDistance"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="18sp"
-            android:paddingBottom="8dp"/>
+            <!-- The stop we are at, or heading to: the one that matters most,
+                 in the largest type, on the primary container colour. -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="?attr/colorPrimaryContainer">
 
-        <TextView android:id="@+id/tvProgress"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="15sp" android:paddingTop="8dp"/>
+                <LinearLayout
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
 
-        <com.google.android.material.divider.MaterialDivider
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginVertical="16dp"
-        android:importantForAccessibility="no"/>
+                    <!-- Either "Спирка" (inside the radius) or "Следваща спирка" -->
+                    <TextView android:id="@+id/tvStopCaption"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textSize="15sp" android:textStyle="bold"
+                        android:textAllCaps="true"
+                        android:textColor="?attr/colorOnPrimaryContainer"/>
 
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="Спирка за слизане" android:textSize="14sp"
-            android:textAllCaps="true" android:textColor="?attr/colorOnSurfaceVariant"/>
-        <TextView android:id="@+id/tvDestination"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="18sp" android:paddingVertical="8dp"/>
+                    <TextView android:id="@+id/tvCurrentStop"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textSize="30sp" android:textStyle="bold"
+                        android:textColor="?attr/colorOnPrimaryContainer"
+                        android:paddingVertical="8dp"/>
 
-        <!-- Real-time ETA of this vehicle at the chosen stop -->
-        <TextView android:id="@+id/tvDestinationEta"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="16sp" android:paddingBottom="4dp"
-            android:visibility="gone"/>
+                    <!-- Live distance; hidden while standing at a stop -->
+                    <TextView android:id="@+id/tvDistance"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textSize="19sp"
+                        android:textColor="?attr/colorOnPrimaryContainer"
+                        android:paddingBottom="4dp"/>
 
-        <Button android:id="@+id/btnChooseDestination"
-            android:layout_width="match_parent" android:layout_height="56dp"
-            android:layout_marginTop="8dp"
-            style="@style/Widget.Material3.Button.OutlinedButton"/>
+                    <TextView android:id="@+id/tvProgress"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textSize="16sp"
+                        android:textColor="?attr/colorOnPrimaryContainer"
+                        android:paddingTop="4dp"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-        <Button android:id="@+id/btnClearDestination"
-            android:layout_width="match_parent" android:layout_height="56dp"
-            android:layout_marginTop="8dp"
-            android:text="Премахни спирката"
-            android:visibility="gone"
-            style="@style/Widget.Material3.Button.TextButton"/>
-    </LinearLayout>
+            <!-- The stop to get off at -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="Спирка за слизане"
+                        android:textSize="15sp" android:textStyle="bold"
+                        android:textAllCaps="true"
+                        android:textColor="?attr/colorPrimary"/>
+
+                    <TextView android:id="@+id/tvDestination"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textSize="20sp" android:textStyle="bold"
+                        android:textColor="?attr/colorOnSurface"
+                        android:paddingVertical="8dp"/>
+
+                    <!-- Real-time ETA of this vehicle at the chosen stop -->
+                    <TextView android:id="@+id/tvDestinationEta"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textSize="17sp" android:textStyle="bold"
+                        android:textColor="?attr/colorArrivalTime"
+                        android:paddingBottom="4dp"
+                        android:visibility="gone"/>
+
+                    <Button android:id="@+id/btnChooseDestination"
+                        android:layout_width="match_parent" android:layout_height="56dp"
+                        android:layout_marginTop="8dp"
+                        style="@style/Widget.Material3.Button.TonalButton"/>
+
+                    <Button android:id="@+id/btnClearDestination"
+                        android:layout_width="match_parent" android:layout_height="56dp"
+                        android:layout_marginTop="4dp"
+                        android:text="Премахни спирката"
+                        android:visibility="gone"
+                        style="@style/Widget.Material3.Button.TextButton"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 
     <!-- Sits outside the tracking panel so it is shown in every phase,
          including while the direction or the position is still being worked
@@ -166,15 +229,23 @@
     <TextView android:id="@+id/tvAccuracy"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textSize="14sp"
+        android:textSize="15sp"
         android:textColor="?attr/colorOnSurfaceVariant"
         android:paddingHorizontal="16dp"
+        android:paddingTop="4dp"
         android:paddingBottom="4dp"
         android:visibility="gone"/>
 
+    <!-- Ending the journey: set apart in the error colours, full width. -->
     <Button android:id="@+id/btnEndJourney"
         android:layout_width="match_parent" android:layout_height="56dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="12dp"
         android:text="Спри пътуването"
-                android:visibility="gone" android:layout_margin="8dp"
-        style="@style/Widget.Material3.Button.TonalButton"/>
+        android:textSize="16sp"
+        android:textColor="?attr/colorOnErrorContainer"
+        app:backgroundTint="?attr/colorErrorContainer"
+        android:visibility="gone"
+        style="@style/Widget.Material3.Button"/>
 </LinearLayout>

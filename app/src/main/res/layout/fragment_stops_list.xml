@@ -5,13 +5,16 @@
 
     <TextView android:id="@+id/tvDirectionTitle"
         android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:textSize="18sp" android:textStyle="bold" android:padding="12dp"
+        android:textSize="20sp" android:textStyle="bold" android:padding="12dp"
+        android:textColor="?attr/colorOnSurface"
         android:accessibilityHeading="true"/>
 
     <TextView android:id="@+id/tvStopCount"
         android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:textSize="13sp" android:paddingHorizontal="12dp" android:paddingBottom="8dp"/>
+        android:textSize="15sp" android:textColor="?attr/colorOnSurfaceVariant"
+        android:paddingHorizontal="12dp" android:paddingBottom="8dp"/>
 
     <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvStops"
-        android:layout_width="match_parent" android:layout_height="match_parent"/>
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:clipToPadding="false" android:paddingBottom="8dp"/>
 </LinearLayout>

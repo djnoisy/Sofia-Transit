@@ -5,13 +5,16 @@
 
     <TextView android:id="@+id/tvRouteTitle"
         android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:textSize="20sp" android:textStyle="bold" android:padding="12dp"
+        android:textSize="21sp" android:textStyle="bold" android:padding="12dp"
+        android:textColor="?attr/colorOnSurface"
         android:accessibilityHeading="true"/>
 
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="Изберете направление:" android:textSize="15sp"
+        android:textColor="?attr/colorOnSurfaceVariant"
         android:paddingHorizontal="12dp" android:paddingBottom="8dp"/>
 
     <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvDirections"
-        android:layout_width="match_parent" android:layout_height="match_parent"/>
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:clipToPadding="false" android:paddingBottom="8dp"/>
 </LinearLayout>

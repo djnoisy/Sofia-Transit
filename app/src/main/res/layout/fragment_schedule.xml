@@ -6,15 +6,16 @@
     <TextView android:id="@+id/tvHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textSize="20sp"
+        android:textSize="21sp"
         android:textStyle="bold"
+        android:textColor="?attr/colorOnSurface"
         android:padding="12dp"
         android:accessibilityHeading="true"/>
 
     <TextView android:id="@+id/tvSubHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textSize="14sp"
+        android:textSize="15sp"
         android:textColor="?attr/colorOnSurfaceVariant"
         android:paddingHorizontal="12dp"
         android:paddingBottom="8dp"/>
@@ -41,8 +42,7 @@
     <TextView android:id="@+id/tvSelectedDate"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textSize="16sp"
-        android:textStyle="bold"
+        android:textAppearance="@style/TextAppearance.SofiaTransit.SectionTitle"
         android:paddingHorizontal="12dp"
         android:paddingTop="4dp"
         android:paddingBottom="8dp"
@@ -59,12 +59,15 @@
     <TextView android:id="@+id/tvEmpty"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textSize="15sp"
+        android:textSize="16sp"
+        android:textColor="?attr/colorOnSurfaceVariant"
         android:padding="24dp"
         android:gravity="center"
         android:visibility="gone"/>
 
     <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvSchedule"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"/>
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:paddingBottom="8dp"/>
 </LinearLayout>
