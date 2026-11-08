@@ -81,7 +81,9 @@ class RideShadow(
      * The early rule by the boarding stop ([stopName]) at [atMs], after a
      * reading: the model takes the vehicle it finds (RideModel.onBoarding).
      * [due]: the trips due there around our departure, by trip id as the
-     * trace writes it, and when. Logged once, when it can be judged — until
+     * trace writes it, and when — predicted, or, for one seen at the stop or
+     * just past it, the fetch it was first seen there at (ReachedStops): the
+     * "due there at" logged. Logged once, when it can be judged — until
      * then (nothing beside us at a report taken while we moved) it is asked
      * again after the next reading. Returns what the model concluded.
      */

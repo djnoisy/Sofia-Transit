@@ -960,7 +960,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var notApproachingFromDist = 0.0
     private var notApproachingLastMs = 0L
     /**
-     * Predicted arrivals at the stops around us, by (trip, stop). Written by
+     * Predicted arrivals at the stops around us, by (trip, stop) — or, for a
+     * trip seen at one of them or just past it, with no arrival there in the
+     * feed any more, the fetch it was first seen there at (ReachedStops). Written by
      * the boarding watch, read after a reading on another thread — hence a
      * concurrent map.
      */
@@ -3806,15 +3808,18 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             ids, withinMinutes = 60, recentSeconds = EXPECTED_BEFORE_SEC, firstStopsAhead = ahead)
         val atSec = System.currentTimeMillis() / 1000
         // A vehicle already at one of these stops, or just past it, has no
-        // arrival there in the feed: due there now (ReachedStops) — tracking
-        // begun with it at the stop (7 Nov 2026, b).
+        // arrival there in the feed: due there as of this fetch (ReachedStops)
+        // — tracking begun with it at the stop (7 Nov 2026, b).
         val reached = reachedAround(ids, ahead)
         // Merged, not replaced: a vehicle that has already pulled in drops
         // out of the next fetch, and it is exactly the one that matters. One
-        // still there, or just gone, at a later fetch is due as of then.
+        // seen there keeps its predicted arrival, or the fetch it was first
+        // seen there at — not a later one: standing there on and on, it
+        // drops out of the window like a predicted arrival long gone
+        // (review of 8 Nov 2026).
         withContext(Dispatchers.Main) {
             for (u in upcoming) expectedArrivals[u.tripId to u.stopId] = u.arrivalEpoch
-            for (key in reached) expectedArrivals.merge(key, atSec) { was, now -> maxOf(was, now) }
+            for (key in reached) expectedArrivals.putIfAbsent(key, atSec)
         }
         FileLogger.d(TAG, "Boarding: ${upcoming.size} arrivals due at ${stops.size} stops nearby" +
             (if (reached.isEmpty()) "" else ", ${reached.size} at one of them or just past it"))
@@ -3882,8 +3887,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     /**
      * The trips predicted at the boarding stop ([stopIds]) around our
-     * departure, and when (epoch s), by trip id as the trace writes it. See
-     * EXPECTED_BEFORE_SEC.
+     * departure, or seen there then (expectedArrivals), and when (epoch s),
+     * by trip id as the trace writes it. See EXPECTED_BEFORE_SEC.
      */
     private fun dueAtBoarding(stopIds: Set<String>): Map<String, Long> {
         if (movingSinceMs == 0L || stopIds.isEmpty()) return emptyMap()

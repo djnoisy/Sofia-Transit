@@ -403,10 +403,11 @@ class RealtimeRepository @Inject constructor() {
          */
         recentSeconds: Long = 0,
         /**
-         * When given, filled from the same feed with the first stop still
-         * ahead of each trip, by trip id: (route id, stop id) — for telling
-         * a vehicle at a stop, or just past it (ReachedStops). A trip with
-         * more than one update is left out: which is right is not known.
+         * When given — empty — filled from the same feed with the first
+         * stop still ahead of each trip, by trip id: (route id, stop id) —
+         * for telling a vehicle at a stop, or just past it (ReachedStops). A
+         * trip with more than one update is left out: which is right is not
+         * known.
          */
         firstStopsAhead: MutableMap<String, Pair<String, String>>? = null
     ): List<UpcomingTripRaw> = withContext(Dispatchers.IO) {
