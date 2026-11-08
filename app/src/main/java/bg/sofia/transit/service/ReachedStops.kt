@@ -15,13 +15,14 @@ package bg.sofia.transit.service
  * Such a trip is one whose first stop ahead in the feed comes right after
  * one of the stops around us in its own order of stops (the static data):
  * as the feed gives it, it is at that stop, or has just left it. Not always
- * so: a few trolleybuses near their first stops had their lists begin 14-27
- * stops on for 10 min and more (review of 8 Nov 2026) — the stop given is
+ * so: a few trolleybuses near their first stops had their lists begin 11-27
+ * stops on for minutes (review of 8 Nov 2026) — the stop given is
  * then far from the vehicle, which cannot be beside us there. What keeps the
  * rule right is what it always was: it takes a vehicle only alone beside
  * us, as we move off, once. Had the arrivals been collected a little
  * earlier, before such a trip came, it would have been due anyway — save
- * one that had stood at the stop over 10 min before tracking began
+ * one that came to the stop over 10 min before we moved off and was first
+ * seen there, still standing, within those 10 min
  * (JourneyService.fetchBoardingArrivals keeps the first fetch it was seen
  * at, not a later one).
  *

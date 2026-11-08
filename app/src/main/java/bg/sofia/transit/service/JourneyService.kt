@@ -962,9 +962,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     /**
      * Predicted arrivals at the stops around us, by (trip, stop) — or, for a
      * trip seen at one of them or just past it, with no arrival there in the
-     * feed any more, the fetch it was first seen there at (ReachedStops). Written by
-     * the boarding watch, read after a reading on another thread — hence a
-     * concurrent map.
+     * feed any more, the fetch it was first seen there at (ReachedStops).
+     * Written by the boarding watch, read after a reading on another thread
+     * — hence a concurrent map.
      */
     private val expectedArrivals =
         java.util.concurrent.ConcurrentHashMap<Pair<String, String>, Long>()
@@ -3808,8 +3808,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             ids, withinMinutes = 60, recentSeconds = EXPECTED_BEFORE_SEC, firstStopsAhead = ahead)
         val atSec = System.currentTimeMillis() / 1000
         // A vehicle already at one of these stops, or just past it, has no
-        // arrival there in the feed: due there as of this fetch (ReachedStops)
-        // — tracking begun with it at the stop (7 Nov 2026, b).
+        // arrival there in the feed: due there as of the fetch it is first
+        // seen there at (ReachedStops) — tracking begun with it at the stop
+        // (7 Nov 2026, b).
         val reached = reachedAround(ids, ahead)
         // Merged, not replaced: a vehicle that has already pulled in drops
         // out of the next fetch, and it is exactly the one that matters. One
