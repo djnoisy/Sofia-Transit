@@ -48,7 +48,7 @@
             android:layout_height="wrap_content"
             android:text="Може да промените разрешенията по-късно от Настройки → Разрешения."
             android:textSize="14sp"
-            android:alpha="0.75"
+            android:textColor="?attr/colorOnSurfaceVariant"
             android:lineSpacingMultiplier="1.15"
             android:paddingTop="20dp"/>
     </LinearLayout>

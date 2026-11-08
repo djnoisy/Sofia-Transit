@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:id="@id/nearbyFragment"
-        android:icon="@drawable/ic_stop"
+        android:icon="@drawable/ic_nav_stops"
         android:title="Спирки"
         android:contentDescription="Спирки около вас"/>
     <item android:id="@id/linesFragment"
-        android:icon="@drawable/ic_route"
+        android:icon="@drawable/ic_nav_lines"
         android:title="Линии"
         android:contentDescription="Всички линии"/>
     <item android:id="@id/journeyFragment"
-        android:icon="@drawable/ic_journey"
+        android:icon="@drawable/ic_nav_journey"
         android:title="Пътуване"
         android:contentDescription="Следене на пътуване"/>
 </menu>

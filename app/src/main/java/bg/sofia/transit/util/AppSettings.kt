@@ -31,6 +31,23 @@ class AppSettings @Inject constructor(
         const val RATE_DEFAULT = 1.0f
 
         private const val KEY_APPROACH_MODE = "approach_mode"
+        private const val KEY_THEME_MODE = "theme_mode"
+
+        /** The look follows the phone's light or dark setting. */
+        const val THEME_SYSTEM = 0
+        const val THEME_LIGHT = 1
+        const val THEME_DARK = 2
+        /** Black, white and yellow (Theme.SofiaTransit.HighContrast). */
+        const val THEME_HIGH_CONTRAST = 3
+
+        /**
+         * The look chosen ([themeMode]), read straight from storage: an
+         * activity needs it before it is created — before injection — to set
+         * its theme (ThemeMode.applyTo).
+         */
+        fun themeModeOf(context: Context): Int =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_THEME_MODE, THEME_SYSTEM)
         private const val KEY_AUTO_DIRECTION = "auto_direction"
 
         /** Warn only where stops are far enough apart for it to be useful. */
@@ -67,6 +84,14 @@ class AppSettings @Inject constructor(
         set(value) { prefs.edit().putBoolean(KEY_AUTO_DIRECTION, value).apply() }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /**
+     * The app's look: [THEME_SYSTEM] (the default), [THEME_LIGHT],
+     * [THEME_DARK] or [THEME_HIGH_CONTRAST]. Applied by ThemeMode.
+     */
+    var themeMode: Int
+        get() = prefs.getInt(KEY_THEME_MODE, THEME_SYSTEM)
+        set(value) { prefs.edit().putInt(KEY_THEME_MODE, value).apply() }
 
     /**
      * Speaking rate for journey announcements, 1.0 being the engine's normal

@@ -1,14 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Colours of the app's themes (HANDOVER, redesign of 8 Nov 2026).
+
+     md_*: the Material 3 standard scheme (2021 spec, tonal spot) from the
+     seed #1565C0 — the light set here, the dark one in values-night. Light
+     and dark themes take every colour role from them (themes.xml).
+     hc_*: the high-contrast theme — black, white and yellow, no greys.
+     The vehicle colours are the official ones of the city's lines (the
+     route_color of the static data); text on them chosen for contrast. -->
 <resources>
-    <color name="primary">#1565C0</color>
-    <color name="on_primary">#FFFFFF</color>
-    <color name="primary_container">#BBDEFB</color>
-    <color name="surface">#FFFFFF</color>
-    <color name="background">#FAFAFA</color>
-    <color name="on_background">#212121</color>
-    <color name="error">#B00020</color>
-    <color name="bus_color">#1976D2</color>
-    <color name="tram_color">#F57C00</color>
-    <color name="trolley_color">#388E3C</color>
-    <color name="metro_color">#7B1FA2</color>
+    <color name="md_primary">#405F90</color>
+    <color name="md_on_primary">#FFFFFF</color>
+    <color name="md_primary_container">#D6E3FF</color>
+    <color name="md_on_primary_container">#274777</color>
+    <color name="md_secondary">#555F71</color>
+    <color name="md_on_secondary">#FFFFFF</color>
+    <color name="md_secondary_container">#DAE2F9</color>
+    <color name="md_on_secondary_container">#3E4758</color>
+    <color name="md_tertiary">#6F5575</color>
+    <color name="md_on_tertiary">#FFFFFF</color>
+    <color name="md_tertiary_container">#F9D8FD</color>
+    <color name="md_on_tertiary_container">#563E5C</color>
+    <color name="md_error">#BA1A1A</color>
+    <color name="md_on_error">#FFFFFF</color>
+    <color name="md_error_container">#FFDAD6</color>
+    <color name="md_on_error_container">#93000A</color>
+    <color name="md_background">#F9F9FF</color>
+    <color name="md_on_background">#191C20</color>
+    <color name="md_surface">#F9F9FF</color>
+    <color name="md_on_surface">#191C20</color>
+    <color name="md_surface_variant">#E0E2EC</color>
+    <color name="md_on_surface_variant">#44474E</color>
+    <color name="md_outline">#74777F</color>
+    <color name="md_outline_variant">#C4C6CF</color>
+    <color name="md_inverse_surface">#2E3036</color>
+    <color name="md_inverse_on_surface">#F0F0F7</color>
+    <color name="md_inverse_primary">#A9C7FF</color>
+    <color name="md_surface_dim">#D9D9E0</color>
+    <color name="md_surface_bright">#F9F9FF</color>
+    <color name="md_surface_container_lowest">#FFFFFF</color>
+    <color name="md_surface_container_low">#F3F3FA</color>
+    <color name="md_surface_container">#EDEDF4</color>
+    <color name="md_surface_container_high">#E7E8EE</color>
+    <color name="md_surface_container_highest">#E2E2E9</color>
+
+    <!-- Arrival times and the like: green, 4.5:1 or more on the surfaces. -->
+    <color name="arrival_time">#146C2E</color>
+    <!-- Status and navigation bar icons dark on light. -->
+    <bool name="light_system_bars">true</bool>
+
+    <!-- High contrast: black background, white text and lines, yellow accent. -->
+    <color name="hc_black">#000000</color>
+    <color name="hc_white">#FFFFFF</color>
+    <color name="hc_yellow">#FFEB3B</color>
+    <color name="hc_cyan">#80D8FF</color>
+    <color name="hc_red">#FF8A80</color>
+    <color name="hc_green">#8CFF9E</color>
+
+    <!-- Official colours of the lines by vehicle, and text on them. -->
+    <color name="vehicle_bus">#BE1E2D</color>
+    <color name="on_vehicle_bus">#FFFFFF</color>
+    <color name="vehicle_tram">#F7941D</color>
+    <color name="on_vehicle_tram">#000000</color>
+    <color name="vehicle_trolley">#27AAE1</color>
+    <color name="on_vehicle_trolley">#000000</color>
+    <color name="vehicle_metro">#1C75BC</color>
+    <color name="on_vehicle_metro">#FFFFFF</color>
 </resources>

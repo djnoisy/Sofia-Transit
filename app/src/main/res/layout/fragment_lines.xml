@@ -3,10 +3,7 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="Линии" android:textSize="22sp" android:textStyle="bold"
-        android:padding="16dp" android:accessibilityHeading="true"/>
-
+    <!-- The title, "Линии", is in the top app bar (activity_main.xml). -->
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="horizontal" android:padding="4dp"
         android:baselineAligned="false">

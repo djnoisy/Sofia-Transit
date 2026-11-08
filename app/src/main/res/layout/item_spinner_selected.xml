@@ -10,4 +10,4 @@
     android:gravity="center_vertical"
     android:paddingHorizontal="12dp"
     android:textSize="16sp"
-    android:textColor="@color/on_background"/>
+    android:textColor="?attr/colorOnSurface"/>

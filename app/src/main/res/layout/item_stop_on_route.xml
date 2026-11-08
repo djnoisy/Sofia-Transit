@@ -7,7 +7,7 @@
 
     <TextView android:id="@+id/tvSequence"
         android:layout_width="40dp" android:layout_height="wrap_content"
-        android:textSize="13sp" android:alpha="0.5" android:gravity="center"
+        android:textSize="13sp" android:textColor="?attr/colorOnSurfaceVariant" android:gravity="center"
         android:importantForAccessibility="no"/>
 
     <TextView android:id="@+id/tvStopName"
@@ -16,5 +16,5 @@
 
     <TextView android:id="@+id/tvTime"
         android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:textSize="14sp" android:textColor="#1976D2"/>
+        android:textSize="14sp" android:textColor="?attr/colorPrimary"/>
 </LinearLayout>

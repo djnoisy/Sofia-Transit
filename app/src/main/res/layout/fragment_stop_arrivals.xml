@@ -41,7 +41,7 @@
         android:textSize="14sp"
         android:paddingHorizontal="12dp"
         android:paddingBottom="8dp"
-        android:alpha="0.7"/>
+        android:textColor="?attr/colorOnSurfaceVariant"/>
 
     <!-- Debug / empty state — small, capped height, scrollable -->
     <ScrollView

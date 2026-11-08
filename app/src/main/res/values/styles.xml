@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget styles shared by all three themes (themes.xml); their colours come
+     from the theme's colour roles, so one style serves light, dark and high
+     contrast alike. -->
+<resources>
+
+    <!-- The top app bar: screen title, "Настройки", and "Диагностика" under
+         the overflow. Set apart from the content by its container colour
+         and a divider below it (activity_main.xml). -->
+    <style name="Widget.SofiaTransit.Toolbar" parent="Widget.Material3.Toolbar.Surface">
+        <item name="android:background">?attr/colorSurfaceContainer</item>
+        <item name="titleTextAppearance">@style/TextAppearance.SofiaTransit.AppBarTitle</item>
+    </style>
+
+    <style name="TextAppearance.SofiaTransit.AppBarTitle" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- The navigation bar at the bottom: Material 3, the active section in a
+         pill (colorSecondaryContainer), labels always shown and larger than
+         the default 12sp. -->
+    <style name="Widget.SofiaTransit.BottomNavigation" parent="Widget.Material3.BottomNavigationView">
+        <item name="backgroundTint">?attr/colorSurfaceContainer</item>
+        <item name="labelVisibilityMode">labeled</item>
+        <item name="itemIconSize">26dp</item>
+        <item name="itemTextAppearanceActive">@style/TextAppearance.SofiaTransit.NavLabel.Active</item>
+        <item name="itemTextAppearanceInactive">@style/TextAppearance.SofiaTransit.NavLabel</item>
+    </style>
+
+    <style name="TextAppearance.SofiaTransit.NavLabel" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <style name="TextAppearance.SofiaTransit.NavLabel.Active">
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- Cards: each item or section a clearly bounded block. -->
+    <style name="Widget.SofiaTransit.Card" parent="Widget.Material3.CardView.Outlined">
+        <item name="cardBackgroundColor">?attr/colorSurfaceContainerLow</item>
+        <item name="strokeColor">?attr/colorOutlineVariant</item>
+        <item name="strokeWidth">?attr/lineDividerWidth</item>
+        <item name="cardCornerRadius">16dp</item>
+        <item name="cardElevation">0dp</item>
+    </style>
+
+    <style name="Widget.SofiaTransit.Divider" parent="Widget.Material3.MaterialDivider">
+        <item name="dividerColor">?attr/colorOutlineVariant</item>
+        <item name="dividerThickness">?attr/lineDividerWidth</item>
+    </style>
+
+    <!-- A section heading inside a screen or a card. -->
+    <style name="TextAppearance.SofiaTransit.SectionTitle" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textColor">?attr/colorPrimary</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- Explanatory text under a control. -->
+    <style name="TextAppearance.SofiaTransit.Supporting" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+</resources>

@@ -1,39 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- "Спирки": the title, "Настройки" and "Диагностика" are in the top app
+     bar (activity_main.xml); here the two tabs and their pages. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="8dp">
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Спирки"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            android:accessibilityHeading="true"/>
-
-        <Button android:id="@+id/btnSettings"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:text="Настройки"
-            style="@style/Widget.Material3.Button.TextButton"/>
-
-        <Button android:id="@+id/btnDiagnostics"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:text="Диагностика"
-            android:contentDescription="Отвори диагностика на API"
-            style="@style/Widget.Material3.Button.TextButton"/>
-    </LinearLayout>
 
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayout"

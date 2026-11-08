@@ -3,10 +3,7 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="Пътуване" android:textSize="22sp" android:textStyle="bold"
-        android:padding="16dp" android:accessibilityHeading="true"/>
-
+    <!-- The title, "Пътуване", is in the top app bar (activity_main.xml). -->
     <!-- Hint when idle -->
     <TextView android:id="@+id/tvJourneyHint"
         android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -107,13 +104,13 @@
 
         <TextView android:id="@+id/tvJourneyRoute"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="15sp" android:alpha="0.7" android:paddingBottom="16dp"/>
+            android:textSize="15sp" android:textColor="?attr/colorOnSurfaceVariant" android:paddingBottom="16dp"/>
 
         <!-- Either "Спирка" (inside the radius) or "Следваща спирка" -->
         <TextView android:id="@+id/tvStopCaption"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textSize="14sp"
-            android:textAllCaps="true" android:alpha="0.6"/>
+            android:textAllCaps="true" android:textColor="?attr/colorOnSurfaceVariant"/>
         <TextView android:id="@+id/tvCurrentStop"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textSize="26sp" android:textStyle="bold"
@@ -130,11 +127,11 @@
             android:textSize="15sp" android:paddingTop="8dp"/>
 
         <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="#E0E0E0" android:layout_marginVertical="16dp"/>
+            android:background="?attr/colorOutlineVariant" android:layout_marginVertical="16dp"/>
 
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="Спирка за слизане" android:textSize="14sp"
-            android:textAllCaps="true" android:alpha="0.6"/>
+            android:textAllCaps="true" android:textColor="?attr/colorOnSurfaceVariant"/>
         <TextView android:id="@+id/tvDestination"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textSize="18sp" android:paddingVertical="8dp"/>
@@ -166,7 +163,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="14sp"
-        android:alpha="0.7"
+        android:textColor="?attr/colorOnSurfaceVariant"
         android:paddingHorizontal="16dp"
         android:paddingBottom="4dp"
         android:visibility="gone"/>

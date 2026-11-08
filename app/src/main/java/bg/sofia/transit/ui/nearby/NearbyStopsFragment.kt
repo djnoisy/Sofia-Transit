@@ -6,7 +6,6 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
-import androidx.navigation.fragment.findNavController
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import bg.sofia.transit.databinding.FragmentNearbyStopsBinding
 import com.google.android.material.tabs.TabLayoutMediator
@@ -16,9 +15,10 @@ import dagger.hilt.android.AndroidEntryPoint
  * Container fragment for the "Spirki" (Stops) section. Hosts a TabLayout +
  * ViewPager2 with two tabs: "Близки спирки" (nearby) and "Търсене" (search).
  *
- * Navigation actions (to arrivals and diagnostics) live on this fragment's
- * destination node in the nav graph, so child tabs reuse them via the
- * Directions class.
+ * The navigation action to a stop's arrivals lives on this fragment's
+ * destination node in the nav graph, so child tabs reuse it via the
+ * Directions class. "Настройки" and "Диагностика" are in the top app bar
+ * (MainActivity), on every screen.
  */
 @AndroidEntryPoint
 class NearbyStopsFragment : Fragment() {
@@ -35,18 +35,6 @@ class NearbyStopsFragment : Fragment() {
 
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
-
-        binding.btnDiagnostics.setOnClickListener {
-            findNavController().navigate(
-                NearbyStopsFragmentDirections.actionNearbyToDiagnostics()
-            )
-        }
-
-        binding.btnSettings.setOnClickListener {
-            findNavController().navigate(
-                NearbyStopsFragmentDirections.actionNearbyToSettings()
-            )
-        }
 
         binding.viewPager.adapter = StopsTabsAdapter(childFragmentManager, lifecycle)
 

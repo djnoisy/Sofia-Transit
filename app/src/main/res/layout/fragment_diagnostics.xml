@@ -5,15 +5,7 @@
     android:orientation="vertical"
     android:padding="16dp">
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Диагностика на API"
-        android:textSize="22sp"
-        android:textStyle="bold"
-        android:paddingBottom="8dp"
-        android:accessibilityHeading="true"/>
-
+    <!-- The title, "Диагностика", is in the top app bar (activity_main.xml). -->
     <Button android:id="@+id/btnRun"
         android:layout_width="match_parent"
         android:layout_height="56dp"
@@ -24,7 +16,7 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#E0E0E0"
+        android:background="?attr/colorOutlineVariant"
         android:layout_marginVertical="16dp"/>
 
     <TextView
@@ -76,7 +68,7 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#E0E0E0"
+        android:background="?attr/colorOutlineVariant"
         android:layout_marginVertical="16dp"/>
 
     <LinearLayout

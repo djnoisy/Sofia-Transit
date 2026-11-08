@@ -5,6 +5,7 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import bg.sofia.transit.util.FileLogger
 import bg.sofia.transit.util.JourneyTrace
+import bg.sofia.transit.util.ThemeMode
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -23,6 +24,8 @@ class TransitApplication : Application(), Configuration.Provider {
         // Initialise in-app log file capture before anything else logs
         FileLogger.init(this)
         JourneyTrace.init(this)
+        // Light, dark or high contrast, as chosen in Settings → "Изглед".
+        ThemeMode.applyNightMode(this)
         // No background work is scheduled here on purpose. The GTFS refresh
         // is triggered from MainActivity once the database is confirmed
         // populated (see GtfsUpdateWorker.checkForUpdate) so that nothing

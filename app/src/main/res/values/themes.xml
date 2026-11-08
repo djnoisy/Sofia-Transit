@@ -1,14 +1,128 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The app's three looks (HANDOVER, redesign of 8 Nov 2026), chosen in
+     Settings → "Изглед" (AppSettings.themeMode):
+     - light and dark: Theme.SofiaTransit, Material 3 day/night with the
+       standard colour roles (values/colors.xml, values-night/colors.xml);
+     - high contrast: Theme.SofiaTransit.HighContrast — black, white and
+       yellow, no greys, lines 2dp.
+     Both carry the same widget styles (styles.xml), so every screen is laid
+     out the same in all three. -->
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Theme.SofiaTransit" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/primary</item>
-        <item name="colorOnPrimary">@color/on_primary</item>
-        <item name="colorPrimaryContainer">@color/primary_container</item>
-        <item name="colorSurface">@color/surface</item>
-        <item name="android:windowBackground">@color/background</item>
+
+    <style name="Base.Theme.SofiaTransit" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/md_primary</item>
+        <item name="colorOnPrimary">@color/md_on_primary</item>
+        <item name="colorPrimaryContainer">@color/md_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/md_on_primary_container</item>
+        <item name="colorSecondary">@color/md_secondary</item>
+        <item name="colorOnSecondary">@color/md_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/md_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/md_on_secondary_container</item>
+        <item name="colorTertiary">@color/md_tertiary</item>
+        <item name="colorOnTertiary">@color/md_on_tertiary</item>
+        <item name="colorTertiaryContainer">@color/md_tertiary_container</item>
+        <item name="colorOnTertiaryContainer">@color/md_on_tertiary_container</item>
+        <item name="colorError">@color/md_error</item>
+        <item name="colorOnError">@color/md_on_error</item>
+        <item name="colorErrorContainer">@color/md_error_container</item>
+        <item name="colorOnErrorContainer">@color/md_on_error_container</item>
+        <item name="android:colorBackground">@color/md_background</item>
+        <item name="colorOnBackground">@color/md_on_background</item>
+        <item name="colorSurface">@color/md_surface</item>
+        <item name="colorOnSurface">@color/md_on_surface</item>
+        <item name="colorSurfaceVariant">@color/md_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/md_on_surface_variant</item>
+        <item name="colorOutline">@color/md_outline</item>
+        <item name="colorOutlineVariant">@color/md_outline_variant</item>
+        <item name="colorSurfaceInverse">@color/md_inverse_surface</item>
+        <item name="colorOnSurfaceInverse">@color/md_inverse_on_surface</item>
+        <item name="colorPrimaryInverse">@color/md_inverse_primary</item>
+        <item name="colorSurfaceDim">@color/md_surface_dim</item>
+        <item name="colorSurfaceBright">@color/md_surface_bright</item>
+        <item name="colorSurfaceContainerLowest">@color/md_surface_container_lowest</item>
+        <item name="colorSurfaceContainerLow">@color/md_surface_container_low</item>
+        <item name="colorSurfaceContainer">@color/md_surface_container</item>
+        <item name="colorSurfaceContainerHigh">@color/md_surface_container_high</item>
+        <item name="colorSurfaceContainerHighest">@color/md_surface_container_highest</item>
+
+        <item name="colorArrivalTime">@color/arrival_time</item>
+        <item name="lineDividerWidth">1dp</item>
+
+        <item name="android:windowBackground">@color/md_surface</item>
+        <item name="android:statusBarColor">@color/md_surface_container</item>
+        <item name="android:navigationBarColor">@color/md_surface_container</item>
+        <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_system_bars</item>
+
         <!-- Large text for low-vision users -->
         <item name="android:textSize">16sp</item>
         <!-- Minimum touch target 48dp -->
         <item name="minTouchTargetSize">48dp</item>
+
+        <item name="toolbarStyle">@style/Widget.SofiaTransit.Toolbar</item>
+        <item name="bottomNavigationStyle">@style/Widget.SofiaTransit.BottomNavigation</item>
+        <item name="materialCardViewStyle">@style/Widget.SofiaTransit.Card</item>
+        <item name="materialDividerStyle">@style/Widget.SofiaTransit.Divider</item>
+    </style>
+
+    <style name="Theme.SofiaTransit" parent="Base.Theme.SofiaTransit"/>
+
+    <!-- High contrast: a dark theme of its own — only black, white and
+         yellow; secondary text as white as the main, every line white. -->
+    <style name="Theme.SofiaTransit.HighContrast" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/hc_yellow</item>
+        <item name="colorOnPrimary">@color/hc_black</item>
+        <item name="colorPrimaryContainer">@color/hc_yellow</item>
+        <item name="colorOnPrimaryContainer">@color/hc_black</item>
+        <item name="colorSecondary">@color/hc_yellow</item>
+        <item name="colorOnSecondary">@color/hc_black</item>
+        <item name="colorSecondaryContainer">@color/hc_yellow</item>
+        <item name="colorOnSecondaryContainer">@color/hc_black</item>
+        <item name="colorTertiary">@color/hc_cyan</item>
+        <item name="colorOnTertiary">@color/hc_black</item>
+        <item name="colorTertiaryContainer">@color/hc_cyan</item>
+        <item name="colorOnTertiaryContainer">@color/hc_black</item>
+        <item name="colorError">@color/hc_red</item>
+        <item name="colorOnError">@color/hc_black</item>
+        <item name="colorErrorContainer">@color/hc_red</item>
+        <item name="colorOnErrorContainer">@color/hc_black</item>
+        <item name="android:colorBackground">@color/hc_black</item>
+        <item name="colorOnBackground">@color/hc_white</item>
+        <item name="colorSurface">@color/hc_black</item>
+        <item name="colorOnSurface">@color/hc_white</item>
+        <item name="colorSurfaceVariant">@color/hc_black</item>
+        <item name="colorOnSurfaceVariant">@color/hc_white</item>
+        <item name="colorOutline">@color/hc_white</item>
+        <item name="colorOutlineVariant">@color/hc_white</item>
+        <item name="colorSurfaceInverse">@color/hc_white</item>
+        <item name="colorOnSurfaceInverse">@color/hc_black</item>
+        <item name="colorPrimaryInverse">@color/hc_black</item>
+        <item name="colorSurfaceDim">@color/hc_black</item>
+        <item name="colorSurfaceBright">@color/hc_black</item>
+        <item name="colorSurfaceContainerLowest">@color/hc_black</item>
+        <item name="colorSurfaceContainerLow">@color/hc_black</item>
+        <item name="colorSurfaceContainer">@color/hc_black</item>
+        <item name="colorSurfaceContainerHigh">@color/hc_black</item>
+        <item name="colorSurfaceContainerHighest">@color/hc_black</item>
+        <item name="android:textColorPrimary">@color/hc_white</item>
+        <item name="android:textColorSecondary">@color/hc_white</item>
+        <item name="android:textColorHint">@color/hc_white</item>
+
+        <item name="colorArrivalTime">@color/hc_green</item>
+        <item name="lineDividerWidth">2dp</item>
+
+        <item name="android:windowBackground">@color/hc_black</item>
+        <item name="android:statusBarColor">@color/hc_black</item>
+        <item name="android:navigationBarColor">@color/hc_black</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+
+        <item name="android:textSize">16sp</item>
+        <item name="minTouchTargetSize">48dp</item>
+
+        <item name="toolbarStyle">@style/Widget.SofiaTransit.Toolbar</item>
+        <item name="bottomNavigationStyle">@style/Widget.SofiaTransit.BottomNavigation</item>
+        <item name="materialCardViewStyle">@style/Widget.SofiaTransit.Card</item>
+        <item name="materialDividerStyle">@style/Widget.SofiaTransit.Divider</item>
     </style>
 </resources>

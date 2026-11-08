@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The top app bar's actions, on every screen (MainActivity): "Настройки"
+     as a button, "Диагностика" under the overflow menu ("Още опции"). -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@+id/actionSettings"
+        android:icon="@drawable/ic_settings"
+        android:title="Настройки"
+        app:showAsAction="ifRoom"/>
+    <item android:id="@+id/actionDiagnostics"
+        android:title="Диагностика"
+        app:showAsAction="never"/>
+</menu>

@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Settings: one card per section, a heading on each (redesign of 8 Nov
+     2026). The title is in the top app bar. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:clipToPadding="false"
     android:padding="16dp">
 
     <LinearLayout
@@ -9,192 +12,299 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <TextView
+        <!-- ── Look ── -->
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Гласови съобщения"
-            android:textSize="14sp"
-            android:textAllCaps="true"
-            android:alpha="0.6"
-            android:accessibilityHeading="true"
-            android:paddingBottom="12dp"/>
+            android:layout_height="wrap_content">
 
-        <!-- Explains what the button below controls. Kept above it so a
-             screen reader meets the explanation before the control. -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Избор на речева машина за изговаряне на съобщенията по време на пътуване. За да се избегнат конфликти, е препоръчително избраната машина да бъде различна от тази на екранния четец."
-            android:textSize="14sp"
-            android:alpha="0.75"
-            android:lineSpacingMultiplier="1.15"
-            android:paddingBottom="12dp"/>
-
-        <!-- Classic Spinner rather than a Material exposed dropdown: the
-             latter is an AutoCompleteTextView underneath, which TalkBack may
-             announce as an editable field. A Spinner is announced plainly as
-             a drop-down list.
-
-             The caption is an ordinary element, read on its own while
-             swiping, exactly as it appears on screen. Deliberately no
-             labelFor and no contentDescription on the spinner: either would
-             repeat the caption when the spinner takes focus, producing an
-             announcement that does not match what is displayed. -->
-        <TextView android:id="@+id/tvEngineLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Речева машина"
-            android:textSize="16sp"
-            android:paddingBottom="4dp"/>
-
-        <Spinner android:id="@+id/spinnerEngine"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:minHeight="48dp"
-            android:popupBackground="@color/surface"/>
-
-        <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="#E0E0E0" android:layout_marginVertical="24dp"/>
-
-        <TextView android:id="@+id/tvRateLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Скорост на изговаряне"
-            android:textSize="16sp"/>
-
-        <SeekBar android:id="@+id/seekRate"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"/>
-
-        <!-- All three are ordinary accessible elements: anything visible on
-             screen should be reachable by touch exploration, so the screen
-             reader's picture matches the visual one. The value is therefore
-             heard twice — once from the slider, once as this text — which is
-             the same duplication a sighted user sees (thumb position and
-             number), not an artefact. -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:text="бавно" android:textSize="13sp" android:alpha="0.6"/>
-
-            <TextView android:id="@+id/tvRateValue"
-                android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:textSize="14sp"/>
-
-            <TextView
-                android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:gravity="end"
-                android:text="бързо" android:textSize="13sp" android:alpha="0.6"/>
-        </LinearLayout>
-
-        <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="#E0E0E0" android:layout_marginVertical="24dp"/>
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Посока на пътуването"
-            android:textSize="14sp"
-            android:textAllCaps="true"
-            android:alpha="0.6"
-            android:accessibilityHeading="true"
-            android:paddingBottom="12dp"/>
-
-        <CheckBox android:id="@+id/cbAutoDirection"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="48dp"
-            android:text="Определяй посоката автоматично"/>
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Подходящо, ако не сте сигурни коя е крайната точка на линията. Следенето изчаква превозното средство да потегли и определя посоката от движението."
-            android:textSize="14sp"
-            android:alpha="0.75"
-            android:lineSpacingMultiplier="1.15"
-            android:paddingTop="8dp"/>
-
-        <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="#E0E0E0" android:layout_marginVertical="24dp"/>
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Съобщения за наближаваща спирка"
-            android:textSize="14sp"
-            android:textAllCaps="true"
-            android:alpha="0.6"
-            android:accessibilityHeading="true"
-            android:paddingBottom="12dp"/>
-
-        <RadioGroup android:id="@+id/rgApproach"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <RadioButton android:id="@+id/rbApproachSparse"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:text="Само при отдалечени спирки"/>
+                android:orientation="vertical"
+                android:padding="16dp">
 
-            <RadioButton android:id="@+id/rbApproachAll"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:text="При всички спирки"/>
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Изглед"
+                    android:textAppearance="@style/TextAppearance.SofiaTransit.SectionTitle"
+                    android:accessibilityHeading="true"
+                    android:paddingBottom="8dp"/>
 
-            <RadioButton android:id="@+id/rbApproachOff"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:text="Изключени"/>
-        </RadioGroup>
+                <!-- Radio buttons, as for the approach announcements below:
+                     all four named states visible at once, each announced
+                     with its checked state. -->
+                <RadioGroup android:id="@+id/rgTheme"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
 
-        <TextView
+                    <RadioButton android:id="@+id/rbThemeSystem"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="Като системата"/>
+
+                    <RadioButton android:id="@+id/rbThemeLight"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="Светла"/>
+
+                    <RadioButton android:id="@+id/rbThemeDark"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="Тъмна"/>
+
+                    <RadioButton android:id="@+id/rbThemeHighContrast"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="Висок контраст"/>
+                </RadioGroup>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="„Като системата“ следва светлия или тъмния режим на телефона. „Висок контраст“ е черен фон с бял текст и жълти акценти."
+                    android:textAppearance="@style/TextAppearance.SofiaTransit.Supporting"
+                    android:lineSpacingMultiplier="1.15"
+                    android:paddingTop="8dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ── Speech ── -->
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Когато спирките са близо една до друга, предупреждението идва секунди след потеглянето и не е от полза."
-            android:textSize="14sp"
-            android:alpha="0.75"
-            android:lineSpacingMultiplier="1.15"
-            android:paddingTop="8dp"/>
+            android:layout_marginTop="12dp">
 
-        <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="#E0E0E0" android:layout_marginVertical="24dp"/>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
 
-        <TextView
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Гласови съобщения"
+                    android:textAppearance="@style/TextAppearance.SofiaTransit.SectionTitle"
+                    android:accessibilityHeading="true"
+                    android:paddingBottom="8dp"/>
+
+                <!-- Explains what the control below does. Kept above it so a
+                     screen reader meets the explanation before the control. -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Избор на речева машина за изговаряне на съобщенията по време на пътуване. За да се избегнат конфликти, е препоръчително избраната машина да бъде различна от тази на екранния четец."
+                    android:textAppearance="@style/TextAppearance.SofiaTransit.Supporting"
+                    android:lineSpacingMultiplier="1.15"
+                    android:paddingBottom="12dp"/>
+
+                <!-- Classic Spinner rather than a Material exposed dropdown: the
+                     latter is an AutoCompleteTextView underneath, which TalkBack
+                     may announce as an editable field. A Spinner is announced
+                     plainly as a drop-down list.
+
+                     The caption is an ordinary element, read on its own while
+                     swiping, exactly as it appears on screen. Deliberately no
+                     labelFor and no contentDescription on the spinner: either
+                     would repeat the caption when the spinner takes focus,
+                     producing an announcement that does not match what is
+                     displayed. -->
+                <TextView android:id="@+id/tvEngineLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Речева машина"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="?attr/colorOnSurface"
+                    android:paddingBottom="4dp"/>
+
+                <Spinner android:id="@+id/spinnerEngine"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:minHeight="48dp"
+                    android:popupBackground="?attr/colorSurfaceContainerHigh"/>
+
+                <com.google.android.material.divider.MaterialDivider
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginVertical="16dp"
+                    android:importantForAccessibility="no"/>
+
+                <TextView android:id="@+id/tvRateLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Скорост на изговаряне"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="?attr/colorOnSurface"/>
+
+                <SeekBar android:id="@+id/seekRate"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"/>
+
+                <!-- All three are ordinary accessible elements: anything visible
+                     on screen should be reachable by touch exploration, so the
+                     screen reader's picture matches the visual one. The value
+                     is therefore heard twice — once from the slider, once as
+                     this text — which is the same duplication a sighted user
+                     sees (thumb position and number), not an artefact. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:text="бавно"
+                        android:textAppearance="@style/TextAppearance.SofiaTransit.Supporting"/>
+
+                    <TextView android:id="@+id/tvRateValue"
+                        android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:gravity="center"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:textColor="?attr/colorOnSurface"/>
+
+                    <TextView
+                        android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:text="бързо"
+                        android:textAppearance="@style/TextAppearance.SofiaTransit.Supporting"/>
+                </LinearLayout>
+
+                <Button android:id="@+id/btnTestSpeech"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:layout_marginTop="16dp"
+                    android:text="Изпробвай гласа"
+                    style="@style/Widget.Material3.Button.TonalButton"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ── Direction ── -->
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Разрешения"
-            android:textSize="14sp"
-            android:textAllCaps="true"
-            android:alpha="0.6"
-            android:accessibilityHeading="true"
-            android:paddingBottom="12dp"/>
+            android:layout_marginTop="12dp">
 
-        <include android:id="@+id/permissionRows"
-            layout="@layout/view_permission_rows"/>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
 
-        <View android:layout_width="match_parent" android:layout_height="1dp"
-            android:background="#E0E0E0" android:layout_marginVertical="24dp"/>
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Посока на пътуването"
+                    android:textAppearance="@style/TextAppearance.SofiaTransit.SectionTitle"
+                    android:accessibilityHeading="true"
+                    android:paddingBottom="8dp"/>
 
-        <Button android:id="@+id/btnTestSpeech"
+                <CheckBox android:id="@+id/cbAutoDirection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="Определяй посоката автоматично"/>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Подходящо, ако не сте сигурни коя е крайната точка на линията. Следенето изчаква превозното средство да потегли и определя посоката от движението."
+                    android:textAppearance="@style/TextAppearance.SofiaTransit.Supporting"
+                    android:lineSpacingMultiplier="1.15"
+                    android:paddingTop="8dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ── Approach announcements ── -->
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_marginTop="20dp"
-            android:text="Изпробвай гласа"
-            style="@style/Widget.Material3.Button.TextButton"/>
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Съобщения за наближаваща спирка"
+                    android:textAppearance="@style/TextAppearance.SofiaTransit.SectionTitle"
+                    android:accessibilityHeading="true"
+                    android:paddingBottom="8dp"/>
+
+                <RadioGroup android:id="@+id/rgApproach"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <RadioButton android:id="@+id/rbApproachSparse"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="Само при отдалечени спирки"/>
+
+                    <RadioButton android:id="@+id/rbApproachAll"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="При всички спирки"/>
+
+                    <RadioButton android:id="@+id/rbApproachOff"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="Изключени"/>
+                </RadioGroup>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Когато спирките са близо една до друга, предупреждението идва секунди след потеглянето и не е от полза."
+                    android:textAppearance="@style/TextAppearance.SofiaTransit.Supporting"
+                    android:lineSpacingMultiplier="1.15"
+                    android:paddingTop="8dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ── Permissions ── -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Разрешения"
+                    android:textAppearance="@style/TextAppearance.SofiaTransit.SectionTitle"
+                    android:accessibilityHeading="true"
+                    android:paddingBottom="8dp"/>
+
+                <include android:id="@+id/permissionRows"
+                    layout="@layout/view_permission_rows"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
     </LinearLayout>
 </ScrollView>

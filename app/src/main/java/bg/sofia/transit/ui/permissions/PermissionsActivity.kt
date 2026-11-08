@@ -6,6 +6,7 @@ import bg.sofia.transit.databinding.ActivityPermissionsBinding
 import bg.sofia.transit.util.FileLogger
 import bg.sofia.transit.util.PermissionRequester
 import bg.sofia.transit.util.Permissions
+import bg.sofia.transit.util.ThemeMode
 
 /**
  * First-run permissions screen: all three permissions on one page, one
@@ -21,6 +22,7 @@ class PermissionsActivity : AppCompatActivity() {
     private val requester = PermissionRequester(this, { this }) { rows.refresh() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        ThemeMode.applyTo(this)
         super.onCreate(savedInstanceState)
         binding = ActivityPermissionsBinding.inflate(layoutInflater)
         setContentView(binding.root)

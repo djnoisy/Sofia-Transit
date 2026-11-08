@@ -18,7 +18,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="14sp"
-        android:alpha="0.75"
+        android:textColor="?attr/colorOnSurfaceVariant"
         android:lineSpacingMultiplier="1.15"
         android:paddingTop="4dp"/>
 
@@ -46,7 +46,7 @@
             android:layout_height="wrap_content"
             android:text="По време на пътуване в панела с известия стои известие, че следенето работи. От него се връщате в приложението с едно докосване."
             android:textSize="14sp"
-            android:alpha="0.75"
+            android:textColor="?attr/colorOnSurfaceVariant"
             android:lineSpacingMultiplier="1.15"
             android:paddingTop="4dp"/>
 
@@ -70,7 +70,7 @@
         android:layout_height="wrap_content"
         android:text="Без това телефонът може да спре обявяването на спирки, докато екранът е заключен."
         android:textSize="14sp"
-        android:alpha="0.75"
+        android:textColor="?attr/colorOnSurfaceVariant"
         android:lineSpacingMultiplier="1.15"
         android:paddingTop="4dp"/>
 

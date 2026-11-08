@@ -1,7 +1,10 @@
 package bg.sofia.transit
 
 import android.os.Bundle
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
+import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
@@ -9,6 +12,11 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
+import androidx.core.view.ViewCompat
+import androidx.core.view.children
+import androidx.navigation.ui.AppBarConfiguration
+import androidx.navigation.ui.navigateUp
+import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -17,6 +25,7 @@ import bg.sofia.transit.databinding.ActivityMainBinding
 import bg.sofia.transit.service.JourneyService
 import bg.sofia.transit.ui.permissions.PermissionsActivity
 import bg.sofia.transit.util.Permissions
+import bg.sofia.transit.util.ThemeMode
 import bg.sofia.transit.worker.GtfsUpdateWorker
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -27,6 +36,9 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var navController: NavController
+    /** The three sections of the navigation bar: no "back" arrow on them. */
+    private val appBarConfig = AppBarConfiguration(
+        setOf(R.id.nearbyFragment, R.id.linesFragment, R.id.journeyFragment))
 
     @Inject lateinit var gtfsRepo: GtfsRepository
 
@@ -44,6 +56,8 @@ class MainActivity : AppCompatActivity() {
     private var updateResultId: java.util.UUID? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // High contrast is a theme of its own, set before the activity is.
+        ThemeMode.applyTo(this)
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -52,6 +66,19 @@ class MainActivity : AppCompatActivity() {
         val navHost = supportFragmentManager
             .findFragmentById(R.id.nav_host_fragment) as NavHostFragment
         navController = navHost.navController
+
+        // The top app bar: the screen's title (the destination's label), a
+        // "back" arrow below the three sections, "Настройки" and
+        // "Диагностика" (onCreateOptionsMenu) — on every screen, not only
+        // on "Спирки" as before (the owner, 8 Nov 2026).
+        setSupportActionBar(binding.toolbar)
+        setupActionBarWithNavController(navController, appBarConfig)
+        navController.addOnDestinationChangedListener { _, _, _ ->
+            invalidateOptionsMenu()
+            // The title is the screen's heading for TalkBack, as the title
+            // inside each screen was; set once the bar has laid it out.
+            binding.toolbar.post { markTitleAsHeading() }
+        }
 
         binding.bottomNav.setupWithNavController(navController)
 
@@ -71,6 +98,38 @@ class MainActivity : AppCompatActivity() {
         gtfsRepo.startInitialLoadIfNeeded()
         observeInitialLoad()
         observeDataUpdate()
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.top_app_bar, menu)
+        return true
+    }
+
+    /** Not offered on the screen it opens. */
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        val here = navController.currentDestination?.id
+        menu.findItem(R.id.actionSettings)?.isVisible = here != R.id.settingsFragment
+        menu.findItem(R.id.actionDiagnostics)?.isVisible = here != R.id.diagnosticsFragment
+        return super.onPrepareOptionsMenu(menu)
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.actionSettings -> { navController.navigate(R.id.actionGlobalSettings); true }
+        R.id.actionDiagnostics -> { navController.navigate(R.id.actionGlobalDiagnostics); true }
+        else -> super.onOptionsItemSelected(item)
+    }
+
+    override fun onSupportNavigateUp(): Boolean =
+        navController.navigateUp(appBarConfig) || super.onSupportNavigateUp()
+
+    /** The bar's title view, by its text: the toolbar does not expose it. */
+    private fun markTitleAsHeading() {
+        // As text: the bar keeps the title it was given (navigation builds it
+        // in a StringBuffer), its view a String copy.
+        val title = binding.toolbar.title?.toString() ?: return
+        binding.toolbar.children.filterIsInstance<TextView>()
+            .firstOrNull { it.text.toString() == title }
+            ?.let { ViewCompat.setAccessibilityHeading(it, true) }
     }
 
     override fun onDestroy() {

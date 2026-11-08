@@ -12,7 +12,7 @@
         android:layout_height="wrap_content"
         android:textSize="18sp"
         android:textStyle="bold"
-        android:textColor="#1976D2"
+        android:textColor="?attr/colorPrimary"
         android:gravity="center"
         android:importantForAccessibility="no"/>
 

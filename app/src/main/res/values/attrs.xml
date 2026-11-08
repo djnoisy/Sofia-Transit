@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Arrival times ("след 3 мин"), as each theme colours them. -->
+    <attr name="colorArrivalTime" format="color"/>
+    <!-- Width of dividers and card outlines: 1dp, 2dp in high contrast. -->
+    <attr name="lineDividerWidth" format="dimension"/>
+</resources>

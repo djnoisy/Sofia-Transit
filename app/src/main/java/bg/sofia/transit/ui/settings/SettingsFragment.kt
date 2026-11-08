@@ -17,6 +17,7 @@ import bg.sofia.transit.ui.permissions.PermissionRows
 import bg.sofia.transit.util.AppSettings
 import bg.sofia.transit.util.FileLogger
 import bg.sofia.transit.util.PermissionRequester
+import bg.sofia.transit.util.ThemeMode
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.Locale
 import java.util.UUID
@@ -77,6 +78,7 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
 
+        setUpTheme()
         initTts()
         setUpRateSlider()
         setUpApproachMode()
@@ -265,6 +267,31 @@ class SettingsFragment : Fragment() {
             // Applies to the next journey; an active one keeps whatever
             // direction it already settled on.
             FileLogger.i(TAG, "Auto direction set to $checked")
+        }
+    }
+
+    // ── Look ──────────────────────────────────────────────────────────────
+
+    /**
+     * Light, dark, high contrast, or as the phone is (the owner, 8 Nov
+     * 2026). The listener is set after the current choice is checked, so
+     * that checking it is not taken for a change.
+     */
+    private fun setUpTheme() {
+        val ids = mapOf(
+            AppSettings.THEME_SYSTEM to binding.rbThemeSystem.id,
+            AppSettings.THEME_LIGHT to binding.rbThemeLight.id,
+            AppSettings.THEME_DARK to binding.rbThemeDark.id,
+            AppSettings.THEME_HIGH_CONTRAST to binding.rbThemeHighContrast.id
+        )
+        binding.rgTheme.check(ids[settings.themeMode] ?: binding.rbThemeSystem.id)
+        binding.rgTheme.setOnCheckedChangeListener { _, id ->
+            val chosen = ids.entries.firstOrNull { it.value == id }?.key ?: return@setOnCheckedChangeListener
+            val old = settings.themeMode
+            if (chosen == old) return@setOnCheckedChangeListener
+            settings.themeMode = chosen
+            FileLogger.i(TAG, "Theme set to $chosen")
+            ThemeMode.change(requireActivity(), old, chosen)
         }
     }
 

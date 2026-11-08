@@ -5,6 +5,15 @@
     android:id="@+id/nav_graph"
     app:startDestination="@id/nearbyFragment">
 
+    <!-- From the top app bar, on any screen (MainActivity). -->
+    <action android:id="@+id/actionGlobalSettings"
+        app:destination="@id/settingsFragment"
+        app:launchSingleTop="true"/>
+
+    <action android:id="@+id/actionGlobalDiagnostics"
+        app:destination="@id/diagnosticsFragment"
+        app:launchSingleTop="true"/>
+
     <!-- ── Nearby Stops ── -->
     <fragment android:id="@+id/nearbyFragment"
         android:name="bg.sofia.transit.ui.nearby.NearbyStopsFragment"
@@ -14,11 +23,6 @@
         <action android:id="@+id/actionNearbyToArrivals"
             app:destination="@id/stopArrivalsFragment"/>
 
-        <action android:id="@+id/actionNearbyToDiagnostics"
-            app:destination="@id/diagnosticsFragment"/>
-
-        <action android:id="@+id/actionNearbyToSettings"
-            app:destination="@id/settingsFragment"/>
     </fragment>
 
     <fragment android:id="@+id/settingsFragment"
