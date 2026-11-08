@@ -8,7 +8,7 @@
     <!-- The title, "Диагностика", is in the top app bar (activity_main.xml). -->
     <Button android:id="@+id/btnRun"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="wrap_content" android:minHeight="56dp"
         android:text="Обща проверка"
         android:contentDescription="Стартирай обща диагностична проверка"
         style="@style/Widget.Material3.Button"/>
@@ -24,6 +24,7 @@
         android:layout_height="wrap_content"
         android:text="Проверка на конкретна спирка:"
         android:textAppearance="@style/TextAppearance.SofiaTransit.SectionTitle"
+        android:accessibilityHeading="true"
         android:paddingBottom="8dp"/>
 
     <com.google.android.material.textfield.TextInputLayout
@@ -44,7 +45,7 @@
 
     <Button android:id="@+id/btnLookup"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="wrap_content" android:minHeight="56dp"
         android:text="Провери спирка"
         android:contentDescription="Провери дали въведената спирка има пристигания"
         android:layout_marginTop="8dp"
@@ -52,7 +53,7 @@
 
     <Button android:id="@+id/btnTestNearby"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="wrap_content" android:minHeight="56dp"
         android:text="Тест на близки спирки"
         android:contentDescription="Тествай извличането на близки спирки от текущото местоположение"
         android:layout_marginTop="8dp"
@@ -60,7 +61,7 @@
 
     <Button android:id="@+id/btnDiagnoseVehicles"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="wrap_content" android:minHeight="56dp"
         android:text="Тест на GPS данни за возилата"
         android:contentDescription="Провери свежестта на позициите и кои возила са най-близо"
         android:layout_marginTop="8dp"
@@ -80,7 +81,7 @@
 
         <Button android:id="@+id/btnShareLog"
             android:layout_width="0dp"
-            android:layout_height="48dp"
+            android:layout_height="wrap_content" android:minHeight="48dp"
             android:layout_weight="1"
             android:layout_marginEnd="4dp"
             android:text="Сподели лог"
@@ -89,7 +90,7 @@
 
         <Button android:id="@+id/btnClearLog"
             android:layout_width="0dp"
-            android:layout_height="48dp"
+            android:layout_height="wrap_content" android:minHeight="48dp"
             android:layout_weight="1"
             android:layout_marginStart="4dp"
             android:text="Изчисти лог"

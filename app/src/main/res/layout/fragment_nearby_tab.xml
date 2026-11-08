@@ -17,11 +17,12 @@
             android:layout_height="wrap_content"
             android:text="Няма достъп до местоположението."
             android:textSize="16sp"
+            android:textColor="?attr/colorOnSurface"
             android:gravity="center"/>
 
         <Button android:id="@+id/btnGrantLocation"
             android:layout_width="match_parent"
-            android:layout_height="56dp"
+            android:layout_height="wrap_content" android:minHeight="56dp"
             android:layout_marginTop="12dp"
             android:text="Разреши"/>
     </LinearLayout>

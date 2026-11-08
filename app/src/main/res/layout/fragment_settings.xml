@@ -126,8 +126,7 @@
 
                 <Spinner android:id="@+id/spinnerEngine"
                     android:layout_width="match_parent"
-                    android:layout_height="56dp"
-                    android:minHeight="48dp"
+                    android:layout_height="wrap_content" android:minHeight="56dp"
                     android:popupBackground="@drawable/bg_popup_outlined"/>
 
                 <com.google.android.material.divider.MaterialDivider
@@ -191,7 +190,7 @@
 
                 <Button android:id="@+id/btnTestSpeech"
                     android:layout_width="match_parent"
-                    android:layout_height="56dp"
+                    android:layout_height="wrap_content" android:minHeight="56dp"
                     android:layout_marginTop="16dp"
                     android:text="Изпробвай гласа"
                     style="@style/Widget.Material3.Button.TonalButton"/>

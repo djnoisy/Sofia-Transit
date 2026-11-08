@@ -27,7 +27,7 @@
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnSearch"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="wrap_content" android:minHeight="56dp"
         android:text="Търси"
         android:contentDescription="Стартирай търсене"
         android:layout_marginTop="8dp"
@@ -38,7 +38,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:textSize="14sp"
+        android:textSize="15sp"
+        android:textColor="?attr/colorOnSurfaceVariant"
         android:text="Въведете име или код на спирка и натиснете „Търси“."/>
 
     <androidx.recyclerview.widget.RecyclerView

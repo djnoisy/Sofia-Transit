@@ -317,10 +317,15 @@ class JourneyFragment : Fragment() {
         val v = _binding?.tvDestination ?: return
         v.isFocusable = true
         v.postDelayed({
-            _binding?.tvDestination?.performAccessibilityAction(
-                android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS,
-                null
-            )
+            _binding?.tvDestination?.let { d ->
+                // Into view first: in its card, in the scrolling panel, it
+                // may lie below the screen at a large font size.
+                d.requestRectangleOnScreen(android.graphics.Rect(0, 0, d.width, d.height), true)
+                d.performAccessibilityAction(
+                    android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS,
+                    null
+                )
+            }
         }, 250)
     }
 

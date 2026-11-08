@@ -12,7 +12,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="16sp"
-        android:textStyle="bold"/>
+        android:textStyle="bold"
+        android:textColor="?attr/colorOnSurface"/>
 
     <TextView android:id="@+id/tvLocationInfo"
         android:layout_width="match_parent"
@@ -24,7 +25,7 @@
 
     <Button android:id="@+id/btnLocation"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="wrap_content" android:minHeight="56dp"
         android:layout_marginTop="8dp"
         android:text="Разреши местоположение"
         style="@style/Widget.Material3.Button.OutlinedButton"/>
@@ -39,7 +40,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textSize="16sp"
-            android:textStyle="bold"/>
+            android:textStyle="bold"
+            android:textColor="?attr/colorOnSurface"/>
 
         <TextView
             android:layout_width="match_parent"
@@ -52,7 +54,7 @@
 
         <Button android:id="@+id/btnNotifications"
             android:layout_width="match_parent"
-            android:layout_height="56dp"
+            android:layout_height="wrap_content" android:minHeight="56dp"
             android:layout_marginTop="8dp"
             android:text="Разреши известия"
             style="@style/Widget.Material3.Button.OutlinedButton"/>
@@ -63,7 +65,8 @@
         android:layout_height="wrap_content"
         android:paddingTop="20dp"
         android:textSize="16sp"
-        android:textStyle="bold"/>
+        android:textStyle="bold"
+        android:textColor="?attr/colorOnSurface"/>
 
     <TextView
         android:layout_width="match_parent"
@@ -76,7 +79,7 @@
 
     <Button android:id="@+id/btnBattery"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="wrap_content" android:minHeight="56dp"
         android:layout_marginTop="8dp"
         android:text="Изключи ограниченията"
         style="@style/Widget.Material3.Button.OutlinedButton"/>
