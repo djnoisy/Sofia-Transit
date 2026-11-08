@@ -6,6 +6,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import bg.sofia.transit.databinding.ItemUpcomingTripBinding
+import bg.sofia.transit.ui.common.LineBadge
 import bg.sofia.transit.util.VehicleLabels
 
 /**
@@ -35,16 +36,26 @@ class UpcomingTripsAdapter(
         }
     }
 
+    /** The lines' official colours, by route id, for the badges (GtfsRepository.getRouteColors). */
+    private var routeColors: Map<String, String> = emptyMap()
+
+    fun setRouteColors(colors: Map<String, String>) {
+        if (colors != routeColors) {
+            routeColors = colors
+            notifyDataSetChanged()
+        }
+    }
+
     inner class VH(private val b: ItemUpcomingTripBinding) :
         RecyclerView.ViewHolder(b.root) {
 
         fun bind(c: LineChoice) {
-            val type = VehicleLabels.typeOf(c.routeType)
             val typeLabel = VehicleLabels.singular(
                 c.routeType, c.routeId in trolleyRouteIds)
 
-            b.tvType.text = type.emoji
-            b.tvRoute.text = c.routeShortName
+            // The badge: the vehicle's icon and the number on the line's
+            // official colour (redesign, stage b; was an emoji).
+            LineBadge.bind(b.badge, typeLabel, c.routeId, c.routeShortName, routeColors[c.routeId])
 
             // Rows carry no direction — it is chosen after tapping — so the
             // second line shows the line's corridor instead. That identifies

@@ -8,6 +8,7 @@ import bg.sofia.transit.data.repository.GtfsRepository
 import bg.sofia.transit.data.repository.RealtimeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharedFlow
@@ -33,6 +34,17 @@ class StopArrivalsViewModel @Inject constructor(
 
     private val _error = MutableSharedFlow<String>()
     val error: SharedFlow<String> = _error
+
+    /** The lines' official colours, for the badges; none if they cannot be read. */
+    suspend fun routeColors(): Map<String, String> = try {
+        if (!gtfsRepo.dataReady.value) gtfsRepo.dataReady.first { it }
+        gtfsRepo.getRouteColors()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        FileLogger.w(TAG, "Could not load route colours: ${e.message}")
+        emptyMap()
+    }
 
     fun loadArrivals(stopId: String, stopCode: String? = null) {
         FileLogger.i(TAG, "loadArrivals called for stopId='$stopId' code='$stopCode'")

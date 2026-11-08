@@ -5,6 +5,7 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import bg.sofia.transit.data.db.entity.Route
 import bg.sofia.transit.databinding.ItemRouteBinding
+import bg.sofia.transit.ui.common.LineBadge
 import bg.sofia.transit.util.FileLogger
 
 class RoutesAdapter(
@@ -68,9 +69,10 @@ class RoutesAdapter(
                 // range because CGM lumps trolleys and electric buses
                 // together (see vehicleLabelFor).
                 val label = vehicleLabelFor(route, type)
-                b.tvRouteNumber.text = route.routeShortName
+                // The badge: the vehicle's icon and the number on the line's
+                // official colour (redesign, stage b; was an emoji).
+                LineBadge.bind(b.badge, label, route.routeId, route.routeShortName, route.routeColor)
                 b.tvRouteName.text   = subtitle
-                b.tvRouteType.text   = type.emoji
                 // Short and speakable, without the redundant "линия" word.
                 b.root.contentDescription =
                     "$label ${route.routeShortName}: $subtitle. Натиснете за направления."

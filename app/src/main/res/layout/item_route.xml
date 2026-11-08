@@ -1,26 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="wrap_content"
-    android:orientation="horizontal" android:padding="16dp" android:minHeight="64dp"
-    android:gravity="center_vertical"
-    android:background="?attr/selectableItemBackground" android:focusable="true">
+<!-- A line in "Линии": a card — the line's badge (vehicle and number on the
+     line's colour), its two ends, an arrow on. Read as one by TalkBack, by
+     the description the adapter sets on the card. -->
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginHorizontal="12dp"
+    android:layout_marginVertical="4dp"
+    android:clickable="true"
+    android:focusable="true">
 
-    <TextView android:id="@+id/tvRouteType"
-        android:layout_width="40dp" android:layout_height="40dp"
-        android:textSize="22sp" android:gravity="center"
-        android:importantForAccessibility="no"/>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:minHeight="72dp"
+        android:padding="12dp"
+        android:importantForAccessibility="no">
 
-    <TextView android:id="@+id/tvRouteNumber"
-        android:layout_width="64dp" android:layout_height="wrap_content"
-        android:textSize="20sp" android:textStyle="bold" android:layout_marginStart="8dp"
-        android:gravity="center"/>
+        <include android:id="@+id/badge"
+            layout="@layout/view_line_badge"/>
 
-    <TextView android:id="@+id/tvRouteName"
-        android:layout_width="0dp" android:layout_height="wrap_content"
-        android:layout_weight="1" android:textSize="15sp" android:layout_marginStart="8dp"
-        android:maxLines="2"/>
+        <TextView android:id="@+id/tvRouteName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:maxLines="3"
+            android:textSize="16sp"
+            android:textColor="?attr/colorOnSurface"
+            android:importantForAccessibility="no"/>
 
-    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:text="›" android:textSize="24sp" android:textColor="?attr/colorOnSurfaceVariant"
-        android:importantForAccessibility="no"/>
-</LinearLayout>
+        <ImageView
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginStart="8dp"
+            android:src="@drawable/ic_chevron_right"
+            app:tint="?attr/colorOnSurfaceVariant"
+            android:importantForAccessibility="no"/>
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

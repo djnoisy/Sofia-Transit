@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The number of a stop along a line, in an outlined circle. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="?attr/colorSurface"/>
+    <stroke android:width="?attr/lineDividerWidth" android:color="?attr/colorOutline"/>
+</shape>

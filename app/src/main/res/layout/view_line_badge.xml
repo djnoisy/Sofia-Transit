@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A line's badge: the vehicle's icon and the line's number on the line's
+     colour (LineBadge). Not read by TalkBack: the row speaks for it. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center"
+    android:minWidth="76dp"
+    android:minHeight="44dp"
+    android:paddingHorizontal="10dp"
+    android:paddingVertical="6dp"
+    android:importantForAccessibility="noHideDescendants">
+
+    <ImageView android:id="@+id/ivBadgeIcon"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:importantForAccessibility="no"/>
+
+    <TextView android:id="@+id/tvBadgeNumber"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:maxLines="1"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:importantForAccessibility="no"/>
+</LinearLayout>

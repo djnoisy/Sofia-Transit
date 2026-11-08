@@ -458,6 +458,38 @@ app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved 
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: startForeground
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: startForeground
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: stopSelf
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: Color
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: Color
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: Color
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: ColorStateList
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: GradientDrawable
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: GradientDrawable
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: MaterialColors
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: TypedValue
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: ViewLineBadgeBinding
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: cornerRadius
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: databinding
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: google
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: google
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: setColor
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: setStroke
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: unresolved reference: shape
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/common/LineBadge.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/diagnostics/DiagnosticsFragment.kt: error: 'onCreateView' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/diagnostics/DiagnosticsFragment.kt: error: 'onDestroyView' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/diagnostics/DiagnosticsFragment.kt: error: 'onViewCreated' overrides nothing
@@ -577,13 +609,17 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: cannot 
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: suspend function 'directionsFor' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> ??? but FlowCollector<String> was expected
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<JourneyService.JourneyEvent> was expected
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<Map<String, String>> was expected
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<Set<String>> was expected
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference. None of the following candidates is applicable because of receiver type mismatch: 
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference. None of the following candidates is applicable because of receiver type mismatch: 
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference. None of the following candidates is applicable because of receiver type mismatch: 
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference. None of the following candidates is applicable because of receiver type mismatch: 
@@ -797,9 +833,11 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspen
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'emit' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'emit' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'first' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'first' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getDirectionHeadsigns' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getNearestStops' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getRemainingStops' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getRouteColors' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getRouteSubtitles' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getRouteSubtitles' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getStopById' should be called only from a coroutine or another suspend function
@@ -852,6 +890,7 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: unreso
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: unresolved reference: viewModelScope
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: unresolved reference: viewModelScope
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: unresolved reference: viewModelScope
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: unresolved reference: viewModelScope
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: 'areContentsTheSame' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: 'areItemsTheSame' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: 'onBindViewHolder' overrides nothing
@@ -871,8 +910,7 @@ app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: un
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: databinding
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: getItem
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: notifyDataSetChanged
-app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: notifyDataSetChanged
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: 'getItemCount' overrides nothing
@@ -1026,8 +1064,6 @@ app/src/main/java/bg/sofia/transit/ui/lines/RoutesAdapter.kt: error: unresolved 
 app/src/main/java/bg/sofia/transit/ui/lines/RoutesAdapter.kt: error: unresolved reference: notifyItemRangeChanged
 app/src/main/java/bg/sofia/transit/ui/lines/RoutesAdapter.kt: error: unresolved reference: notifyItemRangeInserted
 app/src/main/java/bg/sofia/transit/ui/lines/RoutesAdapter.kt: error: unresolved reference: notifyItemRangeRemoved
-app/src/main/java/bg/sofia/transit/ui/lines/RoutesAdapter.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/RoutesAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/RoutesAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/RoutesAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleAdapter.kt: error: 'getItemCount' overrides nothing
@@ -1224,7 +1260,7 @@ app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolve
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: databinding
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: itemCount
-app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: notifyItemRangeChanged
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: variable expected
@@ -1462,6 +1498,7 @@ app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: can
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: suspend function 'collect' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: suspend function 'collectLatest' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: suspend function 'delay' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: suspend function 'routeColors' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> ??? but FlowCollector<String> was expected
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: unresolved reference: AndroidEntryPoint
@@ -1506,6 +1543,7 @@ app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: unr
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: unresolved reference: onViewCreated
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: unresolved reference: requireContext
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: unresolved reference: requireContext
+app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/nearby/StopArrivalsFragment.kt: error: unresolved reference: viewLifecycleOwner

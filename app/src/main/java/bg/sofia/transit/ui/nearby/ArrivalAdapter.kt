@@ -6,6 +6,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import bg.sofia.transit.data.repository.ArrivalInfo
 import bg.sofia.transit.databinding.ItemArrivalBinding
+import bg.sofia.transit.ui.common.LineBadge
 import bg.sofia.transit.util.FileLogger
 
 class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
@@ -13,6 +14,15 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
     companion object { private const val TAG = "ArrivalAdapter" }
 
     private val items = mutableListOf<ArrivalInfo>()
+
+    /** The lines' official colours, by route id, for the badges (GtfsRepository.getRouteColors). */
+    private var routeColors: Map<String, String> = emptyMap()
+
+    fun setRouteColors(colors: Map<String, String>) {
+        if (colors == routeColors) return
+        routeColors = colors
+        if (items.isNotEmpty()) notifyItemRangeChanged(0, items.size)
+    }
 
     /**
      * Updates the list using DiffUtil so RecyclerView receives precise
@@ -70,7 +80,11 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
                 } else {
                     "Линия ${info.routeShortName}"
                 }
-                b.tvRoute.text    = label
+                // Shown as the badge: the vehicle's icon and the number on
+                // the line's official colour (redesign, stage b); the label
+                // is still what TalkBack says.
+                LineBadge.bind(b.badge, info.vehicleType, info.routeId, info.routeShortName,
+                    routeColors[info.routeId])
                 val headsignText = if (info.dropOffOnly) "само слизане" else info.headsign
                 b.tvHeadsign.text = headsignText
                 // Timetable times are marked as such. They carry no traffic

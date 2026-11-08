@@ -18,6 +18,7 @@ import bg.sofia.transit.util.LocationHelper
 import bg.sofia.transit.util.VehicleLabels
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -106,6 +107,10 @@ class JourneyViewModel @Inject constructor(
     private val _trolleyRouteIds = MutableStateFlow<Set<String>>(emptySet())
     val trolleyRouteIds: StateFlow<Set<String>> = _trolleyRouteIds
 
+    /** The lines' official colours, by route id, for the badges (redesign, stage b). */
+    private val _routeColors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val routeColors: StateFlow<Map<String, String>> = _routeColors
+
     /**
      * Sets the stop the user will get off at, by index into the trip's stop
      * list. Passing null clears it. Requires the service binding, which we
@@ -165,6 +170,17 @@ class JourneyViewModel @Inject constructor(
         viewModelScope.launch {
             tracking.collect { state ->
                 if (state is JourneyService.TrackingState.Idle) unbind()
+            }
+        }
+
+        viewModelScope.launch {
+            try {
+                if (!gtfsRepo.dataReady.value) gtfsRepo.dataReady.first { it }
+                _routeColors.value = gtfsRepo.getRouteColors()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "Could not load route colours: ${e.message}")
             }
         }
 

@@ -61,6 +61,11 @@ class StopArrivalsFragment : Fragment() {
 
         binding.btnRefresh.setOnClickListener { loadArrivals() }
 
+        // The lines' official colours for the badges (redesign, stage b).
+        viewLifecycleOwner.lifecycleScope.launch {
+            adapter.setRouteColors(vm.routeColors())
+        }
+
         viewLifecycleOwner.lifecycleScope.launch {
             vm.state.collectLatest { state -> renderState(state) }
         }

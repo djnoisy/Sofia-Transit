@@ -1,42 +1,78 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical">
 
     <!-- The title, "Линии", is in the top app bar (activity_main.xml). -->
+    <!-- The vehicle kinds: the chosen one filled in the primary colour (it
+         was not shown before — an outlined button does not draw "selected"),
+         each with its vehicle's icon instead of an emoji. TalkBack hears
+         them as tabs with the selected state (LinesFragment). -->
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:padding="4dp"
+        android:orientation="horizontal" android:paddingHorizontal="12dp"
+        android:paddingTop="12dp" android:paddingBottom="4dp"
         android:baselineAligned="false">
-        <Button android:id="@+id/btnBus" android:layout_width="0dp"
-            android:layout_weight="1" android:layout_height="wrap_content"
-            android:minHeight="64dp" android:text="🚌\nАвтобуси" android:maxLines="2"
-            android:layout_marginEnd="4dp" android:padding="4dp" android:insetTop="0dp"
-            android:insetBottom="0dp"
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnBus"
+            android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:minHeight="72dp"
+            android:layout_marginEnd="6dp" android:paddingHorizontal="2dp" android:paddingVertical="8dp"
+            android:insetTop="0dp" android:insetBottom="0dp"
+            android:text="Автобуси" android:textSize="14sp" android:maxLines="2"
+            android:textColor="@color/filter_fg"
+            app:icon="@drawable/ic_vehicle_bus" app:iconGravity="top" app:iconPadding="4dp"
+            app:iconSize="26dp" app:iconTint="@color/filter_fg"
+            app:backgroundTint="@color/filter_bg"
+            app:strokeColor="?attr/colorOutline" app:strokeWidth="?attr/lineDividerWidth"
+            app:cornerRadius="12dp"
             style="@style/Widget.Material3.Button.OutlinedButton"/>
-        <Button android:id="@+id/btnTram" android:layout_width="0dp"
-            android:layout_weight="1" android:layout_height="wrap_content"
-            android:minHeight="64dp" android:text="🚊\nТрамваи" android:maxLines="2"
-            android:layout_marginEnd="4dp" android:padding="4dp" android:insetTop="0dp"
-            android:insetBottom="0dp"
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnTram"
+            android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:minHeight="72dp"
+            android:layout_marginEnd="6dp" android:paddingHorizontal="2dp" android:paddingVertical="8dp"
+            android:insetTop="0dp" android:insetBottom="0dp"
+            android:text="Трамваи" android:textSize="14sp" android:maxLines="2"
+            android:textColor="@color/filter_fg"
+            app:icon="@drawable/ic_vehicle_tram" app:iconGravity="top" app:iconPadding="4dp"
+            app:iconSize="26dp" app:iconTint="@color/filter_fg"
+            app:backgroundTint="@color/filter_bg"
+            app:strokeColor="?attr/colorOutline" app:strokeWidth="?attr/lineDividerWidth"
+            app:cornerRadius="12dp"
             style="@style/Widget.Material3.Button.OutlinedButton"/>
-        <Button android:id="@+id/btnTrolley" android:layout_width="0dp"
-            android:layout_weight="1" android:layout_height="wrap_content"
-            android:minHeight="64dp" android:text="🚎\nТролеи" android:maxLines="2"
-            android:layout_marginEnd="4dp" android:padding="4dp" android:insetTop="0dp"
-            android:insetBottom="0dp"
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnTrolley"
+            android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:minHeight="72dp"
+            android:layout_marginEnd="6dp" android:paddingHorizontal="2dp" android:paddingVertical="8dp"
+            android:insetTop="0dp" android:insetBottom="0dp"
+            android:text="Тролеи" android:textSize="14sp" android:maxLines="2"
+            android:textColor="@color/filter_fg"
+            app:icon="@drawable/ic_vehicle_trolley" app:iconGravity="top" app:iconPadding="4dp"
+            app:iconSize="26dp" app:iconTint="@color/filter_fg"
+            app:backgroundTint="@color/filter_bg"
+            app:strokeColor="?attr/colorOutline" app:strokeWidth="?attr/lineDividerWidth"
+            app:cornerRadius="12dp"
             style="@style/Widget.Material3.Button.OutlinedButton"/>
-        <Button android:id="@+id/btnMetro" android:layout_width="0dp"
-            android:layout_weight="1" android:layout_height="wrap_content"
-            android:minHeight="64dp" android:text="🚇\nМетро" android:maxLines="2"
-            android:padding="4dp" android:insetTop="0dp" android:insetBottom="0dp"
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnMetro"
+            android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:minHeight="72dp"
+            android:paddingHorizontal="2dp" android:paddingVertical="8dp"
+            android:insetTop="0dp" android:insetBottom="0dp"
+            android:text="Метро" android:textSize="14sp" android:maxLines="2"
+            android:textColor="@color/filter_fg"
+            app:icon="@drawable/ic_vehicle_metro" app:iconGravity="top" app:iconPadding="4dp"
+            app:iconSize="26dp" app:iconTint="@color/filter_fg"
+            app:backgroundTint="@color/filter_bg"
+            app:strokeColor="?attr/colorOutline" app:strokeWidth="?attr/lineDividerWidth"
+            app:cornerRadius="12dp"
             style="@style/Widget.Material3.Button.OutlinedButton"/>
     </LinearLayout>
 
     <TextView android:id="@+id/tvRouteCount"
         android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:textSize="13sp" android:paddingHorizontal="16dp" android:paddingBottom="4dp"/>
+        android:textSize="14sp" android:textColor="?attr/colorOnSurfaceVariant"
+        android:paddingHorizontal="16dp" android:paddingVertical="6dp"/>
 
     <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvRoutes"
         android:layout_width="match_parent" android:layout_height="0dp"
-        android:layout_weight="1"/>
+        android:layout_weight="1" android:paddingBottom="8dp" android:clipToPadding="false"/>
 </LinearLayout>

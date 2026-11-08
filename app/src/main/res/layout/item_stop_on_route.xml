@@ -1,20 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="wrap_content"
-    android:orientation="horizontal" android:padding="16dp" android:minHeight="56dp"
-    android:gravity="center_vertical"
-    android:background="?attr/selectableItemBackground" android:focusable="true">
+<!-- A stop along a line's direction: a card — its number in a circle, its
+     name, the minutes from the start. Read as one by TalkBack (the adapter's
+     description on the card). -->
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginHorizontal="4dp"
+    android:layout_marginVertical="3dp"
+    android:clickable="true"
+    android:focusable="true">
 
-    <TextView android:id="@+id/tvSequence"
-        android:layout_width="40dp" android:layout_height="wrap_content"
-        android:textSize="13sp" android:textColor="?attr/colorOnSurfaceVariant" android:gravity="center"
-        android:importantForAccessibility="no"/>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:minHeight="60dp"
+        android:padding="10dp"
+        android:importantForAccessibility="no">
 
-    <TextView android:id="@+id/tvStopName"
-        android:layout_width="0dp" android:layout_height="wrap_content"
-        android:layout_weight="1" android:textSize="16sp" android:layout_marginStart="8dp"/>
+        <TextView android:id="@+id/tvSequence"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:background="@drawable/bg_sequence_circle"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="?attr/colorOnSurface"
+            android:importantForAccessibility="no"/>
 
-    <TextView android:id="@+id/tvTime"
-        android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:textSize="14sp" android:textColor="?attr/colorPrimary"/>
-</LinearLayout>
+        <TextView android:id="@+id/tvStopName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:textSize="16sp"
+            android:textColor="?attr/colorOnSurface"
+            android:importantForAccessibility="no"/>
+
+        <TextView android:id="@+id/tvTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="?attr/colorPrimary"
+            android:importantForAccessibility="no"/>
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

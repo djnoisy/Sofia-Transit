@@ -114,6 +114,9 @@ class JourneyFragment : Fragment() {
                     }
                 }
                 launch {
+                    vm.routeColors.collect { colors -> upcomingAdapter.setRouteColors(colors) }
+                }
+                launch {
                     vm.error.collect { msg ->
                         Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                     }

@@ -1,28 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="wrap_content"
-    android:orientation="horizontal" android:paddingVertical="12dp"
-    android:paddingHorizontal="4dp" android:minHeight="56dp"
-    android:gravity="center_vertical"
+<!-- An arrival at a stop: a card — the line's badge and where it goes, the
+     times below in the arrivals' colour. Read as one by TalkBack (the
+     adapter's description on the card). -->
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginHorizontal="4dp"
+    android:layout_marginVertical="4dp"
     android:focusable="true"
     android:screenReaderFocusable="true"
     android:importantForAccessibility="yes">
 
-    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-        android:layout_weight="1" android:orientation="vertical"
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp"
         android:importantForAccessibility="no">
-        <TextView android:id="@+id/tvRoute"
-            android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:textSize="16sp" android:textStyle="bold"
-            android:importantForAccessibility="no"/>
-        <TextView android:id="@+id/tvHeadsign"
-            android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:textSize="14sp" android:textColor="?attr/colorOnSurfaceVariant" android:layout_marginTop="2dp"
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:importantForAccessibility="no">
+
+            <include android:id="@+id/badge"
+                layout="@layout/view_line_badge"/>
+
+            <TextView android:id="@+id/tvHeadsign"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="12dp"
+                android:maxLines="3"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="?attr/colorOnSurface"
+                android:importantForAccessibility="no"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvTimes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:textColor="?attr/colorArrivalTime"
             android:importantForAccessibility="no"/>
     </LinearLayout>
-
-    <TextView android:id="@+id/tvTimes"
-        android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:textSize="15sp" android:textStyle="bold" android:textColor="?attr/colorArrivalTime"
-        android:importantForAccessibility="no"/>
-</LinearLayout>
+</com.google.android.material.card.MaterialCardView>
