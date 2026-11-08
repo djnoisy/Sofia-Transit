@@ -138,6 +138,19 @@ class MainActivity : AppCompatActivity() {
         else -> super.onOptionsItemSelected(item)
     }
 
+    /**
+     * The loading overlay over the whole screen: it takes the taps, and what
+     * lies beneath — the bars and the screen — is hidden from TalkBack while
+     * it is shown, so "Настройки" cannot be reached through it.
+     */
+    private fun showLoadingOverlay(show: Boolean) {
+        binding.layoutLoading.visibility = if (show) View.VISIBLE else View.GONE
+        val beneath = if (show) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        listOf<View>(binding.appBar, binding.navHostFragment, binding.bottomNav)
+            .forEach { it.importantForAccessibility = beneath }
+    }
+
     /** Back out of "Настройки" and "Диагностика", if on one of them. */
     private fun leaveSettingsAndDiagnostics() {
         while (navController.currentDestination?.id.let {
@@ -463,7 +476,7 @@ class MainActivity : AppCompatActivity() {
                     gtfsRepo.initialLoadDone.collect { done ->
                         if (done) {
                             if (binding.layoutLoading.visibility == View.VISIBLE) {
-                                binding.layoutLoading.visibility = View.GONE
+                                showLoadingOverlay(false)
                                 // During the first-run install the dialog
                                 // speaks for itself and ends with its own
                                 // result message — no second announcement.
@@ -484,7 +497,7 @@ class MainActivity : AppCompatActivity() {
                             GtfsUpdateWorker.checkForUpdate(this@MainActivity)
                             maybeShowPermissions()
                         } else {
-                            binding.layoutLoading.visibility = View.VISIBLE
+                            showLoadingOverlay(true)
                             // Plain backdrop until the data is there; the
                             // install dialog on top carries the messages
                             // (and the retry button if the install fails).

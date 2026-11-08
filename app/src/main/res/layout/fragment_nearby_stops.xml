@@ -7,8 +7,9 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- The selected tab: the primary colour and a 4dp bar (by default its
-         text differed from the other's by 1.0-1.4:1). -->
+    <!-- The selected tab: marked by a 4dp bar in the primary colour (6:1 on
+         the page in light, 11:1 in dark); its text differs from the other's
+         by little in light and dark, as in Material 3. -->
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayout"
         android:layout_width="match_parent"

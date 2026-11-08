@@ -3,7 +3,6 @@ package bg.sofia.transit.util
 import android.app.Activity
 import android.content.Context
 import android.content.res.Configuration
-import android.content.res.Resources
 import androidx.appcompat.app.AppCompatDelegate
 import bg.sofia.transit.R
 
@@ -47,7 +46,8 @@ object ThemeMode {
         val darkThen = when (new) {
             AppSettings.THEME_LIGHT -> false
             AppSettings.THEME_DARK, AppSettings.THEME_HIGH_CONTRAST -> true
-            else -> isDark(Resources.getSystem().configuration)
+            // As AppCompat tells the phone's setting: by the app's own.
+            else -> isDark(activity.applicationContext.resources.configuration)
         }
         AppCompatDelegate.setDefaultNightMode(nightModeFor(new))
         val hcBefore = old == AppSettings.THEME_HIGH_CONTRAST

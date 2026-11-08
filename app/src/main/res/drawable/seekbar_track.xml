@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The speech-rate slider's track: opaque, in theme colours — the
+     AppCompat track is drawn at 30% and was 1.4-2.5:1 (review of 8 Nov
+     2026). 4dp, centred. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/background"
+        android:gravity="center_vertical|fill_horizontal"
+        android:height="4dp">
+        <shape android:shape="rectangle">
+            <solid android:color="?attr/colorOutline"/>
+            <corners android:radius="2dp"/>
+        </shape>
+    </item>
+    <item android:id="@android:id/progress"
+        android:gravity="center_vertical|fill_horizontal"
+        android:height="4dp">
+        <scale android:scaleWidth="100%">
+            <shape android:shape="rectangle">
+                <solid android:color="?attr/colorPrimary"/>
+                <corners android:radius="2dp"/>
+            </shape>
+        </scale>
+    </item>
+</layer-list>
