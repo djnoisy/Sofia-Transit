@@ -237,7 +237,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /**
          * Whether leaving a stop — DEPART_RADIUS from it — is on foot, so that
          * "Следваща спирка" is not said: at walking pace since leaving it
-         * ([peakKmh] under [vehicleKmh], measured on accurate fixes only), and
+         * ([peakKmh] under [vehicleKmh], sampled on accurate fixes only — none
+         * when every fix since 45 m from the stop was vague, and the test
+         * then passes on nothing measured: with ours gone, as the owner
+         * accepted on 8 Nov 2026, that is the decision; a vague fix's own
+         * speed is no measure, 11 km/h walking on 7 Nov 2026 c), and
          * either ours gone from us ([oursGone]: ridden with us, it has left
          * without us), or, on an accurate fix ([accurateFix]), off the line's
          * road ahead of the stop ([onRoadAhead] false) and no nearer the next
@@ -3536,8 +3540,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
     /**
      * On foot from the stop we are at, as of [loc] (handleLeftOnFoot) — or,
-     * [loc] vague (ours gone from us: leavingOnFoot), as of the last accurate
-     * fix, if one came in the last FOOT_REF_MAX_AGE_MS: the place getting
+     * [loc] vague (ours gone from us, leavingOnFoot; or after "Слизате тук"
+     * at the chosen stop), as of the last accurate fix, if one came in the
+     * last FOOT_REF_MAX_AGE_MS: the place getting
      * back aboard is measured from (resumesAboard) is not to be tens of
      * metres out (7 Nov 2026, c: 43 m).
      */
