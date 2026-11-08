@@ -2430,6 +2430,24 @@ val expectations: Map<String, (Replayed) -> Unit> = mapOf(
         val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "A3155" }
         check("7.11 b bus 213: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
             others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
+    },
+    // The same evening, c (№117): bus 76 (A3130), 181 chosen, direction to
+    // be determined, waiting 7 min at УМБАЛ СВ. АННА; 76 alone near us and
+    // due there (19:12:13): the early rule took it at the first reading
+    // (19:12:47, 5 s after departure). Off at МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, no
+    // stop chosen (76 left 19:18:46), walking away: the app ended at 19:20:20.
+    "2026-11-07_76.txt" to { rp ->
+        val id = rp.events.firstOrNull()
+        check("7.11 c bus 76 (181 chosen): 76 taken by the boarding stop by 19:12:47",
+            (id?.event as? Event.Identified)?.let { it.key == "A3130" && it.byBoardingStop } == true &&
+            clock(id!!.atMs) <= "19:12:47") { id?.let { "${clock(it.atMs)} ${describe(it.event)}" } ?: "none" }
+        val off = rp.events.getOrNull(1)
+        check("7.11 c bus 76: got off between 19:20:00 and 19:20:45, nothing else", rp.events.size == 2 &&
+            off?.event is Event.Alighted && clock(off.atMs) in "19:20:00".."19:20:45") {
+            rp.events.joinToString { "${clock(it.atMs)} ${describe(it.event)}" } }
+        val others = rp.metresAt.flatMap { it.second.entries }.filter { it.key != "A3130" }
+        check("7.11 c bus 76: no other vehicle reaches 150 m", others.all { it.value < 150.0 }) {
+            others.maxByOrNull { it.value }?.let { "${rp.routeOf[it.key]}/${it.key} ${it.value.toInt()}" } ?: "" }
     }
 )
 
