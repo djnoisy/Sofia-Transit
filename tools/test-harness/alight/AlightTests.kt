@@ -76,7 +76,18 @@ fun main() {
     eq("walking on towards the next stop, ours still with us: a departure", false, onFoot(220.0, 300.0))
     eq("walking on towards the next stop, ours gone: on foot", true, onFoot(220.0, 300.0, gone = true))
     eq("vehicle speed since leaving, ours gone (its report wrong): a departure", false, onFoot(220.0, 300.0, peak = 15.0, gone = true))
-    eq("an inaccurate fix: a departure, as before", false, onFoot(343.0, 265.0, accurate = false))
+    eq("an inaccurate fix, ours not gone: a departure, as before", false, onFoot(343.0, 265.0, accurate = false))
+    eq("an inaccurate fix, ours not gone, on the road ahead: a departure", false,
+        onFoot(220.0, 300.0, onRoad = true, accurate = false))
+    // 7 Nov 2026 c: walking off from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, the 90 m
+    // crossed on a fix of 43 m (19:20:09), 76 595 m away: 202 m from БЛ. 222,
+    // the stop 107 m from it, the top speed on accurate fixes 4 km/h.
+    eq("7.11 c on foot from Метростанция Ал. Малинов, a vague fix, 76 gone: on foot", true,
+        onFoot(202.0, 107.0, peak = 4.0, gone = true, accurate = false))
+    eq("a vague fix, ours gone, walking towards the next stop: on foot", true,
+        onFoot(220.0, 300.0, gone = true, accurate = false))
+    eq("a vague fix, ours gone, vehicle speed seen on accurate fixes: a departure", false,
+        onFoot(220.0, 300.0, peak = 15.0, gone = true, accurate = false))
     eq("no next stop: on foot", true, onFoot(null, null))
     eq("level with the stop (as far from the next as it): on foot", true, onFoot(300.0, 300.0))
     // Review of 3 Nov 2026: the line's own road may bend away from the next

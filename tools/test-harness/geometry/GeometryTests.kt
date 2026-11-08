@@ -258,6 +258,10 @@ fun main() {
     t("G15 behind the stop but an inaccurate fix, or vehicle speed since leaving: a departure, as before") {
         yes("inaccurate", departs(back, accurate = false))
         yes("vehicle speed seen", departs(back, peakKmh = 15.0))
+        // 7 Nov 2026 c: ours gone is the model's, by accurate fixes, not by this one.
+        yes("inaccurate, ours gone: on foot", !departs(back, accurate = false, oursGone = true))
+        yes("inaccurate ahead along the road, ours gone: on foot", !departs(ahead, accurate = false, oursGone = true))
+        yes("vehicle speed seen, ours gone: a departure", departs(ahead, accurate = false, peakKmh = 15.0, oursGone = true))
     }
 
     t("G16 straight off the road, across it, from the stop: on foot (2 Nov 2026 c); at vehicle speed, a departure") {

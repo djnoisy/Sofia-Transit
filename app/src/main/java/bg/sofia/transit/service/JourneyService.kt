@@ -146,6 +146,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * (resumesAboard). Well over the scatter of accurate fixes.
          */
         const val RESUME_NEARER_M = 20.0
+        /** How old the last accurate fix may be to stand for where we were taken to be on foot (onFootFrom). */
+        private const val FOOT_REF_MAX_AGE_MS = 30_000L
 
         /**
          * Road geometry (see [RouteGeometry]): a place on the road older than
@@ -235,11 +237,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         /**
          * Whether leaving a stop — DEPART_RADIUS from it — is on foot, so that
          * "Следваща спирка" is not said: at walking pace since leaving it
-         * ([peakKmh] under [vehicleKmh]) on an accurate fix, and either ours
-         * gone from us ([oursGone]: ridden with us, it has left without us),
-         * or, off the line's road ahead of the stop ([onRoadAhead] false), no
-         * nearer the next stop ([toNextNow], null: none) than the stop itself
-         * is ([stopToNext]) — the owner, 3 Nov 2026. A vehicle of the line
+         * ([peakKmh] under [vehicleKmh], measured on accurate fixes only), and
+         * either ours gone from us ([oursGone]: ridden with us, it has left
+         * without us), or, on an accurate fix ([accurateFix]), off the line's
+         * road ahead of the stop ([onRoadAhead] false) and no nearer the next
+         * stop ([toNextNow], null: none) than the stop itself is
+         * ([stopToNext]) — the owner, 3 Nov 2026. Ours gone needs no accurate
+         * fix now: the model tells it by accurate fixes and ours's reports,
+         * not by this fix, and not in ours the line's next stop is wrong
+         * whether we walk or ride something else — the 90 m were crossed on a
+         * fix of 43 m walking off from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, 76 600 m
+         * away, and "Следваща спирка, БЛ. 222" was said (7 Nov 2026, c; the
+         * owner, 8 Nov 2026). The place-based test reads this fix's place, so
+         * it still needs it accurate. A vehicle of the line
          * leaves towards the next stop, 76-96 m nearer at that point in the 14
          * departures of 2 Nov 2026, walking away 64-77 m further; but on its
          * own road too it may bend away first, through a U-turn or a loop (66
@@ -251,8 +261,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         internal fun leavingOnFoot(accurateFix: Boolean, peakKmh: Double, vehicleKmh: Double,
                                    toNextNow: Double?, stopToNext: Double?, onRoadAhead: Boolean,
                                    oursGone: Boolean): Boolean =
-            accurateFix && peakKmh < vehicleKmh &&
-                (oursGone || (!onRoadAhead && (toNextNow == null || stopToNext == null || toNextNow >= stopToNext)))
+            peakKmh < vehicleKmh &&
+                (oursGone || (accurateFix && !onRoadAhead &&
+                    (toNextNow == null || stopToNext == null || toNextNow >= stopToNext)))
 
         /**
          * Whether, having left a stop on foot, this fix says we were aboard
@@ -1108,6 +1119,10 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private var footRefLon = 0.0
     /** Vehicle speed while on foot, not bringing us back aboard, logged for this spell. */
     private var footHeldLogged = false
+    /** The last accurate fix (DEPARTURE_MAX_ACCURACY): place and phone time; 0 when none this journey. */
+    private var accurateLat = 0.0
+    private var accurateLon = 0.0
+    private var accurateAtMs = 0L
 
     /**
      * Between a journey's start and its end. Nothing may report the journey
@@ -1821,6 +1836,11 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         // metres, jumps about in a way that reads as vehicle speed.
         val accurateFix = loc.hasAccuracy() && loc.accuracy <= DEPARTURE_MAX_ACCURACY
         updateHeading(loc, accurateFix)
+        if (accurateFix) {
+            accurateLat = loc.latitude
+            accurateLon = loc.longitude
+            accurateAtMs = System.currentTimeMillis()
+        }
 
         // Where we are before departure, once the receiver has settled: the
         // point departure is measured from (see recordSpeed), and where we
@@ -2269,17 +2289,19 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     "(peak ${leavingPeakKmh.toInt()} km/h) — taken as alighted; announcements paused")
             }
 
-            // Left the stop. At walking pace on an accurate fix, with ours gone
-            // from us, or off the line's road ahead and no nearer the next stop
-            // than the stop itself is, that is someone on foot (leavingOnFoot):
+            // Left the stop. At walking pace, with ours gone from us, or on an
+            // accurate fix off the line's road ahead and no nearer the next
+            // stop than the stop itself is, that is someone on foot
+            // (leavingOnFoot):
             // walking 90 m back from ЦЕНТРАЛНИ ХАЛИ was announced as the tram
             // departing — "Следваща спирка, Младежки театър" (7 Oct 2026) — and
             // walking off sideways from МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ, 76 gone,
-            // "Следваща спирка, БЛ. 222" (2 Nov 2026 c). It is taken as at the
-            // chosen stop above: the stops fall silent unless vehicle speed
-            // follows. Anything else — faster, on the road ahead or nearer the
-            // next stop with ours not gone, an inaccurate fix — is a
-            // departure, as before.
+            // "Следваща спирка, БЛ. 222" (2 Nov 2026 c; and on a vague fix, 7
+            // Nov 2026 c). It is taken as at the chosen stop above: the stops
+            // fall silent unless vehicle speed follows. Anything else —
+            // faster, on the road ahead or nearer the next stop with ours not
+            // gone, an inaccurate fix with ours not gone — is a departure, as
+            // before.
             atStop && distTo(loc, currentIdx) > DEPART_RADIUS -> {
                 atStop = false
                 approachAnnounced = false
@@ -2301,6 +2323,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                         "(peak ${leavingPeakKmh.toInt()} km/h), " +
                         (if (oursGone) "ours gone from us" else "no nearer the next stop " +
                             "(${toNextNow?.toInt() ?: "-"} m, the stop ${stopToNext?.toInt() ?: "-"} m)") +
+                        (if (accurateFix) "" else ", on a vague fix (" +
+                            (if (loc.hasAccuracy()) "${loc.accuracy.toInt()} m" else "no accuracy") + ")") +
                         " — on foot; announcements paused")
                 } else if (currentIdx < orderedStops.lastIndex) {
                     currentIdx += 1
@@ -3510,12 +3534,24 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         destinationArrivedMs != 0L && destinationIdx == orderedStops.lastIndex &&
             currentIdx == orderedStops.lastIndex
 
-    /** On foot from the stop we are at, as of [loc] (handleLeftOnFoot). */
+    /**
+     * On foot from the stop we are at, as of [loc] (handleLeftOnFoot) — or,
+     * [loc] vague (ours gone from us: leavingOnFoot), as of the last accurate
+     * fix, if one came in the last FOOT_REF_MAX_AGE_MS: the place getting
+     * back aboard is measured from (resumesAboard) is not to be tens of
+     * metres out (7 Nov 2026, c: 43 m).
+     */
     private fun onFootFrom(loc: Location) {
         leftOnFoot = true
         footStopIdx = currentIdx
-        footRefLat = loc.latitude
-        footRefLon = loc.longitude
+        val vague = !loc.hasAccuracy() || loc.accuracy > DEPARTURE_MAX_ACCURACY
+        if (vague && accurateAtMs != 0L && System.currentTimeMillis() - accurateAtMs <= FOOT_REF_MAX_AGE_MS) {
+            footRefLat = accurateLat
+            footRefLon = accurateLon
+        } else {
+            footRefLat = loc.latitude
+            footRefLon = loc.longitude
+        }
         footHeldLogged = false
     }
 
@@ -4059,6 +4095,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         leavingPeakKmh = 0.0
         leftOnFoot = false
         footStopIdx = 0
+        accurateAtMs = 0L
         lastDwellHoldLogMs = 0L
         lastStopAnnouncement = null
         repeatGuardArmed = false
