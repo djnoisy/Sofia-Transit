@@ -1263,11 +1263,15 @@ app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolve
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: ViewGroup
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: databinding
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: itemCount
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: unresolved reference: notifyItemRangeChanged
+app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: variable expected

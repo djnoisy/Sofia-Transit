@@ -7,6 +7,7 @@ import androidx.recyclerview.widget.RecyclerView
 import bg.sofia.transit.data.repository.ArrivalInfo
 import bg.sofia.transit.databinding.ItemArrivalBinding
 import bg.sofia.transit.ui.common.LineBadge
+import bg.sofia.transit.util.ArrivalTimes
 import bg.sofia.transit.util.FileLogger
 
 class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
@@ -87,17 +88,22 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
                     routeColors[info.routeId])
                 val headsignText = if (info.dropOffOnly) "само слизане" else info.headsign
                 b.tvHeadsign.text = headsignText
-                // Timetable times are marked as such. They carry no traffic
+                // The nearest time under the badge, the next two under the
+                // direction, "мин" once after a run of minutes (the owner,
+                // 9 Nov 2026; ArrivalTimes); without "след" on screen (8 Nov
+                // 2026) — TalkBack still hears it (timesDesc below).
+                // Timetable times are marked as such: they carry no traffic
                 // information, so presenting them like live predictions would
                 // invite more trust than they deserve.
-                // On screen without "след" ("5 мин", not "след 5 мин"): to a
-                // sighted reader it adds nothing and takes room (the owner,
-                // 8 Nov 2026). TalkBack still hears it (timesDesc below).
-                val timesText = info.arrivals.joinToString("  •  ") { it.removePrefix("след ") }
-                b.tvTimes.text = if (info.scheduled && info.arrivals.isNotEmpty())
-                    "$timesText  (по разписание)"
-                else
-                    timesText
+                val shown = info.arrivals.take(3)
+                b.tvFirstTime.text = ArrivalTimes.first(shown)
+                val later = ArrivalTimes.later(shown)
+                val laterText = if (info.scheduled && shown.isNotEmpty())
+                    listOf(later, "(по разписание)").filter { it.isNotEmpty() }.joinToString(" ")
+                else later
+                b.tvLaterTimes.text = laterText
+                b.tvLaterTimes.visibility = if (laterText.isEmpty()) android.view.View.GONE
+                    else android.view.View.VISIBLE
 
                 val timesDesc = when (info.arrivals.size) {
                     0    -> "без информация"
