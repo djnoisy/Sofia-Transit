@@ -16,6 +16,7 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type f
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: overload resolution ambiguity: 
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<Boolean> was expected
@@ -38,7 +39,7 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: MenuItem
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: NavController
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: NavHostFragment
-app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: NavigationUI
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: NavOptions
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: R
@@ -90,11 +91,17 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: databinding
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: inject
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: invalidateOptionsMenu
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: isIndeterminate
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: it
@@ -349,12 +356,17 @@ app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: 'onCreate' 
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: 'onDestroy' overrides nothing
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: 'onInit' overrides nothing
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: 'onLocationResult' overrides nothing
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: 'onReceive' overrides nothing
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: AndroidEntryPoint
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Binder
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: BroadcastReceiver
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Build
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Build
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Context
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Context
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Context
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: ContextCompat
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: ContextCompat
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: FusedLocationProviderClient
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: IBinder
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Inject
@@ -364,6 +376,13 @@ app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved 
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Intent
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Intent
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Intent
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Intent
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Intent
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Intent
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Intent
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Intent
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Intent
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: IntentFilter
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Location
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Location
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Location
@@ -400,6 +419,8 @@ app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved 
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: POWER_SERVICE
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: PendingIntent
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: PendingIntent
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: PendingIntent
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: PendingIntent
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: Priority
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: R
@@ -432,6 +453,9 @@ app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved 
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: dagger
@@ -453,10 +477,12 @@ app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved 
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: mainLooper
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: onCreate
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: onDestroy
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: packageName
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: setReferenceCounted
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: startForeground
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: startForeground
 app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: stopSelf
+app/src/main/java/bg/sofia/transit/service/JourneyService.kt: error: unresolved reference: unregisterReceiver
 app/src/main/java/bg/sofia/transit/ui/board/StopBoardActivity.kt: error: 'onCreate' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/board/StopBoardActivity.kt: error: 'onSupportNavigateUp' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/board/StopBoardActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
@@ -651,17 +677,13 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: cannot 
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: suspend function 'directionsFor' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> ??? but FlowCollector<String> was expected
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<JourneyService.JourneyEvent> was expected
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<Map<String, String>> was expected
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<Set<String>> was expected
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference. None of the following candidates is applicable because of receiver type mismatch: 
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference. None of the following candidates is applicable because of receiver type mismatch: 
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference. None of the following candidates is applicable because of receiver type mismatch: 
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference. None of the following candidates is applicable because of receiver type mismatch: 
@@ -684,8 +706,6 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: LocationResult
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: LocationServices
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: Priority
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: R
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: Toast
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: Toast
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: Toast
@@ -760,7 +780,6 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: google
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: google
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: google
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: google
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: isFocusable
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: itemAnimator
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: layoutManager
@@ -771,7 +790,7 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: postDelayed
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: requireActivity
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: requireActivity
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: requireActivity
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: requireContext
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: requireContext
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: requireContext
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: requireContext
@@ -788,7 +807,6 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: viewModels
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: windowToken
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: variable expected

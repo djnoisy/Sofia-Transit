@@ -46,6 +46,8 @@ class JourneyFragment : Fragment() {
     private var lastLat = 0.0
     private var lastLon = 0.0
     private var hasLocation = false
+    /** Tracking at the last state seen: its end is seen as a change. */
+    private var wasTracking = false
 
     // Location is asked for only from the button: the first-run permissions
     // screen and Settings are where permissions are given. Notifications are
@@ -111,7 +113,24 @@ class JourneyFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { vm.tracking.collectLatest { render() } }
+                launch {
+                    vm.tracking.collectLatest { state ->
+                        val tracking = state is JourneyService.TrackingState.Tracking
+                        // A journey just ended, and the screen stays here
+                        // (no more a switch to "Спирки" — the owner, 9 Nov
+                        // 2026): the lines near where it ended, not the ones
+                        // near where it began, kept from before it. Nothing
+                        // else would load them: the screen is not resumed,
+                        // and the location is not updated again until the
+                        // passenger has walked 50 m.
+                        if (wasTracking && !tracking &&
+                            Permissions.hasAnyLocation(requireContext())) {
+                            startLocationAndLoad()
+                        }
+                        wasTracking = tracking
+                        render()
+                    }
+                }
                 launch { vm.selection.collectLatest { render() } }
                 launch {
                     vm.trolleyRouteIds.collect { ids ->
@@ -124,19 +143,6 @@ class JourneyFragment : Fragment() {
                 launch {
                     vm.error.collect { msg ->
                         Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
-                    }
-                }
-                // Destination reached → the journey has ended; take the user
-                // to the Stops tab as agreed.
-                launch {
-                    vm.journeyEvents.collect { ev ->
-                        when (ev) {
-                            // Both endings return the user to the Stops tab:
-                            // the journey is over either way.
-                            is JourneyService.JourneyEvent.DestinationReached,
-                            is JourneyService.JourneyEvent.RouteEnded ->
-                                goToStopsTab()
-                        }
                     }
                 }
             }
@@ -507,19 +513,6 @@ class JourneyFragment : Fragment() {
                     vm.loadUpcomingTrips(lastLat, lastLon)
                 }
             }
-        }
-    }
-
-    /** Switches the bottom navigation to the Stops tab. */
-    private fun goToStopsTab() {
-        try {
-            requireActivity()
-                .findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(
-                    bg.sofia.transit.R.id.bottomNav
-                )?.selectedItemId = bg.sofia.transit.R.id.nearbyFragment
-        } catch (e: Exception) {
-            bg.sofia.transit.util.FileLogger.e(
-                "JourneyFragment", "Could not switch to Stops tab: ${e.message}")
         }
     }
 

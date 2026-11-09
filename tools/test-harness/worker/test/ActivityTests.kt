@@ -323,6 +323,34 @@ fun main() {
         e.post(info(UUID.randomUUID(), F, INST, null, "result" to "failed", "visible" to true))
         eq("screens", 0, e.permissionScreens())
     }
+    // ── sections of the navigation bar (the owner, 9 Nov 2026) ──
+    val ID = bg.sofia.transit.R.id
+    fun nav() = androidx.navigation.fragment.NavHostFragment.last!!
+    t("N1 another section → only it on the back stack: back from it closes the app") {
+        val e = Env(); val bar = e.binding().bottomNav
+        bar.tap(ID.linesFragment)
+        eq("stack", listOf(ID.linesFragment), nav().stack); eq("marked", ID.linesFragment, bar.selectedItemId)
+        bar.tap(ID.journeyFragment); eq("stack", listOf(ID.journeyFragment), nav().stack)
+        bar.tap(ID.nearbyFragment); eq("stack", listOf(ID.nearbyFragment), nav().stack)
+    }
+    t("N2 each section keeps its own screens, back when it is chosen again") {
+        val e = Env(); val bar = e.binding().bottomNav
+        bar.tap(ID.linesFragment); nav().navigate(ID.directionsFragment)
+        bar.tap(ID.journeyFragment); eq("journey alone", listOf(ID.journeyFragment), nav().stack)
+        bar.tap(ID.linesFragment); eq("lines restored", listOf(ID.linesFragment, ID.directionsFragment), nav().stack)
+    }
+    t("N3 Settings over a section, another section chosen → Settings left, not back with the section") {
+        val e = Env(); val bar = e.binding().bottomNav
+        bar.tap(ID.linesFragment); e.act.onOptionsItemSelected(android.view.MenuItem(ID.actionSettings))
+        eq("settings shown", ID.settingsFragment, nav().currentDestination?.id)
+        bar.tap(ID.journeyFragment); eq("journey alone", listOf(ID.journeyFragment), nav().stack)
+        bar.tap(ID.linesFragment); eq("lines without settings", listOf(ID.linesFragment), nav().stack)
+    }
+    t("N4 Diagnostics over a section, the same section chosen → back to its screen") {
+        val e = Env(); val bar = e.binding().bottomNav
+        bar.tap(ID.linesFragment); e.act.onOptionsItemSelected(android.view.MenuItem(ID.actionDiagnostics))
+        bar.tap(ID.linesFragment); eq("stack", listOf(ID.linesFragment), nav().stack)
+    }
     println("\n$ok passed, ${bad.size} failed"); bad.forEach { println("  ✗ $it") }
     kotlin.system.exitProcess(if (bad.isEmpty()) 0 else 1)
 

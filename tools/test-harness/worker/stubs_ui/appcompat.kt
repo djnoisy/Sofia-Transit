@@ -45,5 +45,12 @@ open class AppCompatActivity : Context(TestEnv.files, TestEnv.assets), androidx.
     val started = mutableListOf<android.content.Intent>()
     fun startActivity(i: android.content.Intent) { started += i }
     open fun onCreate(savedInstanceState: android.os.Bundle?) {}
+    val menuInflater = android.view.MenuInflater()
+    fun setSupportActionBar(t: android.view.View?) {}
+    fun invalidateOptionsMenu() {}
+    open fun onCreateOptionsMenu(menu: android.view.Menu): Boolean = true
+    open fun onPrepareOptionsMenu(menu: android.view.Menu): Boolean = true
+    open fun onOptionsItemSelected(item: android.view.MenuItem): Boolean = false
+    open fun onSupportNavigateUp(): Boolean = false
     open fun onDestroy() { androidx.lifecycle.Registry.destroyed(this) }
 }

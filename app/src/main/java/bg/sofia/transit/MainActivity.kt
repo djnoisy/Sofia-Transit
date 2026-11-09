@@ -11,11 +11,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavController
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavOptions
 import androidx.navigation.fragment.NavHostFragment
 import androidx.core.view.ViewCompat
 import androidx.core.view.children
 import androidx.navigation.ui.AppBarConfiguration
-import androidx.navigation.ui.NavigationUI
 import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
@@ -90,7 +91,7 @@ class MainActivity : AppCompatActivity() {
         // nothing, as before.
         binding.bottomNav.setOnItemSelectedListener { item ->
             leaveSettingsAndDiagnostics()
-            NavigationUI.onNavDestinationSelected(item, navController)
+            openSection(item.itemId)
         }
         binding.bottomNav.setOnItemReselectedListener { leaveSettingsAndDiagnostics() }
 
@@ -150,6 +151,42 @@ class MainActivity : AppCompatActivity() {
             else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         listOf<View>(binding.appBar, binding.navHostFragment, binding.bottomNav)
             .forEach { it.importantForAccessibility = beneath }
+    }
+
+    /**
+     * A section of the navigation bar, in place of the one shown. The three
+     * are of equal rank (the owner, 9 Nov 2026): only the one shown is kept
+     * on the back stack, so "back" from its first screen closes the app, as
+     * in other apps — not first to "Спирки", which NavigationUI keeps beneath
+     * every other section. As before, a section's own screens are kept for
+     * it, and come back when it is chosen again.
+     *
+     * The section shown is the one whose first screen is on the back stack —
+     * not the one the bar marks, which after the app is brought back by the
+     * system may not be restored yet.
+     */
+    private fun openSection(id: Int): Boolean {
+        val shown = appBarConfig.topLevelDestinations.firstOrNull { section ->
+            try { navController.getBackStackEntry(section); true }
+            catch (_: IllegalArgumentException) { false }
+        } ?: binding.bottomNav.selectedItemId
+        val options = NavOptions.Builder()
+            .setLaunchSingleTop(true)
+            .setRestoreState(true)
+            .setPopUpTo(shown, inclusive = true, saveState = true)
+            // NavigationUI's own, so the change of section looks as before.
+            .setEnterAnim(androidx.navigation.ui.R.animator.nav_default_enter_anim)
+            .setExitAnim(androidx.navigation.ui.R.animator.nav_default_exit_anim)
+            .setPopEnterAnim(androidx.navigation.ui.R.animator.nav_default_pop_enter_anim)
+            .setPopExitAnim(androidx.navigation.ui.R.animator.nav_default_pop_exit_anim)
+            .build()
+        return try {
+            navController.navigate(id, null, options)
+            // As NavigationUI: the bar marks the section only if it is shown.
+            navController.currentDestination?.hierarchy?.any { it.id == id } == true
+        } catch (e: IllegalArgumentException) {
+            false
+        }
     }
 
     /** Back out of "Настройки" and "Диагностика", if on one of them. */

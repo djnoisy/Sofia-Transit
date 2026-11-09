@@ -100,9 +100,6 @@ class JourneyViewModel @Inject constructor(
     /** Journey state, straight from the single source of truth. */
     val tracking = JourneyService.trackingState
 
-    /** One-shot journey events (e.g. destination reached → go to Stops). */
-    val journeyEvents = JourneyService.events
-
     /** Trolley route set, so the list can label type=11 rows correctly. */
     private val _trolleyRouteIds = MutableStateFlow<Set<String>>(emptySet())
     val trolleyRouteIds: StateFlow<Set<String>> = _trolleyRouteIds

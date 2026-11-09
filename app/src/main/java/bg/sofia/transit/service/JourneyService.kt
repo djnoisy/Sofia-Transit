@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.os.Binder
@@ -14,6 +16,7 @@ import android.os.Build
 import android.os.IBinder
 import android.speech.tts.TextToSpeech
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import bg.sofia.transit.MainActivity
 import bg.sofia.transit.R
 import bg.sofia.transit.data.db.dao.StopWithSequence
@@ -44,9 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
 import java.util.UUID
@@ -88,6 +89,8 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         private const val TAG = "JourneyService"
         const val CHANNEL_ID = "journey_channel"
         const val NOTIF_ID   = 1001
+        /** The tracking notification swiped away (see [notifDismissed]). */
+        private const val ACTION_NOTIF_DISMISSED = "bg.sofia.transit.action.JOURNEY_NOTIFICATION_DISMISSED"
 
         /**
          * "At the stop" radius, measured as the crow flies.
@@ -628,11 +631,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         val trackingState: StateFlow<TrackingState> = _trackingState
 
         /**
-         * One-shot events the UI must react to (navigation), separate from
-         * state. Replay 0: an event missed while the app is backgrounded is
-         * not re-fired when it returns.
-         */
-        /**
          * Trip whose adoption was last spoken aloud.
          *
          * Deliberately here rather than on the instance: the point is to
@@ -642,9 +640,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
          * Cleared when a journey ends.
          */
         private var lastAnnouncedTripId: String? = null
-
-        private val _events = MutableSharedFlow<JourneyEvent>(extraBufferCapacity = 4)
-        val events: SharedFlow<JourneyEvent> = _events
 
         fun start(ctx: Context) =
             ctx.startForegroundService(Intent(ctx, JourneyService::class.java))
@@ -661,14 +656,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         SCHEDULE_ADJUSTED,
         /** Raw static timetable — no live data available at all. */
         SCHEDULE
-    }
-
-    /** One-shot journey events. */
-    sealed class JourneyEvent {
-        /** The chosen alighting stop was reached — UI should go to Stops. */
-        object DestinationReached : JourneyEvent()
-        /** The route's final stop was reached — the journey is over. */
-        object RouteEnded : JourneyEvent()
     }
 
     /** Immutable snapshot of the journey, re-emitted on every change. */
@@ -1670,7 +1657,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
 
         if (waited >= SNAP_GIVE_UP_MS) {
             announce("Няма достатъчно точен сигнал. Следенето се прекратява.")
-            _events.tryEmit(JourneyEvent.RouteEnded)
             endJourney()
             return false
         }
@@ -2268,7 +2254,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     if (nearest == orderedStops.lastIndex &&
                         destinationIdx != orderedStops.lastIndex) {
                         announce("Крайна спирка. Пристигнахте.")
-                        _events.tryEmit(JourneyEvent.RouteEnded)
                         endJourney()
                         return
                     }
@@ -2825,7 +2810,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
                     // least of all if the passenger in fact stayed aboard.
                     FileLogger.i(TAG, "Got off at the chosen stop, as the model concluded — journey over")
                     announce("Следенето приключи.")
-                    _events.tryEmit(JourneyEvent.DestinationReached)
                     endJourney()
                 } else {
                     end("Got off, as the model concluded", "Изглежда слязохте. Следенето се прекратява.")
@@ -2901,7 +2885,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             FileLogger.i(TAG, "$why — after \"Слизате тук\" at the chosen stop, the last, " +
                 "with $routeLabel not the line and direction chosen; journey over")
             announce("Следенето приключи.")
-            _events.tryEmit(JourneyEvent.DestinationReached)
             endJourney()
         } else {
             revokeIdentification(why)
@@ -3759,7 +3742,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             } else {
                 FileLogger.i(TAG, "5 min at the chosen stop without departing — journey over")
                 announce("Следенето приключи.")
-                _events.tryEmit(JourneyEvent.DestinationReached)
                 endJourney()
                 return
             }
@@ -3952,7 +3934,6 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
     private fun end(why: String, message: String) {
         FileLogger.i(TAG, "$why — ending journey automatically")
         announce(message)
-        _events.tryEmit(JourneyEvent.RouteEnded)
         endJourney()
     }
 
@@ -4917,7 +4898,9 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             }
         }
 
-        val notif = buildNotif("Следене на пътуването…")
+        ContextCompat.registerReceiver(this, notifDismissed,
+            IntentFilter(ACTION_NOTIF_DISMISSED), ContextCompat.RECEIVER_NOT_EXPORTED)
+        val notif = buildNotif(notifText)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
         } else {
@@ -4930,6 +4913,7 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
             journeyActive.also { journeyActive = false }
         }
         if (wasActive) closeTrace()
+        try { unregisterReceiver(notifDismissed) } catch (_: IllegalArgumentException) {}
         stopLocUpdates()
         releaseWakeLock()
         etaJob?.cancel()
@@ -4949,19 +4933,49 @@ class JourneyService : Service(), TextToSpeech.OnInitListener {
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
     }
 
+    /** What the notification says now: the last announcement. */
+    @Volatile private var notifText = "Следене на пътуването…"
+
+    /**
+     * The notification swiped away. Since Android 14 the user can dismiss
+     * even the notification of a foreground service, "ongoing" or not: the
+     * tracking went on with nothing left to show it, nor to come back to the
+     * app by (the owner, 9 Nov 2026). Put back at once while a journey runs;
+     * once it has ended the service is about to stop, taking it away anyway.
+     * A receiver of the service's own rather than a start of the service: it
+     * goes with the service, so a late swipe cannot start one again, with
+     * its notification and nothing to track.
+     */
+    private val notifDismissed = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (journeyActive) updateNotif(notifText)
+        }
+    }
+
     private fun buildNotif(text: String): Notification {
-        val pi = PendingIntent.getActivity(this, 0,
-            Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        // The app as it was left, as from its icon: the launcher's own
+        // intent brings its task to the front. A plain one to MainActivity
+        // put a second copy of the app on top of the first, its own sections
+        // and its own "back" (the owner, 9 Nov 2026).
+        val open = Intent(this, MainActivity::class.java)
+            .setAction(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        val pi = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE)
+        val dismissed = PendingIntent.getBroadcast(this, 1,
+            Intent(ACTION_NOTIF_DISMISSED).setPackage(packageName), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_bus)
             .setContentTitle("Градски транспорт")
             .setContentText(text)
             .setContentIntent(pi)
+            .setDeleteIntent(dismissed)
             .setOngoing(true)
             .build()
     }
 
     private fun updateNotif(text: String) {
+        notifText = text
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
             .notify(NOTIF_ID, buildNotif(text))
     }
