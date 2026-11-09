@@ -83,6 +83,14 @@ fun main(): Unit = runBlocking {
         eq("L8 on at start", listOf(true), runningAtStart); eq("L8 off at publish", listOf(false), runningAtDone)
         eq("L8 off after", false, loader.isRunning)
     }
+    // L9 — a run cancelled midway: not "refreshing" any more, nothing published.
+    run {
+        val own = kotlinx.coroutines.CoroutineScope(coroutineContext + kotlinx.coroutines.Job())
+        Rig(own).run {
+            at(0.0); own.coroutineContext[kotlinx.coroutines.Job]!!.cancel(); repeat(3) { yield() }
+            eq("L9 off", false, loader.isRunning); eq("L9 not published", 0, dones)
+        }
+    }
     // L6 — the phone's last known position: used only if at most 2 minutes old.
     eq("L6 now", true, NearbyLinesLoader.lastKnownUsable(0))
     eq("L6 2 min", true, NearbyLinesLoader.lastKnownUsable(120_000))

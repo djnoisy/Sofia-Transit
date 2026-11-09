@@ -79,20 +79,25 @@ class NearbyLinesLoader(
             distanceM(last.lat, last.lon, lat, lon) < MIN_MOVE_M) return
         job = scope.launch {
             isRunning = true
-            onStart()
-            var at = lat to lon
-            while (true) {
-                val ok = load(at.first, at.second)
-                if (ok) loaded = Loaded(at.first, at.second, nowMs())
-                val next = pending
-                pending = null
-                // After a failed load, the newer position is tried however
-                // close: nothing has been loaded to compare it with.
-                if (next == null || (ok &&
-                    distanceM(at.first, at.second, next.first, next.second) < MIN_MOVE_M)) break
-                at = next
+            // Off however the run ends — cancelled too (a time limit some
+            // day): "refreshing" would otherwise stay, "Обнови" disabled.
+            try {
+                onStart()
+                var at = lat to lon
+                while (true) {
+                    val ok = load(at.first, at.second)
+                    if (ok) loaded = Loaded(at.first, at.second, nowMs())
+                    val next = pending
+                    pending = null
+                    // After a failed load, the newer position is tried however
+                    // close: nothing has been loaded to compare it with.
+                    if (next == null || (ok &&
+                        distanceM(at.first, at.second, next.first, next.second) < MIN_MOVE_M)) break
+                    at = next
+                }
+            } finally {
+                isRunning = false
             }
-            isRunning = false
             onDone()
         }
     }
