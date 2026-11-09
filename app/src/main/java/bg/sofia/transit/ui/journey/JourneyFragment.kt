@@ -565,8 +565,14 @@ class JourneyFragment : Fragment() {
         }
     }
 
-    /** A position for the list: remembered, and the lines near it loaded. */
+    /**
+     * A position for the list: remembered, and the lines near it loaded —
+     * only with the screen in front. One answered late (the last known
+     * position, a fix already on its way) once the screen is left loads
+     * nothing (the owner, 9 Nov 2026).
+     */
     private fun usePosition(loc: android.location.Location) {
+        if (!isResumed) return
         lastLat = loc.latitude
         lastLon = loc.longitude
         hasLocation = true

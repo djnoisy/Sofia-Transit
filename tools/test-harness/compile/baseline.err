@@ -803,6 +803,7 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: google
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: google
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: isFocusable
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: isResumed
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: itemAnimator
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: layoutManager
