@@ -106,15 +106,25 @@ class JourneyFragment : Fragment() {
         // The keyboard lies over the window (the owner, 9 Nov 2026): while
         // it is open, room under the last line as tall as the part of the
         // list it covers, so the last lines scroll up above it. Nothing
-        // moves, and the room goes with the keyboard. From Android 11: older
-        // ones do not tell a window that is not resized how tall it is.
+        // moves, and the room goes with the keyboard. Where the window is
+        // drawn under the system bars (Android 15 on, the owner's phone):
+        // only there does the list learn the keyboard's height. Worked out
+        // again when the list is laid out anew — shown only once results
+        // came, with the keyboard already open (review of 9 Nov 2026).
         val listPadBottom = binding.rvUpcoming.paddingBottom
-        ViewCompat.setOnApplyWindowInsetsListener(binding.rvUpcoming) { v, insets ->
-            val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        var keyboard = 0
+        fun roomForKeyboard(v: View) {
             val at = IntArray(2).also { v.getLocationInWindow(it) }
             val below = v.rootView.height - (at[1] + v.height)   // the bars under the list
             v.updatePadding(bottom = listPadBottom + (keyboard - below).coerceAtLeast(0))
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(binding.rvUpcoming) { v, insets ->
+            keyboard = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            roomForKeyboard(v)
             insets
+        }
+        binding.rvUpcoming.addOnLayoutChangeListener { v, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (top != oldTop || bottom != oldBottom) roomForKeyboard(v)
         }
 
         binding.btnClearSearch.setOnClickListener {
