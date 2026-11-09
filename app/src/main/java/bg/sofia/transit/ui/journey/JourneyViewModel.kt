@@ -15,10 +15,13 @@ import bg.sofia.transit.service.JourneyService
 import bg.sofia.transit.util.FileLogger
 import bg.sofia.transit.util.LineSearch
 import bg.sofia.transit.util.LocationHelper
+import bg.sofia.transit.util.NearbyLinesLoader
 import bg.sofia.transit.util.VehicleLabels
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -207,115 +210,122 @@ class JourneyViewModel @Inject constructor(
 
     /** Last nearby result, reused when the search box is cleared. */
     private var nearbyChoices: List<LineChoice> = emptyList()
-    /** In-flight nearby load, so concurrent callers do not duplicate it. */
-    private var loadJob: kotlinx.coroutines.Job? = null
-    private var lastLat = 0.0
-    private var lastLon = 0.0
 
-    fun loadUpcomingTrips(lat: Double, lon: Double) {
+    /**
+     * One load at a time, for the newest position worth it — not the first
+     * to come, as before: that one could be the phone's last known position
+     * from elsewhere, with the fresh fix dropped (NearbyLinesLoader). Never
+     * two at once either: the screen's two sources of position (the last
+     * known one and the first fix) arrive together, and two loads each
+     * downloaded the same half-megabyte feed.
+     */
+    private val nearbyLoader = NearbyLinesLoader(
+        scope     = viewModelScope,
+        distanceM = LocationHelper::distanceMetres,
+        onStart   = { _selection.value = _selection.value.copy(refreshing = true, hasLocation = true) },
+        load      = { lat, lon -> loadNearbyChoices(lat, lon) },
+        // Whatever the user has typed, applied to the fresh data.
+        onDone    = { applyQuery(_selection.value.query, refreshing = false) }
+    )
+
+    /** [force]: "Обнови" — loaded again even for the same place. */
+    fun loadUpcomingTrips(lat: Double, lon: Double, force: Boolean = false) {
         if (tracking.value is JourneyService.TrackingState.Tracking) return
+        nearbyLoader.request(lat, lon, force)
+    }
 
-        // Guard against overlapping loads. The screen has two sources of
-        // position — the last known fix and the first live update — and they
-        // arrive within a millisecond of each other, so both fired a load and
-        // each downloaded the same half-megabyte feed before either could
-        // populate the cache. Guarding here covers every caller at once.
-        if (loadJob?.isActive == true) {
-            FileLogger.d(TAG, "Load already in progress; skipping duplicate")
-            return
-        }
+    /**
+     * The lines near a position into [nearbyChoices]; false if it failed
+     * (the list then empty, the search kept). Throws only when cancelled.
+     */
+    private suspend fun loadNearbyChoices(lat: Double, lon: Double): Boolean {
+        try {
+            // Every stop within NEARBY_RADIUS_M, using the same distance
+            // calculation as the Stops tab.
+            //
+            // Deliberately NOT pickClockStops: that keeps one stop per
+            // compass sector, which is right for the Stops tab, where the
+            // point is to orient the user around them. Here it silently
+            // dropped lines — around a metro station most stops share a
+            // bearing, so the sector filter discarded all but a couple and
+            // the list showed 7 lines when 10 stops were in range.
+            // Exactly the Stops tab's method: getNearestStops ordered by
+            // distance, then distances computed with LocationHelper — no
+            // sector filtering, which the Stops tab does not do either.
+            // The only addition is the radius: a line whose stop is half a
+            // kilometre away is not one you are about to board.
+            // Not read while an import is replacing the tables: names and
+            // numbers would come back missing and identifiers would reach
+            // the screen in their place.
+            if (!gtfsRepo.dataReady.value) gtfsRepo.dataReady.first { it }
 
-        lastLat = lat
-        lastLon = lon
+            val stopInfo = gtfsRepo.getNearestStops(lat, lon, limit = MAX_STOPS)
+                .map { stop ->
+                    stop to LocationHelper.distanceMetres(
+                        lat, lon, stop.stopLat, stop.stopLon)
+                }
+                .filter { (_, metres) -> metres <= NEARBY_RADIUS_M }
+                .associate { (stop, metres) ->
+                    stop.stopId to Pair(stop.stopName, metres)
+                }
+            if (stopInfo.isEmpty()) {
+                nearbyChoices = emptyList()
+                return true
+            }
 
-        _selection.value = _selection.value.copy(refreshing = true, hasLocation = true)
+            val raw = realtimeRepo.getUpcomingTripsForStops(
+                stopInfo.keys, withinMinutes = WITHIN_MINUTES)
+            val resolved = gtfsRepo.resolveUpcomingTrips(raw, stopInfo)
 
-        loadJob = viewModelScope.launch {
-            try {
-                // Every stop within NEARBY_RADIUS_M, using the same distance
-                // calculation as the Stops tab.
-                //
-                // Deliberately NOT pickClockStops: that keeps one stop per
-                // compass sector, which is right for the Stops tab, where the
-                // point is to orient the user around them. Here it silently
-                // dropped lines — around a metro station most stops share a
-                // bearing, so the sector filter discarded all but a couple and
-                // the list showed 7 lines when 10 stops were in range.
-                // Exactly the Stops tab's method: getNearestStops ordered by
-                // distance, then distances computed with LocationHelper — no
-                // sector filtering, which the Stops tab does not do either.
-                // The only addition is the radius: a line whose stop is half a
-                // kilometre away is not one you are about to board.
-                // Not read while an import is replacing the tables: names and
-                // numbers would come back missing and identifiers would reach
-                // the screen in their place.
-                if (!gtfsRepo.dataReady.value) gtfsRepo.dataReady.first { it }
+            // The same endpoint pairs the Lines screen shows: the two
+            // busiest headsigns of the route, joined. Preferred over
+            // route_long_name, which repeats the start at the end
+            // ("Ж.К. Младост-1 - Бул. Никола Петков - Ж.К. Младост-1").
+            val subtitles = gtfsRepo.getRouteSubtitles()
 
-                val stopInfo = gtfsRepo.getNearestStops(lat, lon, limit = MAX_STOPS)
-                    .map { stop ->
-                        stop to LocationHelper.distanceMetres(
-                            lat, lon, stop.stopLat, stop.stopLon)
-                    }
-                    .filter { (_, metres) -> metres <= NEARBY_RADIUS_M }
-                    .associate { (stop, metres) ->
-                        stop.stopId to Pair(stop.stopName, metres)
-                    }
-                if (stopInfo.isEmpty()) {
-                    nearbyChoices = emptyList()
-                    _selection.value = SelectionState(hasLocation = true)
-                    return@launch
+            // Nearby lines come from the realtime feed, which also carries
+            // routes that have no static stop_times. They cannot be
+            // tracked, so they are dropped here as well as in search.
+            val trackable = gtfsRepo.trackableRouteIds()
+
+            // One row per LINE, not per direction. Two reasons: a line
+            // with both directions in range used to eat two of the ten
+            // slots, and — more importantly — if only one direction
+            // happened to be in the feed, the other was unreachable even
+            // though the user might want exactly it. The direction is
+            // asked for on tap, as it already is for search results.
+            //
+            // tripId and boardingStopId are deliberately dropped: they
+            // belong to one particular arrival, possibly in the other
+            // direction, and the vehicle is matched by position at start
+            // anyway.
+            nearbyChoices = resolved
+                .filter { it.routeId in trackable }
+                .groupBy { it.routeId }
+                .map { (_, arrivals) -> arrivals.minBy { it.stopDistanceMetres } }
+                .sortedBy { it.stopDistanceMetres }
+                .take(MAX_LINES)
+                .map { t ->
+                    LineChoice(
+                        routeId        = t.routeId,
+                        routeShortName = t.routeShortName,
+                        routeType      = t.routeType,
+                        headsign       = null,
+                        routeSubtitle  = subtitles[t.routeId].orEmpty(),
+                        isNearby       = true
+                    )
                 }
 
-                val raw = realtimeRepo.getUpcomingTripsForStops(
-                    stopInfo.keys, withinMinutes = WITHIN_MINUTES)
-                val resolved = gtfsRepo.resolveUpcomingTrips(raw, stopInfo)
-
-                // The same endpoint pairs the Lines screen shows: the two
-                // busiest headsigns of the route, joined. Preferred over
-                // route_long_name, which repeats the start at the end
-                // ("Ж.К. Младост-1 - Бул. Никола Петков - Ж.К. Младост-1").
-                val subtitles = gtfsRepo.getRouteSubtitles()
-
-                // Nearby lines come from the realtime feed, which also carries
-                // routes that have no static stop_times. They cannot be
-                // tracked, so they are dropped here as well as in search.
-                val trackable = gtfsRepo.trackableRouteIds()
-
-                // One row per LINE, not per direction. Two reasons: a line
-                // with both directions in range used to eat two of the ten
-                // slots, and — more importantly — if only one direction
-                // happened to be in the feed, the other was unreachable even
-                // though the user might want exactly it. The direction is
-                // asked for on tap, as it already is for search results.
-                //
-                // tripId and boardingStopId are deliberately dropped: they
-                // belong to one particular arrival, possibly in the other
-                // direction, and the vehicle is matched by position at start
-                // anyway.
-                nearbyChoices = resolved
-                    .filter { it.routeId in trackable }
-                    .groupBy { it.routeId }
-                    .map { (_, arrivals) -> arrivals.minBy { it.stopDistanceMetres } }
-                    .sortedBy { it.stopDistanceMetres }
-                    .take(MAX_LINES)
-                    .map { t ->
-                        LineChoice(
-                            routeId        = t.routeId,
-                            routeShortName = t.routeShortName,
-                            routeType      = t.routeType,
-                            headsign       = null,
-                            routeSubtitle  = subtitles[t.routeId].orEmpty(),
-                            isNearby       = true
-                        )
-                    }
-
-                // Keep whatever the user has typed applied to the fresh data.
-                applyQuery(_selection.value.query, refreshing = false)
-            } catch (e: Exception) {
-                FileLogger.e(TAG, "loadUpcomingTrips failed: ${e.message}")
-                _error.emit("Грешка при зареждане: ${e.message ?: "няма връзка"}")
-                _selection.value = SelectionState(hasLocation = true)
-            }
+            return true
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: Exception) {
+            FileLogger.e(TAG, "loadUpcomingTrips failed: ${e.message}")
+            _error.emit("Грешка при зареждане: ${e.message ?: "няма връзка"}")
+            // The list empty, as before — but no longer the search with
+            // it: the text typed stays in the field, and its results too.
+            nearbyChoices = emptyList()
+            return false
         }
     }
 
@@ -324,7 +334,16 @@ class JourneyViewModel @Inject constructor(
         applyQuery(query, refreshing = _selection.value.refreshing)
     }
 
+    /**
+     * The search running. A new key — or "Изчисти" — stops it: searches
+     * started one after another could end in another order, and the results
+     * for an earlier text (even one cleared) replaced those for the text in
+     * the field (the owner, 9 Nov 2026).
+     */
+    private var searchJob: Job? = null
+
     private fun applyQuery(query: String, refreshing: Boolean) {
+        searchJob?.cancel()
         if (query.isBlank()) {
             _selection.value = SelectionState(
                 choices    = nearbyChoices,
@@ -336,7 +355,7 @@ class JourneyViewModel @Inject constructor(
             return
         }
 
-        viewModelScope.launch {
+        searchJob = viewModelScope.launch {
             try {
                 // Search covers the WHOLE network, not just what is nearby —
                 // the case the search box exists for is being already aboard,
@@ -373,6 +392,7 @@ class JourneyViewModel @Inject constructor(
                         )
                 }
 
+                ensureActive()
                 _selection.value = SelectionState(
                     choices     = choices,
                     refreshing  = refreshing,
@@ -380,6 +400,8 @@ class JourneyViewModel @Inject constructor(
                     query       = query,
                     searching   = true
                 )
+            } catch (ce: CancellationException) {
+                throw ce
             } catch (e: Exception) {
                 FileLogger.e(TAG, "search failed: ${e.message}")
             }

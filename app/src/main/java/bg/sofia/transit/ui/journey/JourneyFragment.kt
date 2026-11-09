@@ -14,6 +14,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.databinding.FragmentJourneyBinding
 import bg.sofia.transit.service.JourneyService
+import bg.sofia.transit.util.NearbyLinesLoader
 import bg.sofia.transit.util.PermissionRequester
 import bg.sofia.transit.util.Permissions
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -96,7 +97,7 @@ class JourneyFragment : Fragment() {
         })
 
         binding.btnRefresh.setOnClickListener {
-            if (hasLocation) vm.loadUpcomingTrips(lastLat, lastLon)
+            if (hasLocation) vm.loadUpcomingTrips(lastLat, lastLon, force = true)
         }
         binding.btnEndJourney.setOnClickListener { vm.endJourney() }
         binding.btnChooseDestination.setOnClickListener { showDestinationPicker() }
@@ -493,7 +494,12 @@ class JourneyFragment : Fragment() {
     private fun startLocationAndLoad() {
         fusedClient = LocationServices.getFusedLocationProviderClient(requireContext())
         fusedClient.lastLocation.addOnSuccessListener { loc ->
-            if (loc != null && vm.tracking.value !is JourneyService.TrackingState.Tracking) {
+            // Only a recent one: an older one may be from somewhere else —
+            // then "Определяне на местоположение…" until the fresh fix,
+            // rather than the lines of another place (the owner, 9 Nov 2026).
+            if (loc != null && NearbyLinesLoader.lastKnownUsable(
+                    (android.os.SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000) &&
+                vm.tracking.value !is JourneyService.TrackingState.Tracking) {
                 lastLat = loc.latitude
                 lastLon = loc.longitude
                 hasLocation = true

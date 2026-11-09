@@ -8,6 +8,8 @@ import bg.sofia.transit.data.repository.GtfsRepository
 import bg.sofia.transit.util.LocationHelper
 import bg.sofia.transit.util.LocationHelper.StopWithDistance
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -44,6 +46,19 @@ class NearbyViewModel @Inject constructor(
     /** Holds the most recent location received while data was still loading. */
     private var pendingLocation: Location? = null
 
+    /**
+     * The query running. Only the latest position counts: a new one stops
+     * the one before, which, ending later, could put back the stops of the
+     * previous position — and announce them a second time (the owner,
+     * 9 Nov 2026).
+     */
+    private var queryJob: Job? = null
+
+    private fun query(lat: Double, lon: Double) {
+        queryJob?.cancel()
+        queryJob = viewModelScope.launch { doQuery(lat, lon) }
+    }
+
     init {
         // When the GTFS import finishes (or is confirmed already loaded),
         // replay any location update that arrived during the loading window.
@@ -56,9 +71,9 @@ class NearbyViewModel @Inject constructor(
                 val pending = pendingLocation
                 if (pending != null) {
                     pendingLocation = null
-                    doQuery(pending.latitude, pending.longitude)
+                    query(pending.latitude, pending.longitude)
                 } else if (hasQueried) {
-                    doQuery(lastQueryLat, lastQueryLon)
+                    query(lastQueryLat, lastQueryLon)
                 }
             }
         }
@@ -79,7 +94,7 @@ class NearbyViewModel @Inject constructor(
             if (moved < MIN_MOVE_METRES) return
         }
 
-        viewModelScope.launch { doQuery(lat, lon) }
+        query(lat, lon)
     }
 
     private suspend fun doQuery(lat: Double, lon: Double) {
@@ -95,6 +110,8 @@ class NearbyViewModel @Inject constructor(
             lastQueryLat = lat
             lastQueryLon = lon
             hasQueried = true
+        } catch (ce: CancellationException) {
+            throw ce
         } catch (e: Exception) {
             _error.emit("Грешка при зареждане на спирки: ${e.message}")
         }

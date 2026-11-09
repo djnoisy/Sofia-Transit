@@ -779,6 +779,7 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: androidx
@@ -913,29 +914,23 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspen
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'emit' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'emit' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'emit' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'emit' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'first' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'first' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getDirectionHeadsigns' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getNearestStops' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getRemainingStops' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getRouteColors' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getRouteSubtitles' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getRouteSubtitles' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getStopById' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getStopById' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getStopsForRouteDirection' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getStopsForRouteDirection' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getTrackableRoutes' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'getUpcomingTripsForStops' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'isTrolleyRoute' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'isTrolleyRoute' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'resolveUpcomingTrips' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'trackableRouteIds' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'trolleyRouteIds' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: suspend function 'withTimeout' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<JourneyService.TrackingState> was expected
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: unresolved reference. None of the following candidates is applicable because of receiver type mismatch: 
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: unresolved reference: AndroidViewModel
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: unresolved reference: Application
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyViewModel.kt: error: unresolved reference: Application
@@ -1470,9 +1465,9 @@ app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: unre
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: unresolved reference: databinding
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: unresolved reference: google
-app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: unresolved reference: lifecycle
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: unresolved reference: onDestroyView
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: unresolved reference: onViewCreated
+app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyStopsFragment.kt: error: variable expected
@@ -1545,8 +1540,6 @@ app/src/main/java/bg/sofia/transit/ui/nearby/NearbyTabFragment.kt: error: variab
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyTabFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyViewModel.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyViewModel.kt: error: suspend function 'collect' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/nearby/NearbyViewModel.kt: error: suspend function 'doQuery' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/nearby/NearbyViewModel.kt: error: suspend function 'doQuery' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyViewModel.kt: error: suspend function 'doQuery' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyViewModel.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/nearby/NearbyViewModel.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<Boolean> was expected

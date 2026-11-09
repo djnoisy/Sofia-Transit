@@ -36,7 +36,10 @@ class NearbyStopsFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
 
-        binding.viewPager.adapter = StopsTabsAdapter(childFragmentManager, lifecycle)
+        // Tied to the screen's view, not the section: the section outlives
+        // its view (kept beneath the others), and each return to it held on
+        // to the view before (9 Nov 2026).
+        binding.viewPager.adapter = StopsTabsAdapter(childFragmentManager, viewLifecycleOwner.lifecycle)
 
         TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
             tab.text = when (position) {
