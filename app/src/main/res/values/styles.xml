@@ -5,10 +5,10 @@
 <resources>
 
     <!-- The top app bar: screen title, "Настройки", and "Диагностика" under
-         the overflow. Set apart from the content by its container colour
-         and a divider below it (activity_main.xml). -->
+         the overflow. On the navigation bar's background (colorNavBar), set
+         apart from the content by it, with no line (the owner, 9 Nov 2026). -->
     <style name="Widget.SofiaTransit.Toolbar" parent="Widget.Material3.Toolbar.Surface">
-        <item name="android:background">?attr/colorSurfaceContainer</item>
+        <item name="android:background">?attr/colorNavBar</item>
         <item name="titleTextAppearance">@style/TextAppearance.SofiaTransit.AppBarTitle</item>
     </style>
 

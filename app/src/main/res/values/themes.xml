@@ -53,7 +53,7 @@
         <item name="lineDividerWidth">1dp</item>
 
         <item name="android:windowBackground">@color/md_surface</item>
-        <item name="android:statusBarColor">@color/md_surface_container</item>
+        <item name="android:statusBarColor">@color/nav_bar_bg</item>
         <item name="android:navigationBarColor">@color/nav_bar</item>
         <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_system_bars</item>
