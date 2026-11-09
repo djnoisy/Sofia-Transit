@@ -38,5 +38,9 @@
 
     <color name="arrival_time">#7FD88F</color>
     <bool name="light_system_bars">false</bool>
+    <!-- Active section: the primary's tone 40, 2.5:1 lighter than the bar;
+         icon and label tone 95 on it (5.7:1). -->
+    <color name="nav_active">#405F90</color>
+    <color name="on_nav_active">#ECF0FF</color>
     <color name="nav_bar">@color/md_surface_container</color>
 </resources>

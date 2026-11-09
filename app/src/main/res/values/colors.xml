@@ -45,6 +45,13 @@
 
     <!-- Arrival times and the like: green, 4.5:1 or more on the surfaces. -->
     <color name="arrival_time">#146C2E</color>
+    <!-- The active section of the navigation bar (the owner, 9 Nov 2026):
+         the primary's tone 70 — the same blue, set apart from the bar by its
+         lightness (2:1 on it), so also for those who do not tell colours
+         apart; icon and label tone 10 on it (7.5:1). -->
+    <color name="nav_active">#8EACE3</color>
+    <color name="on_nav_active">#001B3D</color>
+
     <!-- Status and navigation bar icons dark on light. -->
     <bool name="light_system_bars">true</bool>
     <!-- The navigation bar: black before Android 8.1, which cannot draw its

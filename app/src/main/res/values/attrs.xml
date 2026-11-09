@@ -4,6 +4,10 @@
     <attr name="colorArrivalTime" format="color"/>
     <!-- Hints in text fields: apart from text typed in (cyan in high contrast). -->
     <attr name="colorHintText" format="color"/>
+    <!-- The active section of the navigation bar: its background, and its
+         icon and label on it (the owner, 9 Nov 2026). -->
+    <attr name="colorNavActive" format="color"/>
+    <attr name="colorOnNavActive" format="color"/>
     <!-- Width of dividers and card outlines: 1dp, 2dp in high contrast. -->
     <attr name="lineDividerWidth" format="dimension"/>
 </resources>

@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A section of the navigation bar: a ripple when touched (a custom item
-     background replaces Material's own), over the line marking the active
-     one (bg_nav_item_state). -->
+<!-- A section of the navigation bar: a ripple over the whole section when
+     touched (a custom item background replaces Material's own; the mask
+     keeps it visible on the sections with no background), over the active
+     section's background (bg_nav_item_state). -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="?attr/colorControlHighlight">
     <item android:drawable="@drawable/bg_nav_item_state"/>
+    <item android:id="@android:id/mask" android:drawable="@android:color/white"/>
 </ripple>

@@ -1,18 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A section of the navigation bar: the active one marked by a line in the
-     primary colour along its top edge (the colour of icon and label alone
-     differs little from the others'). -->
+<!-- A section of the navigation bar: the active one on a background of its
+     own (colorNavActive) — a rounded field behind icon and label, apart
+     from the bar by its lightness (the owner, 9 Nov 2026; was a line above
+     it). -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_checked="true">
-        <layer-list>
-            <item android:gravity="top|fill_horizontal" android:height="4dp"
-                android:left="20dp" android:right="20dp">
-                <shape android:shape="rectangle">
-                    <solid android:color="?attr/colorPrimary"/>
-                    <corners android:bottomLeftRadius="2dp" android:bottomRightRadius="2dp"/>
-                </shape>
-            </item>
-        </layer-list>
+        <inset android:insetLeft="6dp" android:insetRight="6dp"
+            android:insetTop="6dp" android:insetBottom="6dp">
+            <shape android:shape="rectangle">
+                <solid android:color="?attr/colorNavActive"/>
+                <corners android:radius="16dp"/>
+            </shape>
+        </inset>
     </item>
     <item android:drawable="@android:color/transparent"/>
 </selector>

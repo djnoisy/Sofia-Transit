@@ -16,11 +16,10 @@
         <item name="android:textStyle">bold</item>
     </style>
 
-    <!-- The navigation bar at the bottom, flat, as in Viber or Moovit (the
-         owner, 9 Nov 2026): no pill; the active section's icon and label in
-         the primary colour, the label bold, a line above it
-         (bg_nav_item); the others in onSurfaceVariant. Labels always shown,
-         14sp. -->
+    <!-- The navigation bar at the bottom, as in Viber or Moovit (the owner,
+         9 Nov 2026): the active section on a background of its own — a
+         rounded field the width of the section (bg_nav_item), the label
+         bold; the others in onSurfaceVariant. Labels always shown, 14sp. -->
     <style name="Widget.SofiaTransit.BottomNavigation" parent="Widget.Material3.BottomNavigationView">
         <item name="backgroundTint">?attr/colorSurfaceContainer</item>
         <item name="labelVisibilityMode">labeled</item>

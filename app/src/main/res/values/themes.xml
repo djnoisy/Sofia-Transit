@@ -46,6 +46,8 @@
         <item name="colorSurfaceContainerHighest">@color/md_surface_container_highest</item>
 
         <item name="colorArrivalTime">@color/arrival_time</item>
+        <item name="colorNavActive">@color/nav_active</item>
+        <item name="colorOnNavActive">@color/on_nav_active</item>
         <item name="colorHintText">@color/md_on_surface_variant</item>
         <item name="lineDividerWidth">1dp</item>
 
@@ -114,6 +116,8 @@
         <item name="android:textColorHint">@color/hc_cyan</item>
 
         <item name="colorArrivalTime">@color/hc_green</item>
+        <item name="colorNavActive">@color/hc_yellow</item>
+        <item name="colorOnNavActive">@color/hc_black</item>
         <item name="colorHintText">@color/hc_cyan</item>
         <item name="lineDividerWidth">2dp</item>
 

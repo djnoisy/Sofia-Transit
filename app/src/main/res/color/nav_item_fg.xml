@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Navigation bar icons and labels: the active section in the primary
-     colour (5.5:1 on the bar in light, 9.6:1 in dark, yellow in high
-     contrast), the others in onSurfaceVariant. -->
+<!-- Navigation bar icons and labels: the active section's on its background
+     (colorOnNavActive), the others in onSurfaceVariant. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_checked="true" android:color="?attr/colorPrimary"/>
+    <item android:state_checked="true" android:color="?attr/colorOnNavActive"/>
     <item android:color="?attr/colorOnSurfaceVariant"/>
 </selector>
