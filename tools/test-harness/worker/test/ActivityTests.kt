@@ -19,7 +19,8 @@ fun eq(w: String, e: Any?, a: Any?) { if (e != a) throw AssertionError("$w: expe
 fun yes(w: String, c: Boolean) { if (!c) throw AssertionError(w) }
 
 class Env(dbReady: Boolean = true, taskRoot: Boolean = true,
-          launch: android.content.Intent = android.content.Intent.launcher()) {
+          launch: android.content.Intent = android.content.Intent.launcher(),
+          tracking: Boolean = false, restored: Boolean = false) {
     val root = kotlin.io.path.createTempDirectory("ui").toFile()
     init { TestEnv.files = File(root, "f").apply { mkdirs() }; TestEnv.assets = File(root, "a").apply { mkdirs() }
         Dialogs.all.clear(); A11y.spoken.clear(); WorkManager.INSTANCE.enqueued.clear()
@@ -31,7 +32,9 @@ class Env(dbReady: Boolean = true, taskRoot: Boolean = true,
     val repo = GtfsRepository(act)
     init { if (dbReady) repo.db = "bundled:x"; act.gtfsRepo = repo
         android.os.Build.VERSION.SDK_INT = 34; act.isTaskRoot = taskRoot; act.intent = launch
-        act.onCreate(null) }
+        if (tracking) bg.sofia.transit.service.JourneyService._trackingState.value =
+            bg.sofia.transit.service.JourneyService.TrackingState.Tracking()
+        act.onCreate(if (restored) android.os.Bundle() else null) }
     fun post(vararg i: WorkInfo) = WorkManager.INSTANCE.live.post(i.toList())
     fun showing() = Dialogs.all.filter { it.isShowing }
     fun only(): AlertDialog { val s = showing(); eq("dialogs showing", 1, s.size); return s[0] }
@@ -369,6 +372,16 @@ fun main() {
         val f = Env(taskRoot = false, launch = android.content.Intent(null, null))
         yes("another intent: kept", !f.act.finished)
         val g = Env(); yes("the first of its task: kept", !g.act.finished)
+    }
+    t("N7 opened anew during a journey → straight to Пътуване; back from it → out of the app") {
+        val e = Env(tracking = true)
+        eq("stack", listOf(ID.nearbyFragment, ID.journeyFragment), nav().stack)
+        eq("marked", ID.journeyFragment, e.binding().bottomNav.selectedItemId)
+        e.back(); yes("out", e.act.movedToBack)
+    }
+    t("N8 brought back as left during a journey, or opened anew without one → not switched") {
+        Env(tracking = true, restored = true); eq("restored", listOf(ID.nearbyFragment), nav().stack)
+        Env(); eq("no journey", listOf(ID.nearbyFragment), nav().stack)
     }
     println("\n$ok passed, ${bad.size} failed"); bad.forEach { println("  ✗ $it") }
     kotlin.system.exitProcess(if (bad.isEmpty()) 0 else 1)

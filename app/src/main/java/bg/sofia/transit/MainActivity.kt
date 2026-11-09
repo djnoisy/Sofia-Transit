@@ -122,6 +122,15 @@ class MainActivity : AppCompatActivity() {
             sectionBack.isEnabled = destination.id in appBarConfig.topLevelDestinations
         }
 
+        // Opened anew while a journey is tracked (the app removed from the
+        // recent ones, closed by "back" before Android 12…): straight to
+        // "Пътуване", not "Спирки" (the owner, 9 Nov 2026). Not when brought
+        // back by the system as it was left: then the screen left is shown.
+        if (savedInstanceState == null &&
+            JourneyService.trackingState.value is JourneyService.TrackingState.Tracking) {
+            binding.bottomNav.selectedItemId = R.id.journeyFragment
+        }
+
         // No description of the bar as a whole: TalkBack read it as an element
         // of its own, "Главно меню: …", before the sections — a menu, not a
         // navigation bar as in other apps (the owner, 9 Nov 2026). Each

@@ -64,6 +64,7 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: TextView
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: View
@@ -139,6 +140,7 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: setupActionBarWithNavController
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: startActivity
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: supportFragmentManager
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: variable expected

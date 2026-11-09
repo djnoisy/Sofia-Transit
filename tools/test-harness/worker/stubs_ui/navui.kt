@@ -19,8 +19,8 @@ object NavigationUI {
 fun BottomNavigationView.setupWithNavController(c: NavController) {
     val sections = setOf(bg.sofia.transit.R.id.nearbyFragment, bg.sofia.transit.R.id.linesFragment,
         bg.sofia.transit.R.id.journeyFragment)
-    selectedItemId = bg.sofia.transit.R.id.nearbyFragment
-    c.addOnDestinationChangedListener { _, d, _ -> if (d.id in sections) selectedItemId = d.id }
+    check(bg.sofia.transit.R.id.nearbyFragment)
+    c.addOnDestinationChangedListener { _, d, _ -> if (d.id in sections) check(d.id) }
 }
 fun androidx.appcompat.app.AppCompatActivity.setupActionBarWithNavController(
     c: NavController, cfg: AppBarConfiguration) {}
