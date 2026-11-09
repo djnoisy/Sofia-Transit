@@ -1,9 +1,12 @@
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: 'handleOnBackPressed' overrides nothing
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: 'onCreate' overrides nothing
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: 'onCreateOptionsMenu' overrides nothing
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: 'onDestroy' overrides nothing
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: 'onOptionsItemSelected' overrides nothing
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: 'onPrepareOptionsMenu' overrides nothing
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: 'onSupportNavigateUp' overrides nothing
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
@@ -31,15 +34,21 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: AndroidEntryPoint
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: AppBarConfiguration
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: AppCompatActivity
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: Build
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: Build
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: Bundle
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: Inject
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: Intent
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: Intent
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: Intent
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: Lifecycle
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: Menu
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: Menu
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: MenuItem
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: NavController
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: NavHostFragment
-app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: NavOptions
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: NavigationUI
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: OnBackPressedCallback
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: R
@@ -75,10 +84,8 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
@@ -98,10 +105,14 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: databinding
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: finish
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: finish
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: inject
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: intent
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: invalidateOptionsMenu
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: isEnabled
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: isIndeterminate
-app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: it
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: isTaskRoot
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: it
@@ -112,9 +123,12 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: layoutInflater
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: lifecycleScope
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: menuInflater
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: moveTaskToBack
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: onBackPressedDispatcher
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: onCreate
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: onDestroy
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: onOptionsItemSelected
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: onPrepareOptionsMenu
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: onPrepareOptionsMenu
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: onSupportNavigateUp
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: repeatOnLifecycle
@@ -700,6 +714,7 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: FusedLocationProviderClient
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: LayoutInflater
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: Lifecycle
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: Lifecycle
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: LinearLayoutManager
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: LocationCallback
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: LocationRequest
@@ -802,6 +817,7 @@ app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: requireContext
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: requireContext
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: submitList
+app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/journey/JourneyFragment.kt: error: unresolved reference: viewLifecycleOwner

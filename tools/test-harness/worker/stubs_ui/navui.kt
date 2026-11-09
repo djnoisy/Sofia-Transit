@@ -1,13 +1,19 @@
 package androidx.navigation.ui
+import android.view.MenuItem
 import androidx.navigation.NavController
+import androidx.navigation.NavOptions
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
-object R { object animator {
-    const val nav_default_enter_anim = 1; const val nav_default_exit_anim = 2
-    const val nav_default_pop_enter_anim = 3; const val nav_default_pop_exit_anim = 4
-} }
-
 class AppBarConfiguration(val topLevelDestinations: Set<Int>)
+
+/** As the library: a section over the start one, which stays beneath, saved and restored. */
+object NavigationUI {
+    fun onNavDestinationSelected(item: MenuItem, c: NavController): Boolean {
+        c.navigate(item.itemId, null, NavOptions.Builder().setLaunchSingleTop(true).setRestoreState(true)
+            .setPopUpTo(bg.sofia.transit.R.id.nearbyFragment, inclusive = false, saveState = true).build())
+        return c.currentDestination?.id == item.itemId
+    }
+}
 
 /** As the library: the bar marks the section whose first screen is shown. */
 fun BottomNavigationView.setupWithNavController(c: NavController) {

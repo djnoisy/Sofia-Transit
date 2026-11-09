@@ -46,6 +46,13 @@ open class AppCompatActivity : Context(TestEnv.files, TestEnv.assets), androidx.
     fun startActivity(i: android.content.Intent) { started += i }
     open fun onCreate(savedInstanceState: android.os.Bundle?) {}
     val menuInflater = android.view.MenuInflater()
+    /** How the activity was started, whether it is the first of its task, and how it ended. */
+    var intent: android.content.Intent = android.content.Intent.launcher()
+    var isTaskRoot = true
+    var finished = false; var movedToBack = false; var systemBack = false
+    fun finish() { finished = true }
+    fun moveTaskToBack(nonRoot: Boolean): Boolean { movedToBack = true; return isTaskRoot || nonRoot }
+    val onBackPressedDispatcher = androidx.activity.OnBackPressedDispatcher { systemBack = true }
     fun setSupportActionBar(t: android.view.View?) {}
     fun invalidateOptionsMenu() {}
     open fun onCreateOptionsMenu(menu: android.view.Menu): Boolean = true

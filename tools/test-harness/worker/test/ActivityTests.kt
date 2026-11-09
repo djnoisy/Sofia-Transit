@@ -18,7 +18,8 @@ fun t(name: String, body: () -> Unit) {
 fun eq(w: String, e: Any?, a: Any?) { if (e != a) throw AssertionError("$w: expected <$e> but was <$a>") }
 fun yes(w: String, c: Boolean) { if (!c) throw AssertionError(w) }
 
-class Env(dbReady: Boolean = true) {
+class Env(dbReady: Boolean = true, taskRoot: Boolean = true,
+          launch: android.content.Intent = android.content.Intent.launcher()) {
     val root = kotlin.io.path.createTempDirectory("ui").toFile()
     init { TestEnv.files = File(root, "f").apply { mkdirs() }; TestEnv.assets = File(root, "a").apply { mkdirs() }
         Dialogs.all.clear(); A11y.spoken.clear(); WorkManager.INSTANCE.enqueued.clear()
@@ -28,7 +29,9 @@ class Env(dbReady: Boolean = true) {
             bg.sofia.transit.service.JourneyService.TrackingState.Idle }
     val act = MainActivity()
     val repo = GtfsRepository(act)
-    init { if (dbReady) repo.db = "bundled:x"; act.gtfsRepo = repo; act.onCreate(null) }
+    init { if (dbReady) repo.db = "bundled:x"; act.gtfsRepo = repo
+        android.os.Build.VERSION.SDK_INT = 34; act.isTaskRoot = taskRoot; act.intent = launch
+        act.onCreate(null) }
     fun post(vararg i: WorkInfo) = WorkManager.INSTANCE.live.post(i.toList())
     fun showing() = Dialogs.all.filter { it.isShowing }
     fun only(): AlertDialog { val s = showing(); eq("dialogs showing", 1, s.size); return s[0] }
@@ -323,33 +326,49 @@ fun main() {
         e.post(info(UUID.randomUUID(), F, INST, null, "result" to "failed", "visible" to true))
         eq("screens", 0, e.permissionScreens())
     }
-    // ── sections of the navigation bar (the owner, 9 Nov 2026) ──
+    // ── sections of the navigation bar, "back", a second copy (the owner, 9 Nov 2026) ──
     val ID = bg.sofia.transit.R.id
     fun nav() = androidx.navigation.fragment.NavHostFragment.last!!
-    t("N1 another section → only it on the back stack: back from it closes the app") {
-        val e = Env(); val bar = e.binding().bottomNav
-        bar.tap(ID.linesFragment)
-        eq("stack", listOf(ID.linesFragment), nav().stack); eq("marked", ID.linesFragment, bar.selectedItemId)
-        bar.tap(ID.journeyFragment); eq("stack", listOf(ID.journeyFragment), nav().stack)
-        bar.tap(ID.nearbyFragment); eq("stack", listOf(ID.nearbyFragment), nav().stack)
+    fun Env.back() = act.onBackPressedDispatcher.onBackPressed()
+    t("N1 back on the first screen of any section → the app to the background, the screen kept") {
+        for (section in listOf(ID.nearbyFragment, ID.linesFragment, ID.journeyFragment)) {
+            val e = Env(); if (section != ID.nearbyFragment) e.binding().bottomNav.tap(section)
+            val before = nav().stack.toList(); e.back()
+            yes("$section: to the background", e.act.movedToBack); yes("$section: not closed", !e.act.finished)
+            eq("$section: stack", before, nav().stack)
+        }
     }
-    t("N2 each section keeps its own screens, back when it is chosen again") {
+    t("N2 back on a section's own screen → its previous screen; then out of the app") {
+        val e = Env(); e.binding().bottomNav.tap(ID.linesFragment); nav().navigate(ID.directionsFragment)
+        e.back(); eq("stack", listOf(ID.nearbyFragment, ID.linesFragment), nav().stack); yes("still here", !e.act.movedToBack)
+        e.back(); yes("then out", e.act.movedToBack)
+    }
+    t("N3 back on Settings → the screen it was opened over") {
+        val e = Env(); e.binding().bottomNav.tap(ID.linesFragment)
+        e.act.onOptionsItemSelected(android.view.MenuItem(ID.actionSettings))
+        e.back(); eq("on", ID.linesFragment, nav().currentDestination?.id); yes("still here", !e.act.movedToBack)
+    }
+    t("N4 each section keeps its screens, the first included; Settings left on a change of section") {
         val e = Env(); val bar = e.binding().bottomNav
         bar.tap(ID.linesFragment); nav().navigate(ID.directionsFragment)
-        bar.tap(ID.journeyFragment); eq("journey alone", listOf(ID.journeyFragment), nav().stack)
-        bar.tap(ID.linesFragment); eq("lines restored", listOf(ID.linesFragment, ID.directionsFragment), nav().stack)
+        e.act.onOptionsItemSelected(android.view.MenuItem(ID.actionDiagnostics))
+        bar.tap(ID.journeyFragment); eq("journey", listOf(ID.nearbyFragment, ID.journeyFragment), nav().stack)
+        bar.tap(ID.linesFragment)
+        eq("lines back, no diagnostics", listOf(ID.nearbyFragment, ID.linesFragment, ID.directionsFragment), nav().stack)
+        bar.tap(ID.nearbyFragment); eq("stops", listOf(ID.nearbyFragment), nav().stack)
     }
-    t("N3 Settings over a section, another section chosen → Settings left, not back with the section") {
-        val e = Env(); val bar = e.binding().bottomNav
-        bar.tap(ID.linesFragment); e.act.onOptionsItemSelected(android.view.MenuItem(ID.actionSettings))
-        eq("settings shown", ID.settingsFragment, nav().currentDestination?.id)
-        bar.tap(ID.journeyFragment); eq("journey alone", listOf(ID.journeyFragment), nav().stack)
-        bar.tap(ID.linesFragment); eq("lines without settings", listOf(ID.linesFragment), nav().stack)
+    t("N5 before Android 12, back on a section's first screen closes the app") {
+        val e = Env(); android.os.Build.VERSION.SDK_INT = 30
+        e.binding().bottomNav.tap(ID.journeyFragment); e.back()
+        yes("closed", e.act.finished); yes("system's own not asked", !e.act.systemBack)
     }
-    t("N4 Diagnostics over a section, the same section chosen → back to its screen") {
-        val e = Env(); val bar = e.binding().bottomNav
-        bar.tap(ID.linesFragment); e.act.onOptionsItemSelected(android.view.MenuItem(ID.actionDiagnostics))
-        bar.tap(ID.linesFragment); eq("stack", listOf(ID.linesFragment), nav().stack)
+    t("N6 opened as from its icon over the app already open → this second copy closed at once") {
+        ActivityMainBinding.last = null
+        val e = Env(taskRoot = false)
+        yes("closed", e.act.finished); eq("nothing built", null, ActivityMainBinding.last)
+        val f = Env(taskRoot = false, launch = android.content.Intent(null, null))
+        yes("another intent: kept", !f.act.finished)
+        val g = Env(); yes("the first of its task: kept", !g.act.finished)
     }
     println("\n$ok passed, ${bad.size} failed"); bad.forEach { println("  ✗ $it") }
     kotlin.system.exitProcess(if (bad.isEmpty()) 0 else 1)

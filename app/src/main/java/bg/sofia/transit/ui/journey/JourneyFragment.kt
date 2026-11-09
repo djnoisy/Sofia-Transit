@@ -122,8 +122,12 @@ class JourneyFragment : Fragment() {
                         // near where it began, kept from before it. Nothing
                         // else would load them: the screen is not resumed,
                         // and the location is not updated again until the
-                        // passenger has walked 50 m.
+                        // passenger has walked 50 m. Only on the screen in
+                        // front: one paused (a window over it) would ask for
+                        // updates after onPause took them away, and keep them
+                        // in the background — onResume loads then instead.
                         if (wasTracking && !tracking &&
+                            viewLifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
                             Permissions.hasAnyLocation(requireContext())) {
                             startLocationAndLoad()
                         }

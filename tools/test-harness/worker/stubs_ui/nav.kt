@@ -2,11 +2,7 @@
 // screens MainActivity keeps and which it pops, saves and restores.
 package androidx.navigation
 
-class NavDestination(val id: Int) {
-    companion object {
-        val NavDestination.hierarchy: Sequence<NavDestination> get() = sequenceOf(this)
-    }
-}
+class NavDestination(val id: Int)
 
 class NavOptions(val singleTop: Boolean, val restoreState: Boolean, val popUpToId: Int,
                  val popUpToInclusive: Boolean, val popUpToSaveState: Boolean) {
@@ -17,10 +13,6 @@ class NavOptions(val singleTop: Boolean, val restoreState: Boolean, val popUpToI
         fun setRestoreState(b: Boolean) = apply { restore = b }
         fun setPopUpTo(id: Int, inclusive: Boolean, saveState: Boolean = false) =
             apply { pop = id; incl = inclusive; save = saveState }
-        fun setEnterAnim(a: Int) = this
-        fun setExitAnim(a: Int) = this
-        fun setPopEnterAnim(a: Int) = this
-        fun setPopExitAnim(a: Int) = this
         fun build() = NavOptions(top, restore, pop, incl, save)
     }
 }
@@ -34,7 +26,10 @@ class NavController(start: Int) {
     val saved = mutableMapOf<Int, List<Int>>()
     private val listeners = mutableListOf<(NavController, NavDestination, android.os.Bundle?) -> Unit>()
     val currentDestination: NavDestination? get() = stack.lastOrNull()?.let { NavDestination(it) }
-    fun addOnDestinationChangedListener(l: (NavController, NavDestination, android.os.Bundle?) -> Unit) { listeners += l }
+    /** As the library: told of the screen shown at once, as well as of every change. */
+    fun addOnDestinationChangedListener(l: (NavController, NavDestination, android.os.Bundle?) -> Unit) {
+        listeners += l; currentDestination?.let { l(this, it, null) }
+    }
     fun getBackStackEntry(id: Int): NavBackStackEntry =
         if (id in stack) NavBackStackEntry(id) else throw IllegalArgumentException("$id not on the back stack")
     fun popBackStack(): Boolean {

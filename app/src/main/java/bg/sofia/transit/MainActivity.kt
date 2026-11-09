@@ -1,22 +1,24 @@
 package bg.sofia.transit
 
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavController
-import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.NavOptions
 import androidx.navigation.fragment.NavHostFragment
 import androidx.core.view.ViewCompat
 import androidx.core.view.children
 import androidx.navigation.ui.AppBarConfiguration
+import androidx.navigation.ui.NavigationUI
 import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
@@ -61,6 +63,18 @@ class MainActivity : AppCompatActivity() {
         // High contrast is a theme of its own, set before the activity is.
         ThemeMode.applyTo(this)
         super.onCreate(savedInstanceState)
+        // Opened as from its icon (the tracking notification, a launcher,
+        // Play's "Open"…) while the app is already open: the system brings
+        // its task to the front, but adds a second copy on top when the
+        // intent is not exactly the one that started it — the same app over
+        // itself, with sections and a "back" of its own (the owner, 9 Nov
+        // 2026). The copy goes, and the app is shown as it was left.
+        val launch: Intent? = intent
+        if (!isTaskRoot && launch?.action == Intent.ACTION_MAIN &&
+            launch.hasCategory(Intent.CATEGORY_LAUNCHER)) {
+            finish()
+            return
+        }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -91,9 +105,22 @@ class MainActivity : AppCompatActivity() {
         // nothing, as before.
         binding.bottomNav.setOnItemSelectedListener { item ->
             leaveSettingsAndDiagnostics()
-            openSection(item.itemId)
+            NavigationUI.onNavDestinationSelected(item, navController)
         }
         binding.bottomNav.setOnItemReselectedListener { leaveSettingsAndDiagnostics() }
+
+        // "Back" on the first screen of a section closes the app, from any of
+        // the three: they are of equal rank (the owner, 9 Nov 2026). Before,
+        // it went first to "Спирки", which NavigationUI keeps beneath every
+        // other section — and must keep: the first fragment of the stack is
+        // the one fragment whose state is not saved, so popping "Спирки"
+        // instead would have lost every section's first screen on each
+        // change (review of 9 Nov 2026). Added after the navigation's own
+        // handler, so asked first (both again in that order on every start).
+        onBackPressedDispatcher.addCallback(this, sectionBack)
+        navController.addOnDestinationChangedListener { _, destination, _ ->
+            sectionBack.isEnabled = destination.id in appBarConfig.topLevelDestinations
+        }
 
         // No description of the bar as a whole: TalkBack read it as an element
         // of its own, "Главно меню: …", before the sections — a menu, not a
@@ -121,6 +148,8 @@ class MainActivity : AppCompatActivity() {
 
     /** Not offered on the screen it opens. */
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        // Not for a second copy closed in onCreate.
+        if (!::navController.isInitialized) return super.onPrepareOptionsMenu(menu)
         val here = navController.currentDestination?.id
         menu.findItem(R.id.actionSettings)?.isVisible = here != R.id.settingsFragment
         menu.findItem(R.id.actionDiagnostics)?.isVisible = here != R.id.diagnosticsFragment
@@ -154,38 +183,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * A section of the navigation bar, in place of the one shown. The three
-     * are of equal rank (the owner, 9 Nov 2026): only the one shown is kept
-     * on the back stack, so "back" from its first screen closes the app, as
-     * in other apps — not first to "Спирки", which NavigationUI keeps beneath
-     * every other section. As before, a section's own screens are kept for
-     * it, and come back when it is chosen again.
-     *
-     * The section shown is the one whose first screen is on the back stack —
-     * not the one the bar marks, which after the app is brought back by the
-     * system may not be restored yet.
+     * As the system's own "back" on the app's first screen: since Android 12
+     * the app is sent to the background, as left; before, it is closed.
      */
-    private fun openSection(id: Int): Boolean {
-        val shown = appBarConfig.topLevelDestinations.firstOrNull { section ->
-            try { navController.getBackStackEntry(section); true }
-            catch (_: IllegalArgumentException) { false }
-        } ?: binding.bottomNav.selectedItemId
-        val options = NavOptions.Builder()
-            .setLaunchSingleTop(true)
-            .setRestoreState(true)
-            .setPopUpTo(shown, inclusive = true, saveState = true)
-            // NavigationUI's own, so the change of section looks as before.
-            .setEnterAnim(androidx.navigation.ui.R.animator.nav_default_enter_anim)
-            .setExitAnim(androidx.navigation.ui.R.animator.nav_default_exit_anim)
-            .setPopEnterAnim(androidx.navigation.ui.R.animator.nav_default_pop_enter_anim)
-            .setPopExitAnim(androidx.navigation.ui.R.animator.nav_default_pop_exit_anim)
-            .build()
-        return try {
-            navController.navigate(id, null, options)
-            // As NavigationUI: the bar marks the section only if it is shown.
-            navController.currentDestination?.hierarchy?.any { it.id == id } == true
-        } catch (e: IllegalArgumentException) {
-            false
+    private val sectionBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !moveTaskToBack(false)) finish()
         }
     }
 
