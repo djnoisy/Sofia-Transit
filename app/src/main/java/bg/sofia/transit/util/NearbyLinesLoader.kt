@@ -58,6 +58,17 @@ class NearbyLinesLoader(
     private var pending: Pair<Double, Double>? = null
     private var loaded: Loaded? = null
 
+    /**
+     * A load runs (or follows): the list is being refreshed. Off before
+     * [onDone], so what is published then is no longer "refreshing" — and
+     * whatever is published later (a search) asks this, rather than passing
+     * the flag along: passed along, a search started at [onDone] and
+     * replaced by the next key kept it on for good, "Обнови" disabled
+     * (review of 9 Nov 2026).
+     */
+    var isRunning = false
+        private set
+
     fun request(lat: Double, lon: Double, force: Boolean = false) {
         if (job?.isActive == true) {
             pending = lat to lon
@@ -67,16 +78,21 @@ class NearbyLinesLoader(
         if (!force && last != null && nowMs() - last.atMs < FRESH_MS &&
             distanceM(last.lat, last.lon, lat, lon) < MIN_MOVE_M) return
         job = scope.launch {
+            isRunning = true
             onStart()
             var at = lat to lon
             while (true) {
-                if (load(at.first, at.second)) loaded = Loaded(at.first, at.second, nowMs())
+                val ok = load(at.first, at.second)
+                if (ok) loaded = Loaded(at.first, at.second, nowMs())
                 val next = pending
                 pending = null
-                if (next == null ||
-                    distanceM(at.first, at.second, next.first, next.second) < MIN_MOVE_M) break
+                // After a failed load, the newer position is tried however
+                // close: nothing has been loaded to compare it with.
+                if (next == null || (ok &&
+                    distanceM(at.first, at.second, next.first, next.second) < MIN_MOVE_M)) break
                 at = next
             }
+            isRunning = false
             onDone()
         }
     }

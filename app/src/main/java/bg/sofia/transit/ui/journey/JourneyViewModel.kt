@@ -224,8 +224,12 @@ class JourneyViewModel @Inject constructor(
         distanceM = LocationHelper::distanceMetres,
         onStart   = { _selection.value = _selection.value.copy(refreshing = true, hasLocation = true) },
         load      = { lat, lon -> loadNearbyChoices(lat, lon) },
-        // Whatever the user has typed, applied to the fresh data.
-        onDone    = { applyQuery(_selection.value.query, refreshing = false) }
+        // Whatever the user has typed, applied to the fresh data. Not
+        // refreshing from here on, even if that search never publishes.
+        onDone    = {
+            _selection.value = _selection.value.copy(refreshing = false)
+            applyQuery(_selection.value.query)
+        }
     )
 
     /** [force]: "Обнови" — loaded again even for the same place. */
@@ -331,7 +335,7 @@ class JourneyViewModel @Inject constructor(
 
     /** Called on every keystroke in the search box. */
     fun onQueryChanged(query: String) {
-        applyQuery(query, refreshing = _selection.value.refreshing)
+        applyQuery(query)
     }
 
     /**
@@ -342,12 +346,13 @@ class JourneyViewModel @Inject constructor(
      */
     private var searchJob: Job? = null
 
-    private fun applyQuery(query: String, refreshing: Boolean) {
+    /** Published as refreshing only while a load runs — asked, not passed along (NearbyLinesLoader.isRunning). */
+    private fun applyQuery(query: String) {
         searchJob?.cancel()
         if (query.isBlank()) {
             _selection.value = SelectionState(
                 choices    = nearbyChoices,
-                refreshing = refreshing,
+                refreshing = nearbyLoader.isRunning,
                 hasLocation = true,
                 query      = "",
                 searching  = false
@@ -395,7 +400,7 @@ class JourneyViewModel @Inject constructor(
                 ensureActive()
                 _selection.value = SelectionState(
                     choices     = choices,
-                    refreshing  = refreshing,
+                    refreshing  = nearbyLoader.isRunning,
                     hasLocation = true,
                     query       = query,
                     searching   = true

@@ -17,12 +17,14 @@ import bg.sofia.transit.service.JourneyService
 import bg.sofia.transit.util.NearbyLinesLoader
 import bg.sofia.transit.util.PermissionRequester
 import bg.sofia.transit.util.Permissions
+import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -49,6 +51,11 @@ class JourneyFragment : Fragment() {
     private var hasLocation = false
     /** Tracking at the last state seen: its end is seen as a change. */
     private var wasTracking = false
+
+    private companion object {
+        /** How long the one exact fix is waited for. */
+        const val CURRENT_FIX_MAX_MS = 30_000L
+    }
 
     // Location is asked for only from the button: the first-run permissions
     // screen and Settings are where permissions are given. Notifications are
@@ -494,16 +501,19 @@ class JourneyFragment : Fragment() {
     private fun startLocationAndLoad() {
         fusedClient = LocationServices.getFusedLocationProviderClient(requireContext())
         fusedClient.lastLocation.addOnSuccessListener { loc ->
+            if (vm.tracking.value is JourneyService.TrackingState.Tracking) return@addOnSuccessListener
             // Only a recent one: an older one may be from somewhere else —
-            // then "Определяне на местоположение…" until the fresh fix,
-            // rather than the lines of another place (the owner, 9 Nov 2026).
+            // then "Определяне на местоположение…" until a fresh fix, rather
+            // than the lines of another place (the owner, 9 Nov 2026). And
+            // that fix asked for once, exactly: the updates below are from
+            // Wi-Fi and the network, which may give none (no data, Wi-Fi
+            // scanning off) — the screen would wait for good (review of
+            // 9 Nov 2026).
             if (loc != null && NearbyLinesLoader.lastKnownUsable(
-                    (android.os.SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000) &&
-                vm.tracking.value !is JourneyService.TrackingState.Tracking) {
-                lastLat = loc.latitude
-                lastLon = loc.longitude
-                hasLocation = true
-                vm.loadUpcomingTrips(lastLat, lastLon)
+                    (android.os.SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000)) {
+                usePosition(loc)
+            } else if (isResumed) {
+                askCurrentPosition()
             }
         }
         val req = LocationRequest.Builder(
@@ -515,19 +525,40 @@ class JourneyFragment : Fragment() {
 
     private val locationCb = object : LocationCallback() {
         override fun onLocationResult(r: LocationResult) {
-            r.lastLocation?.let { loc ->
-                lastLat = loc.latitude
-                lastLon = loc.longitude
-                hasLocation = true
-                if (vm.tracking.value !is JourneyService.TrackingState.Tracking) {
-                    vm.loadUpcomingTrips(lastLat, lastLon)
-                }
-            }
+            r.lastLocation?.let { usePosition(it) }
+        }
+    }
+
+    /** A position for the list: remembered, and the lines near it loaded. */
+    private fun usePosition(loc: android.location.Location) {
+        lastLat = loc.latitude
+        lastLon = loc.longitude
+        hasLocation = true
+        if (vm.tracking.value !is JourneyService.TrackingState.Tracking) {
+            vm.loadUpcomingTrips(lastLat, lastLon)
+        }
+    }
+
+    /** The one exact fix asked for, until it comes or the screen is left. */
+    private var currentFix: CancellationTokenSource? = null
+
+    @Suppress("MissingPermission")
+    private fun askCurrentPosition() {
+        currentFix?.cancel()
+        val cts = CancellationTokenSource().also { currentFix = it }
+        val req = CurrentLocationRequest.Builder()
+            .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+            .setDurationMillis(CURRENT_FIX_MAX_MS)
+            .build()
+        fusedClient.getCurrentLocation(req, cts.token).addOnSuccessListener { loc ->
+            if (loc != null && isAdded) usePosition(loc)
         }
     }
 
     override fun onPause() {
         super.onPause()
+        currentFix?.cancel()
+        currentFix = null
         if (::fusedClient.isInitialized)
             fusedClient.removeLocationUpdates(locationCb)
     }

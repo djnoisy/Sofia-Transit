@@ -39,6 +39,13 @@ class NearbyViewModel @Inject constructor(
     private val _error = MutableSharedFlow<String>()
     val error: SharedFlow<String> = _error
 
+    /**
+     * The position last asked for — set when asked, not when its query
+     * ends: a replay after a data update (below) must not go back to the
+     * one before while the query for a newer one still runs, cancelling it
+     * (review of 9 Nov 2026). Cleared if its query fails, so the next fix
+     * tries again.
+     */
     private var lastQueryLat = 0.0
     private var lastQueryLon = 0.0
     private var hasQueried = false
@@ -56,6 +63,9 @@ class NearbyViewModel @Inject constructor(
 
     private fun query(lat: Double, lon: Double) {
         queryJob?.cancel()
+        lastQueryLat = lat
+        lastQueryLon = lon
+        hasQueried = true
         queryJob = viewModelScope.launch { doQuery(lat, lon) }
     }
 
@@ -107,12 +117,10 @@ class NearbyViewModel @Inject constructor(
                 )
             }
             _nearestStops.value = withDistance
-            lastQueryLat = lat
-            lastQueryLon = lon
-            hasQueried = true
         } catch (ce: CancellationException) {
             throw ce
         } catch (e: Exception) {
+            hasQueried = false
             _error.emit("Грешка при зареждане на спирки: ${e.message}")
         }
     }

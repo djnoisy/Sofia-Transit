@@ -15,13 +15,18 @@ class Rig(scope: CoroutineScope) {
     val loads = mutableListOf<Double>()
     private val gates = ArrayDeque<CompletableDeferred<Boolean>>()
     var starts = 0; var dones = 0
-    val loader = NearbyLinesLoader(
-        scope = scope,
-        distanceM = { a, _, b, _ -> kotlin.math.abs(a - b) },
-        onStart = { starts++ },
-        load = { x, _ -> loads += x; CompletableDeferred<Boolean>().also { gates.addLast(it) }.await() },
-        onDone = { dones++ },
-        nowMs = { now })
+    /** Whether the loader said it was running, at each start and each publish. */
+    val runningAtStart = mutableListOf<Boolean>(); val runningAtDone = mutableListOf<Boolean>()
+    lateinit var loader: NearbyLinesLoader
+    init {
+        loader = NearbyLinesLoader(
+            scope = scope,
+            distanceM = { a, _, b, _ -> kotlin.math.abs(a - b) },
+            onStart = { starts++; runningAtStart += loader.isRunning },
+            load = { x, _ -> loads += x; CompletableDeferred<Boolean>().also { gates.addLast(it) }.await() },
+            onDone = { dones++; runningAtDone += loader.isRunning },
+            nowMs = { now })
+    }
     /** The load running ends (ok or failed), and what follows runs. */
     suspend fun finish(ok: Boolean = true) {
         val gate = gates.removeFirstOrNull() ?: run { fails++; println("FAIL no load running to finish"); return }
@@ -62,6 +67,21 @@ fun main(): Unit = runBlocking {
     Rig(this).run {
         at(0.0); finish(ok = false); at(0.0); finish()
         eq("L5 loads", listOf(0.0, 0.0), loads)
+    }
+    // L7 — a failed load, and a position within 50 m came meanwhile: tried
+    // (nothing was loaded to compare it with).
+    Rig(this).run {
+        at(0.0); at(30.0); finish(ok = false); finish()
+        eq("L7 loads", listOf(0.0, 30.0), loads); eq("L7 published once", 1, dones)
+    }
+    // L8 — "refreshing": on while loads run, off when the list is published
+    // (a search published later asks it rather than carrying it on).
+    Rig(this).run {
+        at(0.0); eq("L8 running during the load", true, loader.isRunning)
+        at(1000.0); finish(); eq("L8 still running for the follow-up", true, loader.isRunning)
+        finish()
+        eq("L8 on at start", listOf(true), runningAtStart); eq("L8 off at publish", listOf(false), runningAtDone)
+        eq("L8 off after", false, loader.isRunning)
     }
     // L6 — the phone's last known position: used only if at most 2 minutes old.
     eq("L6 now", true, NearbyLinesLoader.lastKnownUsable(0))
