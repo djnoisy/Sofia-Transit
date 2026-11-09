@@ -3,9 +3,11 @@ package bg.sofia.transit.ui.board
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.children
 import androidx.core.view.updatePadding
 import bg.sofia.transit.databinding.ActivityStopBoardBinding
 import bg.sofia.transit.ui.nearby.StopArrivalsFragment
@@ -32,6 +34,9 @@ class StopBoardActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         title = TITLE
+        // The title is the window's heading for TalkBack, as in the main
+        // screens (MainActivity).
+        binding.toolbar.post { markTitleAsHeading() }
 
         // No navigation bar below: the board keeps clear of the system's
         // (edge to edge on Android 15).
@@ -50,6 +55,14 @@ class StopBoardActivity : AppCompatActivity() {
                     intent.getStringExtra(EXTRA_STOP_CODE)))
                 .commit()
         }
+    }
+
+    /** The bar's title view, by its text: the toolbar does not expose it. */
+    private fun markTitleAsHeading() {
+        val title = binding.toolbar.title?.toString() ?: return
+        binding.toolbar.children.filterIsInstance<TextView>()
+            .firstOrNull { it.text.toString() == title }
+            ?.let { ViewCompat.setAccessibilityHeading(it, true) }
     }
 
     override fun onSupportNavigateUp(): Boolean {
