@@ -65,7 +65,8 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
             val a = old[oldPos]; val b = new[newPos]
             return a.arrivals == b.arrivals &&
                    a.vehicleType == b.vehicleType &&
-                   a.dropOffOnly == b.dropOffOnly
+                   a.dropOffOnly == b.dropOffOnly &&
+                   a.scheduled == b.scheduled
         }
     }
 
@@ -96,7 +97,8 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
                 // information, so presenting them like live predictions would
                 // invite more trust than they deserve.
                 val shown = info.arrivals.take(3)
-                b.tvFirstTime.text = ArrivalTimes.first(shown)
+                // No times: a dash, as TalkBack says "без информация".
+                b.tvFirstTime.text = ArrivalTimes.first(shown).ifEmpty { "—" }
                 val later = ArrivalTimes.later(shown)
                 val laterText = if (info.scheduled && shown.isNotEmpty())
                     listOf(later, "(по разписание)").filter { it.isNotEmpty() }.joinToString(" ")
