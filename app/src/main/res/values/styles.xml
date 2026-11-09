@@ -16,24 +16,21 @@
         <item name="android:textStyle">bold</item>
     </style>
 
-    <!-- The navigation bar at the bottom: Material 3, the active section in a
-         pill (colorSecondaryContainer), labels always shown and larger than
-         the default 12sp. -->
+    <!-- The navigation bar at the bottom, flat, as in Viber or Moovit (the
+         owner, 9 Nov 2026): no pill; the active section's icon and label in
+         the primary colour, the label bold, a line above it
+         (bg_nav_item); the others in onSurfaceVariant. Labels always shown,
+         14sp. -->
     <style name="Widget.SofiaTransit.BottomNavigation" parent="Widget.Material3.BottomNavigationView">
         <item name="backgroundTint">?attr/colorSurfaceContainer</item>
         <item name="labelVisibilityMode">labeled</item>
         <item name="itemIconSize">26dp</item>
         <item name="itemTextAppearanceActive">@style/TextAppearance.SofiaTransit.NavLabel.Active</item>
         <item name="itemTextAppearanceInactive">@style/TextAppearance.SofiaTransit.NavLabel</item>
-        <item name="itemIconTint">@color/nav_item_icon</item>
-        <item name="itemTextColor">@color/nav_item_text</item>
-        <item name="itemActiveIndicatorStyle">@style/Widget.SofiaTransit.BottomNavigation.ActiveIndicator</item>
-    </style>
-
-    <!-- The pill of the active section: the primary colour, 5.5:1 on the bar
-         in light, 9.6:1 in dark, yellow on black in high contrast. -->
-    <style name="Widget.SofiaTransit.BottomNavigation.ActiveIndicator" parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
-        <item name="android:color">?attr/colorPrimary</item>
+        <item name="itemIconTint">@color/nav_item_fg</item>
+        <item name="itemTextColor">@color/nav_item_fg</item>
+        <item name="itemActiveIndicatorStyle">@null</item>
+        <item name="itemBackground">@drawable/bg_nav_item</item>
     </style>
 
     <style name="TextAppearance.SofiaTransit.NavLabel" parent="TextAppearance.Material3.LabelLarge">

@@ -94,9 +94,10 @@ class MainActivity : AppCompatActivity() {
         }
         binding.bottomNav.setOnItemReselectedListener { leaveSettingsAndDiagnostics() }
 
-        // Accessibility: describe the bottom navigation for TalkBack
-        binding.bottomNav.contentDescription =
-            "Главно меню: Спирки, Линии, Пътуване"
+        // No description of the bar as a whole: TalkBack read it as an element
+        // of its own, "Главно меню: …", before the sections — a menu, not a
+        // navigation bar as in other apps (the owner, 9 Nov 2026). Each
+        // section speaks its title.
 
         // First-run DB initialisation.
         //

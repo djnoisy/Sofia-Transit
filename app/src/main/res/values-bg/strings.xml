@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The navigation bar's sections are not called tabs to TalkBack (the
+         owner, 9 Nov 2026: "няма нужда"): Material's role description for
+         them ("Tab" / "Раздел"), overridden empty — here and in values-bg,
+         since the library's Bulgarian one would win over the default. -->
+    <string name="item_view_role_description"></string>
+</resources>

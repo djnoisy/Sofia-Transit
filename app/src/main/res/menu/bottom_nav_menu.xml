@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The navigation bar's sections. TalkBack reads each by its title, short,
+     as on screen ("Спирки, 1 от 3, избрано") — no longer descriptions of
+     their own, and no "Главно меню" (the owner, 9 Nov 2026). -->
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:id="@id/nearbyFragment"
         android:icon="@drawable/ic_nav_stops"
-        android:title="Спирки"
-        android:contentDescription="Спирки около вас"/>
+        android:title="Спирки"/>
     <item android:id="@id/linesFragment"
         android:icon="@drawable/ic_nav_lines"
-        android:title="Линии"
-        android:contentDescription="Всички линии"/>
+        android:title="Линии"/>
     <item android:id="@id/journeyFragment"
         android:icon="@drawable/ic_nav_journey"
-        android:title="Пътуване"
-        android:contentDescription="Следене на пътуване"/>
+        android:title="Пътуване"/>
 </menu>

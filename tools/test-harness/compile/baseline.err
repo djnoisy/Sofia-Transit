@@ -124,7 +124,6 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/MainActivity.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/TransitApplication.kt: error: 'onCreate' overrides nothing
 app/src/main/java/bg/sofia/transit/TransitApplication.kt: error: 'workManagerConfiguration' overrides nothing
 app/src/main/java/bg/sofia/transit/TransitApplication.kt: error: unresolved reference: Application
