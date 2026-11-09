@@ -572,7 +572,13 @@ class JourneyFragment : Fragment() {
                 vm.tracking.value is JourneyService.TrackingState.Tracking) return@launch
             noFix = true
             render()
-            binding.tvJourneyHint.announceForAccessibility(binding.tvJourneyHint.text)
+            // Said once: on the message already (after "Опитай отново"),
+            // TalkBack reads its new text by itself — announced as well, it
+            // was heard twice (review of 9 Nov 2026).
+            val hint = binding.tvJourneyHint
+            if (!hint.createAccessibilityNodeInfo().isAccessibilityFocused) {
+                hint.announceForAccessibility(hint.text)
+            }
         }
     }
 
