@@ -93,16 +93,13 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
                 // direction, "мин" once after a run of minutes (the owner,
                 // 9 Nov 2026; ArrivalTimes); without "след" on screen (8 Nov
                 // 2026) — TalkBack still hears it (timesDesc below).
-                // Timetable times are marked as such: they carry no traffic
-                // information, so presenting them like live predictions would
-                // invite more trust than they deserve.
+                // Timetable times: said by TalkBack ("по разписание", in
+                // timesDesc below), not written — it would take room and
+                // look cluttered (the owner, 9 Nov 2026).
                 val shown = info.arrivals.take(3)
                 // No times: a dash, as TalkBack says "без информация".
                 b.tvFirstTime.text = ArrivalTimes.first(shown).ifEmpty { "—" }
-                val later = ArrivalTimes.later(shown)
-                val laterText = if (info.scheduled && shown.isNotEmpty())
-                    listOf(later, "(по разписание)").filter { it.isNotEmpty() }.joinToString(" ")
-                else later
+                val laterText = ArrivalTimes.later(shown)
                 b.tvLaterTimes.text = laterText
                 b.tvLaterTimes.visibility = if (laterText.isEmpty()) android.view.View.GONE
                     else android.view.View.VISIBLE
