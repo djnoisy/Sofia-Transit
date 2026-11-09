@@ -5,15 +5,23 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.result.ActivityResultCaller
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
+import com.google.android.gms.common.api.ResolvableApiException
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.LocationSettingsRequest
+import com.google.android.gms.location.Priority
 
 /**
  * State of the three things the app needs from the system: precise location,
@@ -34,6 +42,18 @@ object Permissions {
     /** Precise or approximate — enough for the stop lists, not for a journey. */
     fun hasAnyLocation(ctx: Context): Boolean =
         hasFineLocation(ctx) || granted(ctx, Manifest.permission.ACCESS_COARSE_LOCATION)
+
+    /**
+     * Location switched on in the phone's settings (the quick settings
+     * tile). Taken as on when it cannot be told: a failed check must not
+     * put up "изключено" for nothing.
+     */
+    fun isLocationOn(ctx: Context): Boolean = try {
+        val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        lm == null || LocationManagerCompat.isLocationEnabled(lm)
+    } catch (e: Exception) {
+        true
+    }
 
     /** Covers both the Android 13+ permission and notifications switched off by hand. */
     fun hasNotifications(ctx: Context): Boolean =
@@ -131,6 +151,11 @@ class PermissionRequester(
         ActivityResultContracts.StartActivityForResult()
     ) { finishStep() }
 
+    /** Google's window to switch location on; likewise, only that it is closed. */
+    private val resolutionLauncher = caller.registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { finishStep() }
+
     private fun finishStep() {
         onChanged()
         val n = next
@@ -146,6 +171,37 @@ class PermissionRequester(
                           Manifest.permission.ACCESS_COARSE_LOCATION),
             required = Manifest.permission.ACCESS_FINE_LOCATION,
             settings = appDetailsIntent(act), then = then)
+    }
+
+    /**
+     * Location switched on (the owner, 9 Nov 2026): Google's own window,
+     * "Включете местоположението на устройството" — one tap, without leaving
+     * the app; the phone's location settings where it cannot be shown.
+     */
+    fun turnOnLocation(then: () -> Unit = {}) {
+        val act = activity()
+        if (Permissions.isLocationOn(act)) { then(); return }
+        val request = LocationSettingsRequest.Builder()
+            .addLocationRequest(LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 30_000L).build())
+            .setAlwaysShow(true)
+            .build()
+        LocationServices.getSettingsClient(act).checkLocationSettings(request)
+            .addOnSuccessListener { next = then; finishStep() }
+            .addOnFailureListener { e ->
+                if (e is ResolvableApiException) {
+                    try {
+                        next = then
+                        resolutionLauncher.launch(IntentSenderRequest.Builder(e.resolution).build())
+                        return@addOnFailureListener
+                    } catch (x: Exception) {
+                        next = null
+                        FileLogger.w(TAG, "Could not show the location window: ${x.message}")
+                    }
+                }
+                Toast.makeText(act, "Включете местоположението и се върнете с бутона Назад.",
+                    Toast.LENGTH_LONG).show()
+                if (!launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS), then)) then()
+            }
     }
 
     fun requestNotifications(then: () -> Unit = {}) {

@@ -14,20 +14,17 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.databinding.FragmentJourneyBinding
 import bg.sofia.transit.service.JourneyService
+import bg.sofia.transit.util.LocationSwitchWatcher
 import bg.sofia.transit.util.NearbyLinesLoader
 import bg.sofia.transit.util.PermissionRequester
 import bg.sofia.transit.util.Permissions
-import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import com.google.android.gms.tasks.CancellationTokenSource
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -54,15 +51,8 @@ class JourneyFragment : Fragment() {
     /** Tracking at the last state seen: its end is seen as a change. */
     private var wasTracking = false
 
-    /** No position within [NO_FIX_NOTICE_MS]: the message, "Опитай отново". */
-    private var noFix = false
-    private var noFixJob: Job? = null
-
     private companion object {
-        /** How long the one exact fix is waited for. */
-        const val CURRENT_FIX_MAX_MS = 30_000L
-        /** Without a position this long, the passenger is told (the owner, 9 Nov 2026). */
-        const val NO_FIX_NOTICE_MS = 10_000L
+        const val LOCATION_OFF = "Местоположението на телефона е изключено."
     }
 
     // Location is asked for only from the button: the first-run permissions
@@ -72,6 +62,16 @@ class JourneyFragment : Fragment() {
     // had been given on the Stops tab.
     private val requester = PermissionRequester(this, { requireActivity() }) {
         if (_binding != null) refreshLocationAccess()
+    }
+
+    /** Location switched off or on with the screen in front; said when off. */
+    private val locationSwitch = LocationSwitchWatcher { on ->
+        if (_binding == null) return@LocationSwitchWatcher
+        refreshLocationAccess()
+        if (!on && Permissions.hasAnyLocation(requireContext()) &&
+            vm.tracking.value !is JourneyService.TrackingState.Tracking) {
+            binding.tvJourneyHint.announceForAccessibility(LOCATION_OFF)
+        }
     }
 
     override fun onCreateView(
@@ -147,6 +147,10 @@ class JourneyFragment : Fragment() {
                             Permissions.hasAnyLocation(requireContext())) {
                             startLocationAndLoad()
                         }
+                        // A journey begun: the screen asks for no location
+                        // while it lasts — the tracking has its own, every
+                        // second (the owner, 9 Nov 2026).
+                        if (tracking && !wasTracking) stopLocationUpdates()
                         wasTracking = tracking
                         render()
                     }
@@ -169,40 +173,34 @@ class JourneyFragment : Fragment() {
         }
 
         binding.btnGrantLocation.setOnClickListener { requester.requestLocation() }
-        binding.btnRetryLocation.setOnClickListener {
-            noFix = false
-            render()
-            askCurrentPosition()
-            waitForFix()
-            // The button just pressed is gone: TalkBack to the message
-            // instead ("Определяне на местоположение…"), not the top.
-            binding.tvJourneyHint.post {
-                _binding?.tvJourneyHint?.performAccessibilityAction(
-                    android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
-            }
-        }
+        binding.btnTurnOnLocation.setOnClickListener { requester.turnOnLocation() }
     }
 
     /**
-     * Starts location for the selection list when access is there; the
-     * render shows the message with its button otherwise. Runs on every
-     * resume: access may have been given in the system settings meanwhile,
-     * and onPause stops the updates.
+     * Starts location for the selection list when access is there — not
+     * during a journey; the render shows the message with its button
+     * otherwise. Runs on every resume: access may have been given in the
+     * system settings meanwhile, and onPause stops the updates. Asked for
+     * with location switched off too: they come by themselves once it is on.
      */
     private fun refreshLocationAccess() {
-        if (Permissions.hasAnyLocation(requireContext())) startLocationAndLoad()
+        if (Permissions.hasAnyLocation(requireContext()) &&
+            vm.tracking.value !is JourneyService.TrackingState.Tracking) {
+            startLocationAndLoad()
+        }
         render()
     }
 
     override fun onResume() {
         super.onResume()
+        locationSwitch.start(requireContext())
         refreshLocationAccess()
     }
 
     /** Single render entry: decides between tracking and selection modes. */
     private fun render() {
         binding.btnGrantLocation.visibility = View.GONE
-        binding.btnRetryLocation.visibility = View.GONE
+        binding.btnTurnOnLocation.visibility = View.GONE
         val trackingState = vm.tracking.value
         if (trackingState is JourneyService.TrackingState.Tracking) {
             renderTracking(trackingState)
@@ -463,25 +461,33 @@ class JourneyFragment : Fragment() {
         binding.btnEndJourney.visibility      = View.GONE
         binding.tvAccuracy.visibility         = View.GONE
 
-        if (!state.hasLocation) {
-            binding.panelUpcoming.visibility = View.GONE
-            binding.tvJourneyHint.visibility = View.VISIBLE
-            binding.tvJourneyHint.contentDescription = null
-            if (Permissions.hasAnyLocation(requireContext())) {
-                if (noFix) {
-                    binding.tvJourneyHint.text = "Местоположението още не е определено."
-                    binding.btnRetryLocation.visibility = View.VISIBLE
-                } else {
-                    binding.tvJourneyHint.text = "Определяне на местоположение…"
-                }
-            } else {
+        val ctx = requireContext()
+        val allowed = Permissions.hasAnyLocation(ctx)
+        binding.tvJourneyHint.contentDescription = null
+        when {
+            // Location switched off in the phone's settings (the owner, 9 Nov
+            // 2026): said, with "Включи" — over the list too, if there is
+            // one: it is of the last place known, and stays so.
+            allowed && !Permissions.isLocationOn(ctx) -> {
+                binding.tvJourneyHint.visibility = View.VISIBLE
+                binding.tvJourneyHint.text = LOCATION_OFF
+                binding.btnTurnOnLocation.visibility = View.VISIBLE
+            }
+            !allowed -> {
+                binding.tvJourneyHint.visibility = View.VISIBLE
                 binding.tvJourneyHint.text = "Няма достъп до местоположението."
                 binding.btnGrantLocation.visibility = View.VISIBLE
             }
+            !state.hasLocation -> {
+                binding.tvJourneyHint.visibility = View.VISIBLE
+                binding.tvJourneyHint.text = "Определяне на местоположение…"
+            }
+            else -> binding.tvJourneyHint.visibility = View.GONE
+        }
+        if (!state.hasLocation) {
+            binding.panelUpcoming.visibility = View.GONE
             return
         }
-
-        binding.tvJourneyHint.visibility = View.GONE
         binding.panelUpcoming.visibility = View.VISIBLE
         binding.pbRefreshing.visibility =
             if (state.refreshing) View.VISIBLE else View.GONE
@@ -522,32 +528,31 @@ class JourneyFragment : Fragment() {
     }
 
     // ── Location for the SELECTION list only (tracking GPS lives in the
-    //    service). Balanced accuracy is enough while waiting for the bus. ──
+    //    service). By GPS, with Wi-Fi and the network, every 30 s, as on
+    //    "Близки спирки" — "balanced" before, mostly Wi-Fi and the network,
+    //    ~100 m, which can change the nearest stop (the owner, 9 Nov 2026).
+    //    The lines redone only after 50 m. ──
     @Suppress("MissingPermission")
     private fun startLocationAndLoad() {
         fusedClient = LocationServices.getFusedLocationProviderClient(requireContext())
-        waitForFix()
         fusedClient.lastLocation.addOnSuccessListener { loc ->
             if (vm.tracking.value is JourneyService.TrackingState.Tracking) return@addOnSuccessListener
             // Only a recent one: an older one may be from somewhere else —
-            // then "Определяне на местоположение…" until a fresh fix, rather
-            // than the lines of another place (the owner, 9 Nov 2026). And
-            // that fix asked for once, exactly: the updates below are from
-            // Wi-Fi and the network, which may give none (no data, Wi-Fi
-            // scanning off) — the screen would wait for good (review of
-            // 9 Nov 2026).
+            // then "Определяне на местоположение…" until the first fix,
+            // rather than the lines of another place (the owner, 9 Nov 2026).
             if (loc != null && NearbyLinesLoader.lastKnownUsable(
                     (android.os.SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000)) {
                 usePosition(loc)
-            } else if (isResumed) {
-                askCurrentPosition()
             }
         }
-        val req = LocationRequest.Builder(
-            Priority.PRIORITY_BALANCED_POWER_ACCURACY, 30_000L)
+        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 30_000L)
             .setMinUpdateDistanceMeters(50f)
             .build()
         fusedClient.requestLocationUpdates(req, locationCb, requireActivity().mainLooper)
+    }
+
+    private fun stopLocationUpdates() {
+        if (::fusedClient.isInitialized) fusedClient.removeLocationUpdates(locationCb)
     }
 
     private val locationCb = object : LocationCallback() {
@@ -556,36 +561,8 @@ class JourneyFragment : Fragment() {
         }
     }
 
-    /**
-     * No position yet: after [NO_FIX_NOTICE_MS], said so, with "Опитай
-     * отново" (the owner, 9 Nov 2026: "30 секунди е много нека да са 10").
-     * The search goes on meanwhile — the exact fix may take longer, the GPS
-     * starting cold — and a position that comes later still brings the list.
-     */
-    private fun waitForFix() {
-        noFixJob?.cancel()
-        noFix = false
-        if (vm.selection.value.hasLocation) return
-        noFixJob = viewLifecycleOwner.lifecycleScope.launch {
-            delay(NO_FIX_NOTICE_MS)
-            if (vm.selection.value.hasLocation ||
-                vm.tracking.value is JourneyService.TrackingState.Tracking) return@launch
-            noFix = true
-            render()
-            // Said once: on the message already (after "Опитай отново"),
-            // TalkBack reads its new text by itself — announced as well, it
-            // was heard twice (review of 9 Nov 2026).
-            val hint = binding.tvJourneyHint
-            if (!hint.createAccessibilityNodeInfo().isAccessibilityFocused) {
-                hint.announceForAccessibility(hint.text)
-            }
-        }
-    }
-
     /** A position for the list: remembered, and the lines near it loaded. */
     private fun usePosition(loc: android.location.Location) {
-        noFixJob?.cancel()
-        noFix = false
         lastLat = loc.latitude
         lastLon = loc.longitude
         hasLocation = true
@@ -594,29 +571,10 @@ class JourneyFragment : Fragment() {
         }
     }
 
-    /** The one exact fix asked for, until it comes or the screen is left. */
-    private var currentFix: CancellationTokenSource? = null
-
-    @Suppress("MissingPermission")
-    private fun askCurrentPosition() {
-        currentFix?.cancel()
-        val cts = CancellationTokenSource().also { currentFix = it }
-        val req = CurrentLocationRequest.Builder()
-            .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
-            .setDurationMillis(CURRENT_FIX_MAX_MS)
-            .build()
-        fusedClient.getCurrentLocation(req, cts.token).addOnSuccessListener { loc ->
-            if (loc != null && isAdded) usePosition(loc)
-        }
-    }
-
     override fun onPause() {
         super.onPause()
-        noFixJob?.cancel()
-        currentFix?.cancel()
-        currentFix = null
-        if (::fusedClient.isInitialized)
-            fusedClient.removeLocationUpdates(locationCb)
+        locationSwitch.stop()
+        stopLocationUpdates()
     }
 
     override fun onDestroyView() {

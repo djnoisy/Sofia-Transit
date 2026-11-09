@@ -11,6 +11,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.databinding.FragmentNearbyTabBinding
 import bg.sofia.transit.ui.board.StopBoardActivity
+import bg.sofia.transit.util.LocationSwitchWatcher
 import bg.sofia.transit.util.PermissionRequester
 import bg.sofia.transit.util.Permissions
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -43,6 +44,19 @@ class NearbyTabFragment : Fragment() {
     // permissions screen and Settings are where permissions are given.
     private val requester = PermissionRequester(this, { requireActivity() }) {
         if (_binding != null) refreshLocationAccess()
+    }
+
+    /** Location switched off or on with the screen in front; said when off. */
+    private val locationSwitch = LocationSwitchWatcher { on ->
+        if (_binding == null) return@LocationSwitchWatcher
+        refreshLocationAccess()
+        if (!on && Permissions.hasAnyLocation(requireContext())) {
+            binding.tvNoLocation.announceForAccessibility(LOCATION_OFF)
+        }
+    }
+
+    private companion object {
+        const val LOCATION_OFF = "Местоположението на телефона е изключено."
     }
 
     override fun onCreateView(
@@ -83,21 +97,32 @@ class NearbyTabFragment : Fragment() {
         }
 
         binding.btnGrantLocation.setOnClickListener { requester.requestLocation() }
+        binding.btnTurnOnLocation.setOnClickListener { requester.turnOnLocation() }
     }
 
     /**
      * Starts location updates when access is there, otherwise shows the
-     * message with its button. Runs on every resume: access may have been
-     * given in the system settings meanwhile, and onPause stops the updates.
+     * message with its button; with access but location switched off in the
+     * phone's settings, says so, with "Включи" (the owner, 9 Nov 2026) —
+     * before, the list simply stayed empty. Runs on every resume: access may
+     * have been given in the system settings meanwhile, and onPause stops
+     * the updates. The updates are asked for with location off too: they
+     * come by themselves once it is on.
      */
     private fun refreshLocationAccess() {
-        val allowed = Permissions.hasAnyLocation(requireContext())
-        binding.panelNoLocation.visibility = if (allowed) View.GONE else View.VISIBLE
+        val ctx = requireContext()
+        val allowed = Permissions.hasAnyLocation(ctx)
+        val off = allowed && !Permissions.isLocationOn(ctx)
+        binding.panelNoLocation.visibility = if (allowed && !off) View.GONE else View.VISIBLE
+        binding.tvNoLocation.text = if (off) LOCATION_OFF else "Няма достъп до местоположението."
+        binding.btnGrantLocation.visibility = if (allowed) View.GONE else View.VISIBLE
+        binding.btnTurnOnLocation.visibility = if (off) View.VISIBLE else View.GONE
         if (allowed) startLocationUpdates()
     }
 
     override fun onResume() {
         super.onResume()
+        locationSwitch.start(requireContext())
         refreshLocationAccess()
     }
 
@@ -119,6 +144,7 @@ class NearbyTabFragment : Fragment() {
 
     override fun onPause() {
         super.onPause()
+        locationSwitch.stop()
         if (::fusedClient.isInitialized)
             fusedClient.removeLocationUpdates(locationCallback)
     }
