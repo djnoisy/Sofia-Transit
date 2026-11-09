@@ -20,9 +20,6 @@
         android:label="Спирки"
         tools:layout="@layout/fragment_nearby_stops">
 
-        <action android:id="@+id/actionNearbyToArrivals"
-            app:destination="@id/stopArrivalsFragment"/>
-
     </fragment>
 
     <fragment android:id="@+id/settingsFragment"
@@ -34,17 +31,6 @@
         android:name="bg.sofia.transit.ui.diagnostics.DiagnosticsFragment"
         android:label="Диагностика"
         tools:layout="@layout/fragment_diagnostics"/>
-
-    <fragment android:id="@+id/stopArrivalsFragment"
-        android:name="bg.sofia.transit.ui.nearby.StopArrivalsFragment"
-        android:label="Пристигания"
-        tools:layout="@layout/fragment_stop_arrivals">
-
-        <argument android:name="stopId"   app:argType="string"/>
-        <argument android:name="stopName" app:argType="string"/>
-        <argument android:name="stopCode" app:argType="string"
-            app:nullable="true" android:defaultValue="@null"/>
-    </fragment>
 
     <!-- ── Lines ── -->
     <fragment android:id="@+id/linesFragment"

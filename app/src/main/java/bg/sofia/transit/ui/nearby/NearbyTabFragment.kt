@@ -8,9 +8,9 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
-import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.databinding.FragmentNearbyTabBinding
+import bg.sofia.transit.ui.board.StopBoardActivity
 import bg.sofia.transit.util.PermissionRequester
 import bg.sofia.transit.util.Permissions
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -55,14 +55,12 @@ class NearbyTabFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
 
+        // A stop's arrivals: the "Виртуално табло" window (StopBoardActivity).
         nearbyAdapter = NearbyStopAdapter { stopWithDist ->
-            findNavController().navigate(
-                NearbyStopsFragmentDirections.actionNearbyToArrivals(
-                    stopId   = stopWithDist.stop.stopId,
-                    stopName = stopWithDist.stop.stopName,
-                    stopCode = stopWithDist.stop.stopCode
-                )
-            )
+            StopBoardActivity.start(requireContext(),
+                stopId   = stopWithDist.stop.stopId,
+                stopName = stopWithDist.stop.stopName,
+                stopCode = stopWithDist.stop.stopCode)
         }
         binding.rvStops.layoutManager = LinearLayoutManager(requireContext())
         binding.rvStops.adapter = nearbyAdapter

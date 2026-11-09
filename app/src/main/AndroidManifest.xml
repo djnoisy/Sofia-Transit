@@ -61,6 +61,12 @@
             </intent-filter>
         </activity>
 
+        <!-- "Виртуално табло": a stop's arrivals, a window of its own. -->
+        <activity
+            android:name=".ui.board.StopBoardActivity"
+            android:exported="false"
+            android:label="Виртуално табло"/>
+
         <activity
             android:name=".ui.permissions.PermissionsActivity"
             android:exported="false"

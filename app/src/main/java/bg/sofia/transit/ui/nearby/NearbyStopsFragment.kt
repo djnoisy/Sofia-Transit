@@ -13,11 +13,11 @@ import dagger.hilt.android.AndroidEntryPoint
 
 /**
  * Container fragment for the "Spirki" (Stops) section. Hosts a TabLayout +
- * ViewPager2 with two tabs: "Близки спирки" (nearby) and "Търсене" (search).
+ * ViewPager2 with two tabs: "Близки спирки" (nearby) and "Любими" (the
+ * favourite stops; in place of "Търсене", the owner, 9 Nov 2026).
  *
- * The navigation action to a stop's arrivals lives on this fragment's
- * destination node in the nav graph, so child tabs reuse it via the
- * Directions class. "Настройки" and "Диагностика" are in the top app bar
+ * A stop's arrivals open in a window of their own, "Виртуално табло"
+ * (StopBoardActivity). "Настройки" and "Диагностика" are in the top app bar
  * (MainActivity), on every screen.
  */
 @AndroidEntryPoint
@@ -41,11 +41,11 @@ class NearbyStopsFragment : Fragment() {
         TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
             tab.text = when (position) {
                 0 -> "Близки спирки"
-                else -> "Търсене"
+                else -> "Любими"
             }
             tab.contentDescription = when (position) {
                 0 -> "Близки спирки около вас"
-                else -> "Търсене на спирка по име или код"
+                else -> "Любими спирки"
             }
         }.attach()
     }
@@ -62,7 +62,7 @@ class NearbyStopsFragment : Fragment() {
         override fun getItemCount(): Int = 2
         override fun createFragment(position: Int): Fragment = when (position) {
             0 -> NearbyTabFragment()
-            else -> SearchTabFragment()
+            else -> FavoritesTabFragment()
         }
     }
 }

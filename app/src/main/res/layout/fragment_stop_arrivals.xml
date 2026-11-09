@@ -3,7 +3,8 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:padding="8dp">
 
-    <!-- Header with selected stop name -->
+    <!-- The stop's name, the whole width ("Обнови" is in the top bar now,
+         and the caption over the list is gone: the owner, 9 Nov 2026). -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -26,23 +27,8 @@
             android:visibility="gone"
             android:importantForAccessibility="no"/>
 
-        <Button android:id="@+id/btnRefresh"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:minHeight="48dp"
-            android:text="Обнови"
-            android:contentDescription="Обнови списъка с пристигания"
-            android:layout_marginStart="8dp"
-            style="@style/Widget.Material3.Button.TextButton"/>
     </LinearLayout>
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Превозни средства, спиращи на тази спирка:"
-        android:textSize="15sp"
-        android:paddingHorizontal="12dp"
-        android:paddingBottom="8dp"
-        android:textColor="?attr/colorOnSurfaceVariant"/>
 
     <!-- Debug / empty state — small, capped height, scrollable -->
     <ScrollView
