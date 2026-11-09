@@ -9,7 +9,7 @@
          one filled in the primary colour, each with its vehicle's icon above
          its name. The name shrinks to fit its quarter of the width rather
          than break mid-word at a large font size (autoSize, 15sp down to
-         9sp); the height is fixed, which autoSize needs. TalkBack hears them
+         8sp); the height is fixed, which autoSize needs. TalkBack hears them
          as tabs with the selected state (LinesFragment). -->
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="horizontal" android:paddingHorizontal="12dp"
@@ -22,7 +22,7 @@
             android:insetTop="0dp" android:insetBottom="0dp"
             android:text="Автобуси" android:maxLines="1"
             android:textColor="@color/filter_fg"
-            app:autoSizeTextType="uniform" app:autoSizeMinTextSize="9sp"
+            app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp"
             app:autoSizeMaxTextSize="15sp" app:autoSizeStepGranularity="1sp"
             app:icon="@drawable/ic_vehicle_bus" app:iconGravity="top" app:iconPadding="4dp"
             app:iconSize="26dp" app:iconTint="@color/filter_fg"
@@ -37,7 +37,7 @@
             android:insetTop="0dp" android:insetBottom="0dp"
             android:text="Трамваи" android:maxLines="1"
             android:textColor="@color/filter_fg"
-            app:autoSizeTextType="uniform" app:autoSizeMinTextSize="9sp"
+            app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp"
             app:autoSizeMaxTextSize="15sp" app:autoSizeStepGranularity="1sp"
             app:icon="@drawable/ic_vehicle_tram" app:iconGravity="top" app:iconPadding="4dp"
             app:iconSize="26dp" app:iconTint="@color/filter_fg"
@@ -52,7 +52,7 @@
             android:insetTop="0dp" android:insetBottom="0dp"
             android:text="Тролеи" android:maxLines="1"
             android:textColor="@color/filter_fg"
-            app:autoSizeTextType="uniform" app:autoSizeMinTextSize="9sp"
+            app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp"
             app:autoSizeMaxTextSize="15sp" app:autoSizeStepGranularity="1sp"
             app:icon="@drawable/ic_vehicle_trolley" app:iconGravity="top" app:iconPadding="4dp"
             app:iconSize="26dp" app:iconTint="@color/filter_fg"
@@ -67,7 +67,7 @@
             android:insetTop="0dp" android:insetBottom="0dp"
             android:text="Метро" android:maxLines="1"
             android:textColor="@color/filter_fg"
-            app:autoSizeTextType="uniform" app:autoSizeMinTextSize="9sp"
+            app:autoSizeTextType="uniform" app:autoSizeMinTextSize="8sp"
             app:autoSizeMaxTextSize="15sp" app:autoSizeStepGranularity="1sp"
             app:icon="@drawable/ic_vehicle_metro" app:iconGravity="top" app:iconPadding="4dp"
             app:iconSize="26dp" app:iconTint="@color/filter_fg"

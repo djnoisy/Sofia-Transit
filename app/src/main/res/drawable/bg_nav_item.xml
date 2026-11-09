@@ -1,18 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A section of the navigation bar: the active one marked by a line in the
-     primary colour along its top edge (the colour of icon and label alone
-     differs little from the others'). -->
-<selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_checked="true">
-        <layer-list>
-            <item android:gravity="top|fill_horizontal" android:height="4dp"
-                android:left="20dp" android:right="20dp">
-                <shape android:shape="rectangle">
-                    <solid android:color="?attr/colorPrimary"/>
-                    <corners android:bottomLeftRadius="2dp" android:bottomRightRadius="2dp"/>
-                </shape>
-            </item>
-        </layer-list>
-    </item>
-    <item android:drawable="@android:color/transparent"/>
-</selector>
+<!-- A section of the navigation bar: a ripple when touched (a custom item
+     background replaces Material's own), over the line marking the active
+     one (bg_nav_item_state). -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?attr/colorControlHighlight">
+    <item android:drawable="@drawable/bg_nav_item_state"/>
+</ripple>
