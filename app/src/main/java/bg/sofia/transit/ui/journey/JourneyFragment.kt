@@ -26,6 +26,8 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -52,9 +54,15 @@ class JourneyFragment : Fragment() {
     /** Tracking at the last state seen: its end is seen as a change. */
     private var wasTracking = false
 
+    /** No position within [NO_FIX_NOTICE_MS]: the message, "Опитай отново". */
+    private var noFix = false
+    private var noFixJob: Job? = null
+
     private companion object {
         /** How long the one exact fix is waited for. */
         const val CURRENT_FIX_MAX_MS = 30_000L
+        /** Without a position this long, the passenger is told (the owner, 9 Nov 2026). */
+        const val NO_FIX_NOTICE_MS = 10_000L
     }
 
     // Location is asked for only from the button: the first-run permissions
@@ -161,6 +169,18 @@ class JourneyFragment : Fragment() {
         }
 
         binding.btnGrantLocation.setOnClickListener { requester.requestLocation() }
+        binding.btnRetryLocation.setOnClickListener {
+            noFix = false
+            render()
+            askCurrentPosition()
+            waitForFix()
+            // The button just pressed is gone: TalkBack to the message
+            // instead ("Определяне на местоположение…"), not the top.
+            binding.tvJourneyHint.post {
+                _binding?.tvJourneyHint?.performAccessibilityAction(
+                    android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
+            }
+        }
     }
 
     /**
@@ -182,6 +202,7 @@ class JourneyFragment : Fragment() {
     /** Single render entry: decides between tracking and selection modes. */
     private fun render() {
         binding.btnGrantLocation.visibility = View.GONE
+        binding.btnRetryLocation.visibility = View.GONE
         val trackingState = vm.tracking.value
         if (trackingState is JourneyService.TrackingState.Tracking) {
             renderTracking(trackingState)
@@ -447,7 +468,12 @@ class JourneyFragment : Fragment() {
             binding.tvJourneyHint.visibility = View.VISIBLE
             binding.tvJourneyHint.contentDescription = null
             if (Permissions.hasAnyLocation(requireContext())) {
-                binding.tvJourneyHint.text = "Определяне на местоположение…"
+                if (noFix) {
+                    binding.tvJourneyHint.text = "Местоположението още не е определено."
+                    binding.btnRetryLocation.visibility = View.VISIBLE
+                } else {
+                    binding.tvJourneyHint.text = "Определяне на местоположение…"
+                }
             } else {
                 binding.tvJourneyHint.text = "Няма достъп до местоположението."
                 binding.btnGrantLocation.visibility = View.VISIBLE
@@ -500,6 +526,7 @@ class JourneyFragment : Fragment() {
     @Suppress("MissingPermission")
     private fun startLocationAndLoad() {
         fusedClient = LocationServices.getFusedLocationProviderClient(requireContext())
+        waitForFix()
         fusedClient.lastLocation.addOnSuccessListener { loc ->
             if (vm.tracking.value is JourneyService.TrackingState.Tracking) return@addOnSuccessListener
             // Only a recent one: an older one may be from somewhere else —
@@ -529,8 +556,30 @@ class JourneyFragment : Fragment() {
         }
     }
 
+    /**
+     * No position yet: after [NO_FIX_NOTICE_MS], said so, with "Опитай
+     * отново" (the owner, 9 Nov 2026: "30 секунди е много нека да са 10").
+     * The search goes on meanwhile — the exact fix may take longer, the GPS
+     * starting cold — and a position that comes later still brings the list.
+     */
+    private fun waitForFix() {
+        noFixJob?.cancel()
+        noFix = false
+        if (vm.selection.value.hasLocation) return
+        noFixJob = viewLifecycleOwner.lifecycleScope.launch {
+            delay(NO_FIX_NOTICE_MS)
+            if (vm.selection.value.hasLocation ||
+                vm.tracking.value is JourneyService.TrackingState.Tracking) return@launch
+            noFix = true
+            render()
+            binding.tvJourneyHint.announceForAccessibility(binding.tvJourneyHint.text)
+        }
+    }
+
     /** A position for the list: remembered, and the lines near it loaded. */
     private fun usePosition(loc: android.location.Location) {
+        noFixJob?.cancel()
+        noFix = false
         lastLat = loc.latitude
         lastLon = loc.longitude
         hasLocation = true
@@ -557,6 +606,7 @@ class JourneyFragment : Fragment() {
 
     override fun onPause() {
         super.onPause()
+        noFixJob?.cancel()
         currentFix?.cancel()
         currentFix = null
         if (::fusedClient.isInitialized)
