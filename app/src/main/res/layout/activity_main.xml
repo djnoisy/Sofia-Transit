@@ -2,7 +2,8 @@
 <!-- The frame of every screen (redesign of 8 Nov 2026): the top app bar —
      the screen's title, "Настройки" and, under the overflow, "Диагностика"
      (MainActivity) — the screen itself, and the navigation bar at the bottom.
-     A divider sets each bar apart from the content. -->
+     A divider sets the top bar apart from the content; the navigation bar,
+     its own background. -->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -36,21 +37,14 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"/>
 
+    <!-- No line between the screen and the navigation bar: its own
+         background sets it apart (colorNavBar; the owner, 9 Nov 2026). -->
     <androidx.fragment.app.FragmentContainerView
         android:id="@+id/nav_host_fragment"
         android:name="androidx.navigation.fragment.NavHostFragment"
         android:layout_width="0dp" android:layout_height="0dp"
         app:defaultNavHost="true" app:navGraph="@navigation/nav_graph"
         app:layout_constraintTop_toBottomOf="@id/dividerTop"
-        app:layout_constraintBottom_toTopOf="@id/dividerBottom"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"/>
-
-    <com.google.android.material.divider.MaterialDivider
-        android:id="@+id/dividerBottom"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:importantForAccessibility="no"
         app:layout_constraintBottom_toTopOf="@id/bottomNav"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"/>

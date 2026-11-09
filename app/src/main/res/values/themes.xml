@@ -47,6 +47,7 @@
 
         <item name="colorArrivalTime">@color/arrival_time</item>
         <item name="colorNavActive">@color/nav_active</item>
+        <item name="colorNavBar">@color/nav_bar_bg</item>
         <item name="colorOnNavActive">@color/on_nav_active</item>
         <item name="colorHintText">@color/md_on_surface_variant</item>
         <item name="lineDividerWidth">1dp</item>
@@ -117,6 +118,7 @@
 
         <item name="colorArrivalTime">@color/hc_green</item>
         <item name="colorNavActive">@color/hc_yellow</item>
+        <item name="colorNavBar">@color/hc_black</item>
         <item name="colorOnNavActive">@color/hc_black</item>
         <item name="colorHintText">@color/hc_cyan</item>
         <item name="lineDividerWidth">2dp</item>

@@ -21,7 +21,7 @@
          rounded field the width of the section (bg_nav_item), the label
          bold; the others in onSurfaceVariant. Labels always shown, 14sp. -->
     <style name="Widget.SofiaTransit.BottomNavigation" parent="Widget.Material3.BottomNavigationView">
-        <item name="backgroundTint">?attr/colorSurfaceContainer</item>
+        <item name="backgroundTint">?attr/colorNavBar</item>
         <item name="labelVisibilityMode">labeled</item>
         <item name="itemIconSize">26dp</item>
         <item name="itemTextAppearanceActive">@style/TextAppearance.SofiaTransit.NavLabel.Active</item>

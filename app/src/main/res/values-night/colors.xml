@@ -41,6 +41,10 @@
     <!-- Active section: the primary's tone 40, 2.5:1 lighter than the bar;
          icon and label tone 95 on it (5.7:1). -->
     <color name="nav_active">#405F90</color>
+    <!-- The navigation bar lighter than the screen (the owner, 9 Nov 2026):
+         neutral variant tone 22, 1.5:1 on the screen; the active section's
+         background 1.9:1 on it, labels 7.2:1. -->
+    <color name="nav_bar_bg">#32353C</color>
     <color name="on_nav_active">#ECF0FF</color>
-    <color name="nav_bar">@color/md_surface_container</color>
+    <color name="nav_bar">@color/nav_bar_bg</color>
 </resources>
