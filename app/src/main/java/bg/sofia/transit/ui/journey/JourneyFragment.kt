@@ -68,9 +68,13 @@ class JourneyFragment : Fragment() {
     private val locationSwitch = LocationSwitchWatcher { on ->
         if (_binding == null) return@LocationSwitchWatcher
         refreshLocationAccess()
+        // Not when TalkBack is already on the message: it reads the new
+        // text by itself, and it would be heard twice (review of 9 Nov 2026).
+        val hint = binding.tvJourneyHint
         if (!on && Permissions.hasAnyLocation(requireContext()) &&
-            vm.tracking.value !is JourneyService.TrackingState.Tracking) {
-            binding.tvJourneyHint.announceForAccessibility(LOCATION_OFF)
+            vm.tracking.value !is JourneyService.TrackingState.Tracking &&
+            !hint.createAccessibilityNodeInfo().isAccessibilityFocused) {
+            hint.announceForAccessibility(LOCATION_OFF)
         }
     }
 

@@ -185,9 +185,13 @@ class PermissionRequester(
             .addLocationRequest(LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 30_000L).build())
             .setAlwaysShow(true)
             .build()
+        // The answer comes back after a moment: by then the screen may be
+        // gone — nothing then, not even the toast (review of 9 Nov 2026).
+        val gone = { act.isFinishing || act.isDestroyed }
         LocationServices.getSettingsClient(act).checkLocationSettings(request)
-            .addOnSuccessListener { next = then; finishStep() }
+            .addOnSuccessListener { if (!gone()) { next = then; finishStep() } }
             .addOnFailureListener { e ->
+                if (gone()) return@addOnFailureListener
                 if (e is ResolvableApiException) {
                     try {
                         next = then

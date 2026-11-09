@@ -50,8 +50,12 @@ class NearbyTabFragment : Fragment() {
     private val locationSwitch = LocationSwitchWatcher { on ->
         if (_binding == null) return@LocationSwitchWatcher
         refreshLocationAccess()
-        if (!on && Permissions.hasAnyLocation(requireContext())) {
-            binding.tvNoLocation.announceForAccessibility(LOCATION_OFF)
+        // Not when TalkBack is already on the message: it reads the new
+        // text by itself, and it would be heard twice (review of 9 Nov 2026).
+        val text = binding.tvNoLocation
+        if (!on && Permissions.hasAnyLocation(requireContext()) &&
+            !text.createAccessibilityNodeInfo().isAccessibilityFocused) {
+            text.announceForAccessibility(LOCATION_OFF)
         }
     }
 
