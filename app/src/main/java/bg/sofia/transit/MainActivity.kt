@@ -106,6 +106,12 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNav.setOnItemSelectedListener { item ->
             leaveSettingsAndDiagnostics()
             NavigationUI.onNavDestinationSelected(item, navController)
+            // Marked whenever the section is now the one shown — also when it
+            // comes back on one of its own screens (a line's directions, its
+            // stops), which NavigationUI does not count: the bar stayed on
+            // the section left, and that one, tapped, did nothing — "it is
+            // shown already" (the owner, 10 Nov 2026).
+            isOnBackStack(item.itemId)
         }
         binding.bottomNav.setOnItemReselectedListener { leaveSettingsAndDiagnostics() }
 
@@ -199,6 +205,13 @@ class MainActivity : AppCompatActivity() {
         override fun handleOnBackPressed() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !moveTaskToBack(false)) finish()
         }
+    }
+
+    private fun isOnBackStack(id: Int): Boolean = try {
+        navController.getBackStackEntry(id)
+        true
+    } catch (_: IllegalArgumentException) {
+        false
     }
 
     /** Back out of "Настройки" and "Диагностика", if on one of them. */

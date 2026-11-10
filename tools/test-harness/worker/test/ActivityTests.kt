@@ -383,6 +383,15 @@ fun main() {
         Env(tracking = true, restored = true); eq("restored", listOf(ID.nearbyFragment), nav().stack)
         Env(); eq("no journey", listOf(ID.nearbyFragment), nav().stack)
     }
+    t("N9 a section back on one of its own screens → marked; the section left, tapped, goes there") {
+        val e = Env(); val bar = e.binding().bottomNav
+        bar.tap(ID.linesFragment); nav().navigate(ID.directionsFragment)
+        bar.tap(ID.nearbyFragment); eq("on Спирки", listOf(ID.nearbyFragment), nav().stack)
+        bar.tap(ID.linesFragment)
+        eq("Линии back on its directions", listOf(ID.nearbyFragment, ID.linesFragment, ID.directionsFragment), nav().stack)
+        eq("Линии marked", ID.linesFragment, bar.selectedItemId)
+        bar.tap(ID.nearbyFragment); eq("Спирки, tapped, shown", listOf(ID.nearbyFragment), nav().stack)
+    }
     println("\n$ok passed, ${bad.size} failed"); bad.forEach { println("  ✗ $it") }
     kotlin.system.exitProcess(if (bad.isEmpty()) 0 else 1)
 
