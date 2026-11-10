@@ -46,5 +46,7 @@
          background 1.9:1 on it, labels 7.2:1. -->
     <color name="nav_bar_bg">#32353C</color>
     <color name="on_nav_active">#ECF0FF</color>
-    <color name="nav_bar">@color/nav_bar_bg</color>
+    <!-- The system's navigation bar on the screen's own colour (the owner,
+         10 Nov 2026). -->
+    <color name="nav_bar">@color/md_surface</color>
 </resources>

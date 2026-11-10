@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android 8.1 and later draw the navigation bar's buttons dark on a light
-     bar (windowLightNavigationBar): the bar takes the navigation bar's colour.
-     A dark theme takes values-night's, which outranks this. -->
+     bar (windowLightNavigationBar): the system's bar takes the screen's own
+     colour — not the app's navigation bar's (the owner, 10 Nov 2026). A dark
+     theme takes values-night's, which outranks this. -->
 <resources>
-    <color name="nav_bar">@color/nav_bar_bg</color>
+    <color name="nav_bar">@color/md_surface</color>
 </resources>

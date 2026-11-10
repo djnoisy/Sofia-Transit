@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
@@ -16,6 +17,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
 import androidx.core.view.children
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.NavigationUI
@@ -97,6 +100,21 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.bottomNav.setupWithNavController(navController)
+        // The system's navigation bar — Home, Recents, Back — not in the
+        // app's bar's colour (the owner, 10 Nov 2026): the bar ends above it
+        // (beside it, sideways), the screen's own colour under it. In place
+        // of Material's own handling, which padded the bar into that area.
+        // Matters where the app draws it, Android 15 on; before, the system
+        // paints it (navigationBarColor, themes.xml).
+        ViewCompat.setOnApplyWindowInsetsListener(binding.bottomNav) { v, insets ->
+            val bar = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            v.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                leftMargin = bar.left
+                rightMargin = bar.right
+                bottomMargin = bar.bottom
+            }
+            insets
+        }
         // "Настройки" and "Диагностика" belong to no section: left before a
         // section is chosen, or they would be kept as part of the section
         // left — and come back with it, the section's own screen behind

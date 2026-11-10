@@ -392,6 +392,16 @@ fun main() {
         eq("Линии marked", ID.linesFragment, bar.selectedItemId)
         bar.tap(ID.nearbyFragment); eq("Спирки, tapped, shown", listOf(ID.nearbyFragment), nav().stack)
     }
+    t("N10 the app's bar ends above the system's navigation bar (Home, Recents, Back)") {
+        val e = Env(); val bar = e.binding().bottomNav
+        val listener = androidx.core.view.ViewCompat.insetListeners[bar]
+            ?: throw AssertionError("no inset handling of its own")
+        listener(bar, androidx.core.view.WindowInsetsCompat(androidx.core.view.Insets(left = 0, right = 0, bottom = 48)))
+        val lp = bar.layoutParams as android.view.ViewGroup.MarginLayoutParams
+        eq("above it", 48, lp.bottomMargin)
+        listener(bar, androidx.core.view.WindowInsetsCompat(androidx.core.view.Insets(left = 40, right = 0, bottom = 0)))
+        eq("beside it, sideways", 40, lp.leftMargin); eq("not above it then", 0, lp.bottomMargin)
+    }
     println("\n$ok passed, ${bad.size} failed"); bad.forEach { println("  ✗ $it") }
     kotlin.system.exitProcess(if (bad.isEmpty()) 0 else 1)
 

@@ -10,11 +10,18 @@ open class View {
     var contentDescription: CharSequence? = null
     var isClickable = false
     var importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_AUTO
+    var layoutParams: ViewGroup.LayoutParams = ViewGroup.MarginLayoutParams()
     fun announceForAccessibility(t: CharSequence) { A11y.spoken += t.toString() }
     fun setOnClickListener(l: ((View) -> Unit)?) {}
     fun setPadding(a: Int, b: Int, c: Int, d: Int) {}
     fun post(r: () -> Unit): Boolean { r(); return true }
 }
-open class ViewGroup : View() { val childViews = mutableListOf<View>() }
+open class ViewGroup : View() {
+    val childViews = mutableListOf<View>()
+    open class LayoutParams
+    open class MarginLayoutParams : LayoutParams() {
+        var leftMargin = 0; var topMargin = 0; var rightMargin = 0; var bottomMargin = 0
+    }
+}
 class LayoutInflater
 class Window { val decorView = View() }

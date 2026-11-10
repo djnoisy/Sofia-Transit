@@ -59,8 +59,10 @@
 
     <!-- Status and navigation bar icons dark on light. -->
     <bool name="light_system_bars">true</bool>
-    <!-- The navigation bar: black before Android 8.1, which cannot draw its
-         buttons dark on a light bar (values-v27 has the light one). -->
+    <!-- The system's navigation bar (Home, Recents, Back): the screen's own
+         colour, not the app's navigation bar's (the owner, 10 Nov 2026) —
+         black before Android 8.1, which cannot draw its buttons dark on a
+         light bar (values-v27 has the light one). -->
     <color name="nav_bar">#000000</color>
 
     <!-- High contrast: black background, white text and lines, yellow accent. -->

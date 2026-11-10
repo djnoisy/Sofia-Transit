@@ -20,6 +20,8 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type f
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: overload resolution ambiguity: 
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<Boolean> was expected
@@ -73,6 +75,9 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: ViewCompat
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: ViewCompat
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: ViewGroup
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: WindowInsetsCompat
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: WorkInfo
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: WorkInfo
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: WorkInfo
@@ -87,6 +92,7 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
@@ -104,6 +110,9 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: bottomMargin
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: databinding
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: finish
@@ -122,6 +131,7 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: layoutInflater
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: leftMargin
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: lifecycleScope
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: menuInflater
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: moveTaskToBack
@@ -134,6 +144,7 @@ app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference:
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: onSupportNavigateUp
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: repeatOnLifecycle
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: resources
+app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: rightMargin
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: setContentView
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: setPadding
 app/src/main/java/bg/sofia/transit/MainActivity.kt: error: unresolved reference: setSupportActionBar
