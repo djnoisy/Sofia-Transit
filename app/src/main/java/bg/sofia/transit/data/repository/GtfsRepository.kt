@@ -960,18 +960,26 @@ class GtfsRepository @Inject constructor(
     }
 
     /**
-     * The line's directions running today besides [shown] (getDirectionsForRoute's
-     * two), each by a trip of its route today, for the Lines screen's "Други
-     * направления" (the owner, 24 Nov 2026; RouteOfTheDay.otherDirections).
+     * The Lines screen's "Други направления" (the owner, 24 Nov 2026;
+     * RouteOfTheDay.othersListed), besides [shown] (getDirectionsForRoute's
+     * two): the line's other directions running today and the routes each
+     * direction needs for every stop its trips leave from to be listed, each
+     * by a trip of the route. Empty when the line does not run today.
      */
-    suspend fun getOtherDirectionsForRoute(routeId: String, shown: List<Trip>): List<Trip> {
+    suspend fun getOtherDirectionsForRoute(routeId: String, shown: List<Trip>): List<OtherDirection> {
         val todays = todaysTrips(routeId)
-        val others = withContext(Dispatchers.Default) {
-            RouteOfTheDay.otherDirections(todays, shown.mapNotNull { it.tripHeadsign })
-        }
-        if (others.isEmpty()) return emptyList()
+        if (todays.isEmpty()) return emptyList()
+        // The two shown: their routes — of today's trips, or, from data too old
+        // to have today in it, as getDirectionsForRoute took them.
+        val main = shown.mapNotNull { m -> todays.firstOrNull { it.tripId == m.tripId } ?: withStops(listOf(m)).firstOrNull() }
+        val listed = withContext(Dispatchers.Default) { RouteOfTheDay.othersListed(todays, main) }
+        if (listed.isEmpty()) return emptyList()
         val trips = tripDao.getByRoute(routeId).associateBy { it.tripId }
-        return others.mapNotNull { trips[it.tripId] }
+        return listed.mapNotNull { l ->
+            trips[l.route.tripId]?.let { t ->
+                OtherDirection(t, l.by?.let { (if (l.fromStart) "от " else "през ") + it.name.ifEmpty { it.id } })
+            }
+        }
     }
 
     /**
@@ -1570,6 +1578,14 @@ const val METRO_ROUTE_TYPE = 1
  * direction's own.
  */
 data class ScheduledTime(val seconds: Int, val endsAt: String?)
+
+/**
+ * A route under the Lines screen's "Други направления"
+ * (GtfsRepository.getOtherDirectionsForRoute): a trip of it, and, for one more
+ * route of a direction listed already, what tells it apart ("от ДЕПО ИСКЪР",
+ * "през …"); null for another direction's own.
+ */
+data class OtherDirection(val trip: Trip, val via: String?)
 
 /**
  * A line's direction at a stop (GtfsRepository.lineAtStop): a trip whose

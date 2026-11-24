@@ -2,8 +2,9 @@
 // otherDirections) — the board's options and the Lines screen (the owner, 24 Nov 2026): on made-up trips, and on a
 // whole static feed (route/route_extract.py), day by day:
 //  - every departure from a stop (a trip at a stop but its last) shown in the Lines screen: at a stop of one of the
-//    directions it lists — the two of before and, under "Други направления", the others running that day — in that
-//    direction's timetable there (scheduleAt); before, the two directions' own trips, by the exact headsign, only;
+//    routes it lists — the two directions of before and, under "Други направления", the others running that day and
+//    the further routes each needs (othersListed) — in that direction's timetable there (scheduleAt); before, the two
+//    directions' own trips, by the exact headsign, only;
 //  - no trip of another direction put in a direction's timetable that runs the opposite way (RouteOfTheDay.opposite),
 //    nor leaves the stop by another way than the direction's route through it — judged by place: its next stop
 //    within OFF_WAY_M of one of the route's on from the stop;
@@ -91,6 +92,24 @@ fun main(args: Array<String>) {
             o.map { RouteOfTheDay.directionKey(it.headsign) } == listOf("RARE", "ONCE")) { o.map { it.headsign }.toString() }
     }
 
+    run {
+        // A direction whose runs from the depot call at stops its route does not (tram 22 to ГАРА ПОДУЯНЕ), one whose
+        // runs leave the way and come back to it (44 through МАХАЛА ИВАНЯНЕ), and a direction not shown.
+        val p = s("p", -800.0); val q = s("q", -400.0); val x = s("x", 600.0)
+        val trips = listOf(t("1", "Main", a, b, c, d), t("2", "Main", a, b, c, d), t("3", "Main", p, q, b, c, d),
+            t("4", "Back", d, c, b, a), t("5", "Back", d, c, b, a), t("6", "Back", d, x, b, a),
+            t("7", "Rare", a, b), t("8", "Rare", e, f, a, b))
+        val main = listOf(trips[0], trips[3])
+        val l = RouteOfTheDay.othersListed(trips, main)
+        fun ids(x: RouteOfTheDay.Listed) = x.route.tripId
+        check("under Други направления: the main directions' further routes, by where they start or a stop on the way; then the others, each followed by its own",
+            l.map { ids(it) to (it.by?.id to it.fromStart) } ==
+                listOf("3" to ("p" to true), "6" to ("x" to false), "8" to (null to false))) {
+            l.map { "${ids(it)} ${it.by?.id} ${it.fromStart}" }.toString() }
+        check("a direction's runs all along its route: nothing more",
+            RouteOfTheDay.othersListed(trips.take(2), listOf(trips[0])).isEmpty())
+    }
+
     // A whole feed, day by day.
     val file = args.getOrNull(0)?.let { File(it) }
     if (file == null || !file.isFile) { println("(no feed extract)"); return finish() }
@@ -107,7 +126,8 @@ fun main(args: Array<String>) {
     val byRoute = feed.groupBy { it.route }
     for ((date, services) in days) {
         var departures = 0; var shownBefore = 0; var shownNow = 0; var marked = 0; var opposite = 0; var offWay = 0
-        var routes = 0; var routeWrong = 0; var lines = 0; var withOthers = 0; var others = 0
+        var routes = 0; var routeWrong = 0; var lines = 0; var withOthers = 0; var others = 0; var further = 0
+        val furtherBy = ArrayList<String>()
         val hidden = HashMap<String, Int>(); val wrongBy = HashMap<String, Int>()
         for ((route, all) in byRoute) {
             val today = all.filter { it.service in services }.map { it.trip }
@@ -119,9 +139,11 @@ fun main(args: Array<String>) {
             val named = RouteOfTheDay.directions(today, ranking)
             val two = if (named.isNotEmpty()) named.map { it.second } else ranking.take(2).mapNotNull { hs ->
                 all.filter { it.trip.headsign == hs }.maxByOrNull { it.trip.stops.size }?.trip }
-            val more = RouteOfTheDay.otherDirections(today, two.map { it.headsign })
+            val listed = RouteOfTheDay.othersListed(today, two)
+            val more = listed.map { it.route }
             if (more.isNotEmpty()) withOthers++
-            others += more.size
+            others += listed.count { it.by == null }; further += listed.count { it.by != null }
+            for (l in listed) if (l.by != null) furtherBy += "${all[0].name} ${l.route.headsign} (${if (l.fromStart) "от" else "през"} ${l.by.name})"
             val who = "${all[0].name}"
             // What the Lines screen shows: (trip, index) of each call in a listed direction's timetable at its stops.
             val seenNow = HashSet<Pair<String, Int>>(); val seenBefore = HashSet<Pair<String, Int>>()
@@ -174,12 +196,13 @@ fun main(args: Array<String>) {
         }
         fun top(m: Map<String, Int>) = m.entries.sortedByDescending { it.value }.take(12).joinToString("; ") { "${it.key} ${it.value}" }
         fun pct(n: Int) = "%.2f %%".format(100.0 * n / departures)
-        println("$label, $date: $lines lines, $withOthers with other directions ($others)")
+        println("$label, $date: $lines lines, $withOthers with routes under Други направления: $others other directions, $further further routes")
+        if (furtherBy.isNotEmpty()) println("  further routes: ${furtherBy.joinToString("; ")}")
         println("  departures from stops $departures; shown in the Lines screen before ${shownBefore} (${pct(departures - shownBefore)} not), " +
             "now $shownNow (${pct(departures - shownNow)} not; $marked calls marked with where they end)")
         if (hidden.isNotEmpty()) println("  not shown now (${hidden.values.sum()}): ${top(hidden)}")
         check("$label, $date: more departures shown than before", shownNow > shownBefore)
-        check("$label, $date: under 0.5 % of departures not shown", (departures - shownNow) * 200 < departures) { pct(departures - shownNow) }
+        check("$label, $date: every departure from a stop shown", departures == shownNow) { "${departures - shownNow}: ${top(hidden)}" }
         check("$label, $date: no trip of the way back in a direction's timetable", opposite == 0) { top(wrongBy) }
         check("$label, $date: no trip leaving by another way in a direction's timetable — its next stop within $OFF_WAY_M m of the way's on",
             offWay == 0) { "$offWay: ${top(wrongBy)}" }

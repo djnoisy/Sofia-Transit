@@ -4,14 +4,16 @@ import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import bg.sofia.transit.data.db.entity.Trip
+import bg.sofia.transit.data.repository.OtherDirection
 import bg.sofia.transit.databinding.ItemDirectionBinding
 import bg.sofia.transit.databinding.ItemDirectionHeadingBinding
 import bg.sofia.transit.util.FileLogger
 
 /**
  * A line's directions: the two main ones, then — under "Други направления" —
- * the others running today (the owner, 24 Nov 2026: no bus leaving a stop is
- * to be lost from the Lines screen). [onClick] gets the direction and whether
+ * the others running today and the further routes a direction needs, told
+ * apart by where they start or a stop on the way (the owner, 24 Nov 2026: no
+ * bus leaving a stop is to be lost from the Lines screen). [onClick] gets the direction and whether
  * it is one of the others.
  */
 class DirectionsAdapter(
@@ -25,30 +27,38 @@ class DirectionsAdapter(
         private const val OTHERS_HEADING = "Други направления"
     }
 
-    /** A direction, and whether it is one of the others; null for the heading over them. */
-    private val items = mutableListOf<Pair<Trip, Boolean>?>()
+    /**
+     * A direction: its trip, whether it is under "Други направления", and
+     * what tells one more route of a direction apart ("от ДЕПО ИСКЪР").
+     */
+    class Row(val trip: Trip, val other: Boolean, val via: String? = null)
 
-    fun submitList(main: List<Trip>, others: List<Trip>) {
+    /** The rows; null for the heading over the others. */
+    private val items = mutableListOf<Row?>()
+
+    fun submitList(main: List<Trip>, others: List<OtherDirection>) {
         FileLogger.i(TAG, "submitList ${main.size} + ${others.size} other (current=${items.size})")
         val oldSize = items.size
         items.clear()
         if (oldSize > 0) notifyItemRangeRemoved(0, oldSize)
-        items.addAll(main.map { it to false })
+        items.addAll(main.map { Row(it, false) })
         if (others.isNotEmpty()) {
             items.add(null)
-            items.addAll(others.map { it to true })
+            items.addAll(others.map { Row(it.trip, true, it.via) })
         }
         if (items.isNotEmpty()) notifyItemRangeInserted(0, items.size)
     }
 
     inner class VH(val b: ItemDirectionBinding) : RecyclerView.ViewHolder(b.root) {
-        fun bind(trip: Trip, other: Boolean) {
+        fun bind(row: Row) {
+            val trip = row.trip
             try {
                 val headsign = trip.tripHeadsign?.ifBlank { "—" } ?: "—"
-                b.tvHeadsign.text = headsign
+                // "ГАРА ПОДУЯНЕ (от ДЕПО ИСКЪР)"; TalkBack: "…, от ДЕПО ИСКЪР."
+                b.tvHeadsign.text = row.via?.let { "$headsign ($it)" } ?: headsign
                 b.root.contentDescription =
-                    "Направление към $headsign. Натиснете за списък със спирки."
-                b.root.setOnClickListener { onClick(trip, other) }
+                    "Направление към $headsign${row.via?.let { ", $it" } ?: ""}. Натиснете за списък със спирки."
+                b.root.setOnClickListener { onClick(trip, row.other) }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind failed for ${trip.tripId}", e)
             }
@@ -68,7 +78,7 @@ class DirectionsAdapter(
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, pos: Int) {
         val item = items[pos]
         when {
-            holder is VH && item != null -> holder.bind(item.first, item.second)
+            holder is VH && item != null -> holder.bind(item)
             holder is HeadingVH -> holder.b.tvHeading.text = OTHERS_HEADING
         }
     }

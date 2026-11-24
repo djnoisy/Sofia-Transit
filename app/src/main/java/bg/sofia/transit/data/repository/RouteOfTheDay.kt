@@ -227,6 +227,60 @@ object RouteOfTheDay {
     }
 
     /**
+     * A route the Lines screen lists under "Други направления" (othersListed):
+     * another direction's route today ([by] null), or one more route of a
+     * direction listed already — [by], the first of its stops the
+     * direction's other lists lack, which tells it apart: where it starts
+     * ([fromStart]: "от ДЕПО ИСКЪР") or a stop on the way ("през …").
+     */
+    class Listed(val route: TodaysTrip, val by: Stop? = null, val fromStart: Boolean = false)
+
+    /**
+     * What the Lines screen lists under "Други направления", besides the two
+     * directions [main] (getDirectionsForRoute's routes): the routes of each
+     * of those that its trips of [trips] need (coverOf), then each other
+     * direction running today (otherDirections), followed by the routes it
+     * needs. So every stop a trip of the day leaves from is in a list of its
+     * direction, and in that direction's timetable there (scheduleAt): no
+     * departure of the line is missing from the screen (the owner, 24 Nov
+     * 2026: "no fixes for the cases missing — new ones would not be fixed by
+     * themselves"). One route a direction, as before, left out tram 22's runs
+     * from ДЕПО ИСКЪР to ГАРА ПОДУЯНЕ, 63's from ЗЛАТНИ МОСТОВЕ, 21's from the
+     * depot: 513 of 364 208 departures on 24 Nov 2026.
+     */
+    fun othersListed(trips: List<TodaysTrip>, main: List<TodaysTrip>): List<Listed> {
+        val out = ArrayList<Listed>()
+        for ((key, routes) in main.groupBy { directionKey(it.headsign) }) out += coverOf(trips, key, routes)
+        for (route in otherDirections(trips, main.map { it.headsign })) {
+            out += Listed(route)
+            out += coverOf(trips, directionKey(route.headsign), listOf(route))
+        }
+        return out
+    }
+
+    /**
+     * The routes besides [listed] — its routes listed already — that the
+     * direction [key] (directionKey) needs for every stop its trips of [trips]
+     * leave from (all but where each ends) to be in one of its lists: of its
+     * trips leaving from a stop none lists, the route the most of them run
+     * along (busiest), and again, until none is left. Each is one of those
+     * trips' own, so each round lists at least one more of them: it ends.
+     */
+    private fun coverOf(trips: List<TodaysTrip>, key: String, listed: List<TodaysTrip>): List<Listed> {
+        val own = trips.filter { directionKey(it.headsign) == key }
+        val listedIds = listed.flatMapTo(HashSet()) { r -> r.stops.map { it.id } }
+        val out = ArrayList<Listed>()
+        while (true) {
+            val left = own.filter { t -> t.stops.subList(0, t.stops.lastIndex).any { it.id !in listedIds } }
+            val route = busiest(left) ?: break
+            val first = route.stops.indexOfFirst { it.id !in listedIds }
+            out += Listed(route, route.stops[first], first == 0)
+            route.stops.mapTo(listedIds) { it.id }
+        }
+        return out
+    }
+
+    /**
      * Whether routes [a] and [b] run the opposite ways: the stops of [a]
      * that have one of [b] near (OPPOSITE_M — across the street), taken in
      * order, meet those of [b] mostly backwards. So every line with two

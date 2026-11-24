@@ -7,6 +7,7 @@ import bg.sofia.transit.data.db.entity.Route
 import bg.sofia.transit.data.db.entity.TransportType
 import bg.sofia.transit.data.db.entity.Trip
 import bg.sofia.transit.data.repository.GtfsRepository
+import bg.sofia.transit.data.repository.OtherDirection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -122,8 +123,8 @@ class LinesViewModel @Inject constructor(
 
     /**
      * The stops of a direction: of a main one, its route (getStopsForDirection,
-     * as before); of another ([other]), the route of the trip standing for it
-     * — its route today (RouteOfTheDay.otherDirections).
+     * as before); of one under "Други направления" ([other]), the route of the
+     * trip standing for it (RouteOfTheDay.othersListed).
      */
     fun selectDirection(trip: Trip, other: Boolean = false) {
         selectedDirection = trip
@@ -140,5 +141,8 @@ class LinesViewModel @Inject constructor(
     fun clearStops()      { _directionStops.value = emptyList() }
 }
 
-/** A line's directions: the two main ones, and the others running today. */
-data class LineDirections(val main: List<Trip> = emptyList(), val others: List<Trip> = emptyList())
+/**
+ * A line's directions: the two main ones, and under "Други направления" the
+ * others running today and the further routes of each (GtfsRepository.getOtherDirectionsForRoute).
+ */
+data class LineDirections(val main: List<Trip> = emptyList(), val others: List<OtherDirection> = emptyList())
