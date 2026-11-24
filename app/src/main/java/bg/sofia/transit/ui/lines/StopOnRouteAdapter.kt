@@ -7,7 +7,12 @@ import bg.sofia.transit.data.db.dao.StopWithSequence
 import bg.sofia.transit.databinding.ItemStopOnRouteBinding
 import bg.sofia.transit.util.FileLogger
 
+/**
+ * A route's stops: number, name, minutes from the start. [here]: the stop a
+ * board's route was opened from (RouteStopsFragment), marked "тази спирка".
+ */
 class StopOnRouteAdapter(
+    private val here: String? = null,
     private val onClick: (StopWithSequence) -> Unit
 ) : RecyclerView.Adapter<StopOnRouteAdapter.VH>() {
 
@@ -29,12 +34,14 @@ class StopOnRouteAdapter(
             try {
                 b.tvSequence.text = "${stop.stopSequence}."
                 b.tvStopName.text = stop.stopName
+                val isHere = here != null && stop.stopId == here
+                b.tvHere.visibility = if (isHere) android.view.View.VISIBLE else android.view.View.GONE
 
                 // Show cumulative minutes of travel from the first stop.
                 val mins = stop.minutesFromStart ?: 0
                 b.tvTime.text = "$mins мин"
                 b.root.contentDescription =
-                    "Спирка ${stop.stopSequence}: ${stop.stopName}, $mins минути"
+                    "Спирка ${stop.stopSequence}: ${stop.stopName}${if (isHere) ", тази спирка" else ""}, $mins минути"
                 b.root.setOnClickListener { onClick(stop) }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind failed for ${stop.stopId}", e)

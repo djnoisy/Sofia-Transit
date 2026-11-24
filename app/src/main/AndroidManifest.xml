@@ -72,6 +72,12 @@
             android:exported="false"
             android:label="Виртуално табло"/>
 
+        <!-- A board row's line: its route or its timetable, a window of its own. -->
+        <activity
+            android:name=".ui.board.LineWindowActivity"
+            android:exported="false"
+            android:label="Линия"/>
+
         <activity
             android:name=".ui.permissions.PermissionsActivity"
             android:exported="false"

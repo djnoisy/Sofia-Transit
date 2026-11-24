@@ -3,6 +3,7 @@ package bg.sofia.transit.ui.lines
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import bg.sofia.transit.data.repository.GtfsRepository
+import bg.sofia.transit.data.repository.ScheduledTime
 import bg.sofia.transit.util.DateHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,7 +14,8 @@ import javax.inject.Inject
 data class ScheduleState(
     val days: List<DateHelper.DayChip> = emptyList(),
     val selectedDate: String = "",        // YYYYMMDD currently shown
-    val times: List<String> = emptyList(),
+    /** By time; the line's short runs of other directions marked with where they end. */
+    val times: List<ScheduledTime> = emptyList(),
     val loading: Boolean = false,
     val noDataReason: String? = null      // null when data is present
 )

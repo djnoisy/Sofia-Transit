@@ -10,9 +10,27 @@ import bg.sofia.transit.ui.common.LineBadge
 import bg.sofia.transit.util.ArrivalTimes
 import bg.sofia.transit.util.FileLogger
 
-class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
+/**
+ * The board's rows, a line and direction each; activating one calls
+ * [onClick] — the options "Спирки по маршрута" and "Разписание за тази
+ * спирка" (StopArrivalsFragment; the owner, 24 Nov 2026).
+ */
+class ArrivalAdapter(
+    private val onClick: (ArrivalInfo) -> Unit
+) : RecyclerView.Adapter<ArrivalAdapter.VH>() {
 
-    companion object { private const val TAG = "ArrivalAdapter" }
+    companion object {
+        private const val TAG = "ArrivalAdapter"
+
+        /**
+         * The row's line as said, e.g. "Автобус 84" / "Тролей 2" /
+         * "Електробус 73"; plain "Линия N" when the type is uncertain
+         * (temporary lines with unknown vehicle kind).
+         */
+        fun labelOf(info: ArrivalInfo): String =
+            if (info.vehicleType != null) "${info.vehicleType.replaceFirstChar { it.uppercase() }} ${info.routeShortName}"
+            else "Линия ${info.routeShortName}"
+    }
 
     private val items = mutableListOf<ArrivalInfo>()
 
@@ -73,15 +91,7 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
     inner class VH(val b: ItemArrivalBinding) : RecyclerView.ViewHolder(b.root) {
         fun bind(info: ArrivalInfo) {
             try {
-                // Visible label: prefer the vehicle type when known, e.g.
-                // "Автобус 84" / "Тролей 2" / "Електробус 73". Fall back to
-                // plain "Линия N" when the type is uncertain (temporary
-                // lines with unknown vehicle kind).
-                val label = if (info.vehicleType != null) {
-                    "${info.vehicleType.replaceFirstChar { it.uppercase() }} ${info.routeShortName}"
-                } else {
-                    "Линия ${info.routeShortName}"
-                }
+                val label = labelOf(info)
                 // Shown as the badge: the vehicle's icon and the number on
                 // the line's official colour (redesign, stage b); the label
                 // is still what TalkBack says.
@@ -118,6 +128,7 @@ class ArrivalAdapter : RecyclerView.Adapter<ArrivalAdapter.VH>() {
                 } else {
                     "$label към ${info.headsign}: $timesDesc"
                 }
+                b.root.setOnClickListener { onClick(info) }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind() FAILED for $info", e)
             }

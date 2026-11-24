@@ -25,7 +25,7 @@ data class StopWithSequence(
  */
 data class TripStop(
     val tripId: String, val stopId: String, val stopLat: Double, val stopLon: Double,
-    val departureTime: String, val arrivalTime: String
+    val departureTime: String, val arrivalTime: String, val stopName: String
 )
 
 @Dao
@@ -38,7 +38,7 @@ interface StopTimeDao {
 
     /** The stops of [tripIds], by trip and in order, with their times. */
     @Query("""
-        SELECT st.tripId, st.stopId, s.stopLat, s.stopLon, st.departureTime, st.arrivalTime
+        SELECT st.tripId, st.stopId, s.stopLat, s.stopLon, st.departureTime, st.arrivalTime, s.stopName
         FROM stop_times st
         JOIN stops s ON s.stopId = st.stopId
         WHERE st.tripId IN (:tripIds)
@@ -70,40 +70,13 @@ interface StopTimeDao {
     """)
     suspend fun getScheduleForRouteAtStop(routeId: String, stopId: String): List<String>
 
+    /** The trips of [routeId] calling at any of [stopIds], on any day. */
     @Query("""
-        SELECT st.arrivalTime FROM stop_times st
+        SELECT DISTINCT st.tripId FROM stop_times st
         JOIN trips t ON t.tripId = st.tripId
-        WHERE t.routeId = :routeId 
-          AND t.tripHeadsign = :headsign
-          AND st.stopId = :stopId
-        ORDER BY st.arrivalTime
+        WHERE t.routeId = :routeId AND st.stopId IN (:stopIds)
     """)
-    suspend fun getScheduleForDirectionAtStop(
-        routeId: String,
-        headsign: String,
-        stopId: String
-    ): List<String>
-
-    /**
-     * Same as getScheduleForDirectionAtStop, but filters by service_ids
-     * (e.g. only those active on a given calendar date). Used when the user
-     * selects "weekday" / "weekend" / a specific date in the schedule view.
-     */
-    @Query("""
-        SELECT st.arrivalTime FROM stop_times st
-        JOIN trips t ON t.tripId = st.tripId
-        WHERE t.routeId = :routeId 
-          AND t.tripHeadsign = :headsign
-          AND st.stopId = :stopId
-          AND t.serviceId IN (:serviceIds)
-        ORDER BY st.arrivalTime
-    """)
-    suspend fun getScheduleForDirectionAtStopFiltered(
-        routeId: String,
-        headsign: String,
-        stopId: String,
-        serviceIds: List<String>
-    ): List<String>
+    suspend fun getTripIdsOfRouteAtStops(routeId: String, stopIds: List<String>): List<String>
 
     /**
      * For a given stop, returns route + headsign + arrival_time triples

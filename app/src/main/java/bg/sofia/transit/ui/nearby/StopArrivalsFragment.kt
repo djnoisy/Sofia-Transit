@@ -8,6 +8,7 @@ import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.core.os.bundleOf
 import androidx.core.view.MenuProvider
 import androidx.fragment.app.Fragment
@@ -16,7 +17,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.R
+import bg.sofia.transit.data.repository.ArrivalInfo
 import bg.sofia.transit.databinding.FragmentStopArrivalsBinding
+import bg.sofia.transit.ui.board.LineWindowActivity
 import bg.sofia.transit.util.FavoriteStop
 import bg.sofia.transit.util.FavoriteStops
 import bg.sofia.transit.util.FileLogger
@@ -28,7 +31,8 @@ import kotlinx.coroutines.launch
 /**
  * The arrivals at one stop — the board of the "Виртуално табло" window
  * (StopBoardActivity), with its top-bar actions: "Обнови" and adding to or
- * removing from the favourites (the owner, 9 Nov 2026).
+ * removing from the favourites (the owner, 9 Nov 2026). A row activated
+ * offers its line's route and timetable (the owner, 24 Nov 2026).
  */
 @AndroidEntryPoint
 class StopArrivalsFragment : Fragment() {
@@ -38,6 +42,8 @@ class StopArrivalsFragment : Fragment() {
         private const val ARG_STOP_ID = "stopId"
         private const val ARG_STOP_NAME = "stopName"
         private const val ARG_STOP_CODE = "stopCode"
+        private const val OPTION_ROUTE = "Спирки по маршрута"
+        private const val OPTION_SCHEDULE = "Разписание за тази спирка"
 
         fun newInstance(stopId: String, stopName: String, stopCode: String?) =
             StopArrivalsFragment().apply {
@@ -76,7 +82,7 @@ class StopArrivalsFragment : Fragment() {
         binding.tvStopName.contentDescription =
             "Спирка $stopName${codeSuffix.ifEmpty { "" }}. Списък с пристигания."
 
-        adapter = ArrivalAdapter()
+        adapter = ArrivalAdapter { info -> showLineOptions(info) }
         binding.rvArrivals.layoutManager = LinearLayoutManager(requireContext())
         binding.rvArrivals.adapter = adapter
         // Disable the "change" animation: when a row's contents update in
@@ -146,6 +152,39 @@ class StopArrivalsFragment : Fragment() {
         FileLogger.i(TAG, "$message: $stopId")
         requireActivity().invalidateOptionsMenu()
         Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * A row activated: its line's options (the owner, 24 Nov 2026) — the
+     * stops of the route its direction takes through this stop, or its
+     * timetable here — each in a window of its own over the board.
+     */
+    private fun showLineOptions(info: ArrivalInfo) {
+        val label = ArrivalAdapter.labelOf(info)
+        val title = if (info.dropOffOnly) "$label, само слизане" else "$label към ${info.headsign}"
+        AlertDialog.Builder(requireContext())
+            .setTitle(title)
+            .setItems(arrayOf(OPTION_ROUTE, OPTION_SCHEDULE)) { _, which -> openLineOption(info, route = which == 0) }
+            .setNegativeButton("Затвори", null)
+            .show()
+    }
+
+    private fun openLineOption(info: ArrivalInfo, route: Boolean) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            val line = vm.lineAtStop(info, stopId)
+            val context = context ?: return@launch
+            FileLogger.i(TAG, "${if (route) "Route" else "Timetable"} of ${info.routeId} towards '${info.headsign}' " +
+                "from the board of $stopId: ${line?.let { "trip ${it.tripId} at ${it.stopId}" } ?: "none"}")
+            when {
+                line == null -> Toast.makeText(context,
+                    if (route) "Маршрутът на линията не е известен" else "Няма разписание за тази линия",
+                    Toast.LENGTH_LONG).show()
+                route -> LineWindowActivity.openRoute(context, info.routeId, info.routeShortName,
+                    line.headsign, line.tripId, line.stopId)
+                else -> LineWindowActivity.openSchedule(context, info.routeId, info.routeShortName,
+                    line.headsign, line.stopId, stopName)
+            }
+        }
     }
 
     private fun scheduleAutoRefresh() {

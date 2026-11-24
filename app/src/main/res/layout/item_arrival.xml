@@ -2,13 +2,15 @@
 <!-- An arrival at a stop: a card — on the left the line's badge with the
      nearest time under it, on the right the direction with the next two
      times under it (the owner, 9 Nov 2026). Read as one by TalkBack (the
-     adapter's description on the card). -->
+     adapter's description on the card). Activated, it offers the line's
+     route and timetable (the owner, 24 Nov 2026). -->
 <com.google.android.material.card.MaterialCardView
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginHorizontal="4dp"
     android:layout_marginVertical="4dp"
+    android:clickable="true"
     android:focusable="true"
     android:screenReaderFocusable="true"
     android:importantForAccessibility="yes">

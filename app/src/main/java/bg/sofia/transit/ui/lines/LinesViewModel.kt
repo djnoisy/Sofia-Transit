@@ -34,9 +34,11 @@ class LinesViewModel @Inject constructor(
     private val _trolleyRouteIds = MutableStateFlow<Set<String>>(emptySet())
     val trolleyRouteIds: StateFlow<Set<String>> = _trolleyRouteIds
 
-    // Directions for selected route
-    private val _directions = MutableStateFlow<List<Trip>>(emptyList())
-    val directions: StateFlow<List<Trip>> = _directions
+    // Directions for selected route: the two main ones, and the others
+    // running today, under "Други направления" (the owner, 24 Nov 2026) —
+    // together, so the list is drawn once
+    private val _directions = MutableStateFlow(LineDirections())
+    val directions: StateFlow<LineDirections> = _directions
 
     // Stops for selected direction
     private val _directionStops = MutableStateFlow<List<StopWithSequence>>(emptyList())
@@ -113,22 +115,30 @@ class LinesViewModel @Inject constructor(
     fun selectRoute(route: Route) {
         selectedRoute = route
         viewModelScope.launch {
-            _directions.value = repo.getDirectionsForRoute(route.routeId)
+            val main = repo.getDirectionsForRoute(route.routeId)
+            _directions.value = LineDirections(main, repo.getOtherDirectionsForRoute(route.routeId, main))
         }
     }
 
-    fun selectDirection(trip: Trip) {
+    /**
+     * The stops of a direction: of a main one, its route (getStopsForDirection,
+     * as before); of another ([other]), the route of the trip standing for it
+     * — its route today (RouteOfTheDay.otherDirections).
+     */
+    fun selectDirection(trip: Trip, other: Boolean = false) {
         selectedDirection = trip
         viewModelScope.launch {
-            _directionStops.value = repo.getStopsForDirection(
-                trip.routeId, trip.tripHeadsign ?: ""
-            )
+            _directionStops.value = if (other) repo.getStopsOfTrip(trip.tripId)
+            else repo.getStopsForDirection(trip.routeId, trip.tripHeadsign ?: "")
         }
     }
 
     /** Used by ScheduleFragment to look up the direction it was opened for. */
     fun getSelectedDirection(): Trip? = selectedDirection
 
-    fun clearDirections() { _directions.value = emptyList() }
+    fun clearDirections() { _directions.value = LineDirections() }
     fun clearStops()      { _directionStops.value = emptyList() }
 }
+
+/** A line's directions: the two main ones, and the others running today. */
+data class LineDirections(val main: List<Trip> = emptyList(), val others: List<Trip> = emptyList())

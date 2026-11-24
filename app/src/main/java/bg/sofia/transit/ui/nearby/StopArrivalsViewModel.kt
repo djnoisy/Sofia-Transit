@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import bg.sofia.transit.data.repository.ArrivalInfo
 import bg.sofia.transit.data.repository.GtfsRepository
+import bg.sofia.transit.data.repository.LineAtStop
 import bg.sofia.transit.data.repository.RealtimeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -44,6 +45,21 @@ class StopArrivalsViewModel @Inject constructor(
     } catch (e: Exception) {
         FileLogger.w(TAG, "Could not load route colours: ${e.message}")
         emptyMap()
+    }
+
+    /**
+     * A board row's line at this stop, for its options: the route its
+     * direction takes through the stop and the pole it calls at
+     * (GtfsRepository.lineAtStop); null when the line has no timetable here.
+     */
+    suspend fun lineAtStop(info: ArrivalInfo, stopId: String): LineAtStop? = try {
+        if (!gtfsRepo.dataReady.value) gtfsRepo.dataReady.first { it }
+        gtfsRepo.lineAtStop(info.routeId, info.headsign, stopId)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        FileLogger.w(TAG, "Line at stop failed: ${e.message}")
+        null
     }
 
     fun loadArrivals(stopId: String, stopCode: String? = null) {

@@ -48,6 +48,19 @@
         android:paddingBottom="8dp"
         android:accessibilityHeading="true"/>
 
+    <!-- What the letters after some minutes mean: the line's short runs of
+         other directions, "а — до БУЛ. НИКОЛА ПЕТКОВ". Not read by TalkBack:
+         each hour's row says where such a trip ends. -->
+    <TextView android:id="@+id/tvLegend"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="15sp"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:paddingHorizontal="12dp"
+        android:paddingBottom="8dp"
+        android:visibility="gone"
+        android:importantForAccessibility="no"/>
+
     <ProgressBar android:id="@+id/pbLoading"
         android:layout_width="32dp"
         android:layout_height="32dp"

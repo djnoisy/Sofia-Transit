@@ -19,10 +19,13 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * Shows the static schedule for a specific (route, direction, stop) triple.
+ * Shows the static schedule for a specific (route, direction, stop) triple:
+ * the direction's trips and, marked, the line's short runs of other
+ * directions that leave the stop its way (GtfsRepository.getScheduleForDirectionAtStop).
  *
  * The user browses by concrete date via a 7-day strip (today + 6 days), with
- * today selected by default. Reached by tapping a stop in StopsListFragment.
+ * today selected by default. Reached by tapping a stop in StopsListFragment,
+ * and from the "Виртуално табло" in a window of its own (LineWindowActivity).
  */
 @AndroidEntryPoint
 class ScheduleFragment : Fragment() {
@@ -124,18 +127,28 @@ class ScheduleFragment : Fragment() {
         binding.pbLoading.visibility =
             if (state.loading) View.VISIBLE else View.GONE
 
-        // Group times by hour for compact display: "07: 05  20  35  50"
+        // Group times by hour for compact display: "07: 05  20  35  50".
+        // Another direction's short run: its minute marked with a letter —
+        // "а", "б", … by where it ends, in the order they first come — and
+        // the letters explained above the list (the owner, 24 Nov 2026).
+        val marks = LinkedHashMap<String, String>()
+        state.times.mapNotNull { it.endsAt }.distinct().forEachIndexed { i, end ->
+            marks[end] = MARK_LETTERS.getOrNull(i)?.toString() ?: "${i + 1}"
+        }
         val groups = state.times
-            .filter { it.length >= 5 }
-            .groupBy { it.substring(0, 2) }   // "07"
+            .groupBy { it.seconds / 3600 }
             .toSortedMap()
             .map { (hour, list) ->
                 ScheduleAdapter.Row(
-                    hour    = hour,
-                    minutes = list.map { it.substring(3, 5) }   // "05"
+                    hour    = "%02d".format(hour),
+                    minutes = list.map { t ->
+                        ScheduleAdapter.Minute("%02d".format(t.seconds / 60 % 60), t.endsAt?.let { marks[it] }, t.endsAt)
+                    }
                 )
             }
         adapter.submitList(groups)
+        binding.tvLegend.text = marks.entries.joinToString("\n") { (end, mark) -> "$mark — до $end" }
+        binding.tvLegend.visibility = if (marks.isEmpty() || state.loading) View.GONE else View.VISIBLE
 
         if (state.loading) {
             binding.tvEmpty.visibility = View.GONE
@@ -154,6 +167,11 @@ class ScheduleFragment : Fragment() {
                 "Намерени $total курса за избрания ден"
             )
         }
+    }
+
+    private companion object {
+        /** The letters short runs are marked with, by where they end. */
+        const val MARK_LETTERS = "абвгдежзиклмнопрстуф"
     }
 
     override fun onDestroyView() {

@@ -36,7 +36,7 @@ class DirectionsFragment : Fragment() {
         binding.tvRouteTitle.text = args.routeShortName
         binding.tvRouteTitle.contentDescription = args.routeShortName
 
-        val adapter = DirectionsAdapter { trip -> openStops(trip) }
+        val adapter = DirectionsAdapter { trip, other -> openStops(trip, other) }
         binding.rvDirections.layoutManager = LinearLayoutManager(requireContext())
         binding.rvDirections.adapter = adapter
         // No contentDescription on the RecyclerView itself — it would make
@@ -44,7 +44,8 @@ class DirectionsFragment : Fragment() {
         // child rendering. Same fix as in StopArrivalsFragment.
 
         viewLifecycleOwner.lifecycleScope.launch {
-            vm.directions.collectLatest { adapter.submitList(it) }
+            // The main two, then the others running today (the owner, 24 Nov 2026).
+            vm.directions.collectLatest { adapter.submitList(it.main, it.others) }
         }
 
         // Load the same "vehicle type + top-2 headsigns" info the Lines
@@ -61,8 +62,8 @@ class DirectionsFragment : Fragment() {
         }
     }
 
-    private fun openStops(trip: Trip) {
-        vm.selectDirection(trip)
+    private fun openStops(trip: Trip, other: Boolean) {
+        vm.selectDirection(trip, other)
         findNavController().navigate(
             DirectionsFragmentDirections.actionDirectionsToStopsList(
                 routeId   = args.routeId,

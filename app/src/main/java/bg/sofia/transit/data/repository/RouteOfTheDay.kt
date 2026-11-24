@@ -33,7 +33,8 @@ import kotlin.math.hypot
  */
 object RouteOfTheDay {
 
-    class Stop(val id: String, val lat: Double, val lon: Double)
+    /** A stop: its id, where it is, and its name where looked up (scheduleAt). */
+    class Stop(val id: String, val lat: Double, val lon: Double, val name: String = "")
 
     /**
      * A trip that runs today: its headsign, trimmed, its stops in order, and
@@ -106,13 +107,114 @@ object RouteOfTheDay {
      * day, the only one that place (50 m) chose otherwise. In order, so that
      * the stops of the way back are not taken for the way there.
      */
-    fun along(trip: TodaysTrip, route: TodaysTrip): Boolean {
+    fun along(trip: TodaysTrip, route: TodaysTrip): Boolean = along(trip.stops, route.stops)
+
+    /** [stops], each a stop of [route] by its id, in order (along). */
+    private fun along(stops: List<Stop>, route: List<Stop>): Boolean {
         var i = 0
-        for (s in route.stops) {
-            if (i == trip.stops.size) break
-            if (trip.stops[i].id == s.id) i++
+        for (s in route) {
+            if (i == stops.size) break
+            if (stops[i].id == s.id) i++
         }
-        return i == trip.stops.size
+        return i == stops.size
+    }
+
+    // ── A direction at a stop: the board's options and the Lines screen ──
+
+    /**
+     * The direction [headsign] names, whatever the case of its letters and its
+     * spaces: the board shows the feed's headsigns in capitals, single-spaced
+     * (RealtimeRepository), and CGM spells some directions two ways —
+     * "Кв. Орландовци" and "КВ. ОРЛАНДОВЦИ" for trams 3 and 4, "ГАРА ПОДУЯНЕ"
+     * and "Гара Подуяне" for tram 22 (the owner, 24 Nov 2026: one direction).
+     * Only for the board's options and the Lines screen: the route of the day
+     * (routeFor) and journey tracking compare headsigns exactly, as before.
+     */
+    fun directionKey(headsign: String?): String =
+        headsign.orEmpty().uppercase().replace(SPACES, " ").trim()
+
+    /**
+     * The route of the direction [headsign] names (directionKey) through the
+     * stop [poles] (its ids): of [trips] towards it that call there, the route
+     * the most of them run along (busiest) — the line's actual route through
+     * the stop, which the main route of the direction may not be (100 to
+     * БАЛКАН СТАР calls at 7 stops its main route does not; 179 such of 8138
+     * line, direction and stop on 24 Nov 2026). 111 at МЕТРОСТАНЦИЯ АЛ.
+     * МАЛИНОВ: towards Ж.К. ЛЮЛИН-1,2 its 41 stops, towards БУЛ. НИКОЛА
+     * ПЕТКОВ the short run's 22 (the owner, 24 Nov 2026: the route the
+     * direction shown takes). Null when none calls there.
+     */
+    fun routeThrough(trips: List<TodaysTrip>, headsign: String, poles: Set<String>): TodaysTrip? {
+        val key = directionKey(headsign)
+        return busiest(trips.filter { t -> directionKey(t.headsign) == key && t.stops.any { it.id in poles } })
+    }
+
+    /**
+     * A call at a stop for its timetable (scheduleAt): the trip, the index of
+     * the stop in it, and — for a trip of another direction that runs this
+     * one's way and ends sooner — its headsign, where it ends; null for the
+     * direction's own.
+     */
+    class Call(val trip: TodaysTrip, val at: Int, val endsAt: String?)
+
+    /**
+     * The timetable of the direction [headsign] names at the stop [stopId], of
+     * [trips] (the line's, on one day): its own trips calling there, by
+     * directionKey — as the Lines screen showed, but whatever the spelling —
+     * and those of the line's other directions that leave the stop its way
+     * and end sooner (runsAhead), each with where it ends: 111 at МЕТРОСТАНЦИЯ
+     * АЛ. МАЛИНОВ towards Ж.К. ЛЮЛИН-1,2 its 70 trips and the 11 short runs to
+     * БУЛ. НИКОЛА ПЕТКОВ (the owner, 24 Nov 2026: no bus leaving a stop is to
+     * be lost from the Lines screen). The way is the route of the direction
+     * through the stop (routeThrough); none on a day the direction does not
+     * call there, nor its short runs. In the order of [trips]; the caller
+     * sorts by time.
+     */
+    fun scheduleAt(trips: List<TodaysTrip>, headsign: String, stopId: String): List<Call> {
+        val key = directionKey(headsign)
+        val out = ArrayList<Call>()
+        for (t in trips) if (directionKey(t.headsign) == key)
+            t.stops.forEachIndexed { i, s -> if (s.id == stopId) out += Call(t, i, null) }
+        val route = routeThrough(trips, headsign, setOf(stopId)) ?: return out
+        val ahead = route.stops.subList(route.stops.indexOfFirst { it.id == stopId }, route.stops.size)
+        for (t in trips) {
+            if (directionKey(t.headsign) == key) continue
+            // Not where it ends: it leaves from nowhere there.
+            for (i in 0 until t.stops.lastIndex)
+                if (t.stops[i].id == stopId && runsAhead(t.stops.subList(i, t.stops.size), ahead)) out += Call(t, i, t.headsign)
+        }
+        return out
+    }
+
+    /**
+     * Whether a trip that leaves a stop by [rest] (that stop first, then on to
+     * where it ends) runs the way [ahead] goes from it (the same stop first):
+     * its stops, each one of the way's, by id, in order (along) — but for
+     * where it ends, often a pole of its own, off the way (111's short runs
+     * end at another pole of БУЛ. НИКОЛА ПЕТКОВ than the full runs call at).
+     * With no stop between, by that last stop's name: that of the way's next
+     * stop; any other — at a loop's end, the way back — is not the way.
+     */
+    private fun runsAhead(rest: List<Stop>, ahead: List<Stop>): Boolean {
+        if (along(rest, ahead)) return true
+        val before = rest.subList(0, rest.lastIndex)
+        if (!along(before, ahead)) return false
+        return before.size > 1 || (ahead.size > 1 && rest.last().name.isNotEmpty() && rest.last().name == ahead[1].name)
+    }
+
+    /**
+     * The line's directions running today besides [shown] (the Lines screen's
+     * two, getDirectionsForRoute), by directionKey: each by its route today
+     * (busiest), the busiest directions first, then by name — 111's БУЛ.
+     * НИКОЛА ПЕТКОВ, tram 22's ДЕПО ИСКЪР (the owner, 24 Nov 2026: shown under
+     * "Други направления"). Empty headsigns are not a direction.
+     */
+    fun otherDirections(trips: List<TodaysTrip>, shown: List<String>): List<TodaysTrip> {
+        val seen = shown.map { directionKey(it) }.toSet()
+        return trips.filter { directionKey(it.headsign).let { k -> k.isNotEmpty() && k !in seen } }
+            .groupBy { directionKey(it.headsign) }.entries
+            .sortedWith(compareBy<Map.Entry<String, List<TodaysTrip>>>({ -it.value.size }, { it.key }))
+            .mapNotNull { busiest(it.value) }
     }
 
     /**
@@ -211,4 +313,5 @@ object RouteOfTheDay {
     /** …to this long after it. */
     const val DUE_AFTER_S = 5 * 60
     private const val M_PER_DEG = 111_195.0
+    private val SPACES = Regex("\\s+")
 }

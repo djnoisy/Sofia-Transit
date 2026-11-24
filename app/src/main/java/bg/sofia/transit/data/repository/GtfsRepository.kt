@@ -903,20 +903,68 @@ class GtfsRepository @Inject constructor(
         if (services.isEmpty()) return emptyList()
         val key = "$routeId|${servicesTodayCache?.first}|$servicesTodayGeneration"
         synchronized(todaysTripsCache) { todaysTripsCache[key] }?.let { return it }
-        val trips = tripDao.getByRoute(routeId).filter { it.serviceId in services }
+        val todays = withStops(tripDao.getByRoute(routeId).filter { it.serviceId in services })
+        synchronized(todaysTripsCache) { todaysTripsCache[key] = todays }
+        return todays
+    }
+
+    /** [trips] with their stops, names and times, for RouteOfTheDay; those without stops left out. */
+    private suspend fun withStops(trips: List<Trip>): List<RouteOfTheDay.TodaysTrip> {
         val rows = trips.map { it.tripId }.chunked(TRIP_IDS_PER_QUERY).flatMap { stopTimeDao.getStopsOfTrips(it) }
-        val todays = withContext(Dispatchers.Default) {
+        return withContext(Dispatchers.Default) {
             val byTrip = rows.groupBy { it.tripId }
             trips.mapNotNull { t ->
                 byTrip[t.tripId]?.let { r ->
                     RouteOfTheDay.TodaysTrip(t.tripId, t.tripHeadsign?.trim() ?: "",
-                        r.map { RouteOfTheDay.Stop(it.stopId, it.stopLat, it.stopLon) },
+                        r.map { RouteOfTheDay.Stop(it.stopId, it.stopLat, it.stopLon, it.stopName) },
                         r.map { s -> RouteOfTheDay.secondsOf(s.departureTime).takeIf { it >= 0 } ?: RouteOfTheDay.secondsOf(s.arrivalTime) })
                 }
             }
         }
-        synchronized(todaysTripsCache) { todaysTripsCache[key] = todays }
-        return todays
+    }
+
+    /**
+     * A line's direction at a stop, for the board's options (the owner,
+     * 24 Nov 2026): the route it takes through the stop — of the trips
+     * towards [headsign] calling at any pole of the stop [stopId]
+     * (stopIdsOfSamePlace: the bus and the trolley rows of one stop), today's,
+     * else any day's (RouteOfTheDay.routeThrough) — and the pole it calls at.
+     * A row whose direction the feed did not say (the board's "А / Б", "—"):
+     * the direction calling there with most trips today. Null when no trip of
+     * the line calls there: a line with no timetable (CGM's replacement bus
+     * M3).
+     */
+    suspend fun lineAtStop(routeId: String, headsign: String, stopId: String): LineAtStop? {
+        val poles = stopIdsOfSamePlace(stopId).toSet()
+        val todays = todaysTrips(routeId)
+        val route = RouteOfTheDay.routeThrough(todays, headsign, poles)
+            ?: run {
+                val key = RouteOfTheDay.directionKey(headsign)
+                val ids = stopTimeDao.getTripIdsOfRouteAtStops(routeId, poles.toList()).toSet()
+                val any = tripDao.getByRoute(routeId).filter { it.tripId in ids && RouteOfTheDay.directionKey(it.tripHeadsign) == key }
+                RouteOfTheDay.routeThrough(withStops(any), headsign, poles)
+            }
+            ?: todays.filter { t -> t.stops.any { it.id in poles } }
+                .groupingBy { RouteOfTheDay.directionKey(it.headsign) }.eachCount()
+                .entries.sortedWith(compareBy({ -it.value }, { it.key })).firstOrNull()
+                ?.let { RouteOfTheDay.routeThrough(todays, it.key, poles) }
+            ?: return null
+        val pole = route.stops.first { it.id in poles }.id
+        FileLogger.i("GtfsRepo", "Line at stop: $routeId towards '$headsign' at $stopId → " +
+            "route ${route.tripId} (${route.stops.size} stops, '${route.headsign}'), at $pole")
+        return LineAtStop(route.tripId, route.headsign, pole)
+    }
+
+    /**
+     * The line's directions running today besides [shown] (getDirectionsForRoute's
+     * two), each by a trip of its route today, for the Lines screen's "Други
+     * направления" (the owner, 24 Nov 2026; RouteOfTheDay.otherDirections).
+     */
+    suspend fun getOtherDirectionsForRoute(routeId: String, shown: List<Trip>): List<Trip> {
+        val others = RouteOfTheDay.otherDirections(todaysTrips(routeId), shown.mapNotNull { it.tripHeadsign })
+        if (others.isEmpty()) return emptyList()
+        val trips = tripDao.getByRoute(routeId).associateBy { it.tripId }
+        return others.mapNotNull { trips[it.tripId] }
     }
 
     /**
@@ -1340,6 +1388,15 @@ class GtfsRepository @Inject constructor(
             ?: tripDao.getByRoute(routeId)
                 .firstOrNull { it.tripHeadsign == headsign }?.tripId
             ?: return emptyList()
+        return getStopsOfTrip(tripId)
+    }
+
+    /**
+     * The stops of [tripId] in order, each with the minutes from the first:
+     * a direction's route (getStopsForDirection), or the route a line takes
+     * through a stop (lineAtStop, the board's "Спирки по маршрута").
+     */
+    suspend fun getStopsOfTrip(tripId: String): List<StopWithSequence> {
         val raw = stopTimeDao.getStopsForTrip(tripId)
 
         // Compute minutes of travel from the FIRST stop on this route.
@@ -1365,29 +1422,29 @@ class GtfsRepository @Inject constructor(
     // ── Schedules ─────────────────────────────────────────────────────────
 
     /**
-     * Returns the schedule for a specific direction at a specific stop, on
-     * a specific date. The date is used to filter by service_id — so weekday
-     * trips, weekend trips and holiday trips are correctly separated.
-     *
-     * If [date] is null, returns the unfiltered (all-day-types) schedule.
+     * The timetable of a direction at a stop on [date] (YYYYMMDD), by time:
+     * the trips towards [headsign] calling there — whatever its spelling
+     * (RouteOfTheDay.directionKey) — and, marked with where they end, the
+     * line's trips of other directions that leave the stop this one's way and
+     * end sooner (RouteOfTheDay.scheduleAt; the owner, 24 Nov 2026: 111's
+     * short runs to БУЛ. НИКОЛА ПЕТКОВ were in no timetable of the Lines
+     * screen). Of the services running that day; none on a day outside the
+     * data.
      */
     suspend fun getScheduleForDirectionAtStop(
         routeId: String,
         headsign: String,
         stopId: String,
-        date: String? = null
-    ): List<String> {
-        if (date == null) {
-            return stopTimeDao.getScheduleForDirectionAtStop(routeId, headsign, stopId)
+        date: String
+    ): List<ScheduledTime> {
+        val services = calendarDateDao.getActiveServicesForDate(date).toSet()
+        if (services.isEmpty()) return emptyList()
+        val trips = withStops(tripDao.getByRoute(routeId).filter { it.serviceId in services })
+        return withContext(Dispatchers.Default) {
+            RouteOfTheDay.scheduleAt(trips, headsign, stopId)
+                .mapNotNull { c -> c.trip.times.getOrNull(c.at)?.takeIf { it >= 0 }?.let { ScheduledTime(it, c.endsAt) } }
+                .sortedBy { it.seconds }
         }
-        val activeServices = calendarDateDao.getActiveServicesForDate(date)
-        if (activeServices.isEmpty()) {
-            // No services scheduled for this date — likely outside feed range
-            return emptyList()
-        }
-        return stopTimeDao.getScheduleForDirectionAtStopFiltered(
-            routeId, headsign, stopId, activeServices
-        )
     }
 
     // ── Calendar / Service Days ──────────────────────────────────────────
@@ -1498,6 +1555,21 @@ class GtfsRepository @Inject constructor(
  */
 /** GTFS route_type for the metro, excluded from journey tracking. */
 const val METRO_ROUTE_TYPE = 1
+
+/**
+ * A time in a direction's timetable at a stop: seconds after midnight of the
+ * service day (past 24:00 after midnight), and where the trip ends when it is
+ * another direction's short run (getScheduleForDirectionAtStop); null for the
+ * direction's own.
+ */
+data class ScheduledTime(val seconds: Int, val endsAt: String?)
+
+/**
+ * A line's direction at a stop (GtfsRepository.lineAtStop): a trip whose
+ * route is the one it takes through the stop, its headsign, and the pole of
+ * the stop it calls at.
+ */
+data class LineAtStop(val tripId: String, val headsign: String, val stopId: String)
 
 data class SampleStops(
     val totalCount: Int,

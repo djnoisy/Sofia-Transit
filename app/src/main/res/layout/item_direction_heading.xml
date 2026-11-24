@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A heading in the list of a line's directions: "Други направления" over
+     the directions besides the two main ones (the owner, 24 Nov 2026).
+     TalkBack reads it as a heading. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/tvHeading"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:textAppearance="@style/TextAppearance.SofiaTransit.SectionTitle"
+    android:paddingHorizontal="12dp"
+    android:paddingTop="16dp"
+    android:paddingBottom="8dp"
+    android:accessibilityHeading="true"/>
