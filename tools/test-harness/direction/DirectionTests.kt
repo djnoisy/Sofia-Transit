@@ -5,7 +5,8 @@
 //    directions it lists — the two of before and, under "Други направления", the others running that day — in that
 //    direction's timetable there (scheduleAt); before, the two directions' own trips, by the exact headsign, only;
 //  - no trip of another direction put in a direction's timetable that runs the opposite way (RouteOfTheDay.opposite),
-//    nor leaves the stop by another way than the direction's route through it;
+//    nor leaves the stop by another way than the direction's route through it — judged by place: its next stop
+//    within OFF_WAY_M of one of the route's on from the stop;
 //  - the board's route (routeThrough) of every line, direction and stop: a route of that direction calling there;
 //  - 111 at МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ (A0169): towards Ж.К. ЛЮЛИН-1,2 its own trips and the short runs to БУЛ. НИКОЛА
 //    ПЕТКОВ, marked; towards БУЛ. НИКОЛА ПЕТКОВ, its 22 stops and none of the full runs.
@@ -19,14 +20,11 @@ fun check(n: String, ok: Boolean, detail: () -> String = { "" }) {
     if (ok) println("PASS $n") else { fails++; println("FAIL $n ${detail()}") }
 }
 
-class FeedTrip(val route: String, val name: String, val kind: String, val trip: TodaysTrip, val service: String)
+fun dist(a: Stop, b: Stop) = Math.hypot((a.lat - b.lat) * 111_195.0, (a.lon - b.lon) * 111_195.0 * Math.cos(Math.toRadians(a.lat)))
+/** A trip leaving a stop the way's way: its next stop is this near one of the way's next ones at most (another pole of a terminus). */
+const val OFF_WAY_M = 400.0
 
-/** [stops] each a stop of [route] by id, in order. */
-fun alongIds(stops: List<String>, route: List<String>): Boolean {
-    var i = 0
-    for (x in route) { if (i == stops.size) break; if (stops[i] == x) i++ }
-    return i == stops.size
-}
+class FeedTrip(val route: String, val name: String, val kind: String, val trip: TodaysTrip, val service: String)
 
 fun main(args: Array<String>) {
     fun s(id: String, y: Double, name: String = id.uppercase()) = Stop(id, 42.7 + y / 111_195.0, 23.3, name)
@@ -35,9 +33,13 @@ fun main(args: Array<String>) {
     val f = s("f", 2000.0)
 
     // Made up.
-    check("one direction whatever its letters' case and spaces",
+    check("one direction whatever its letters' case and the marks and spaces between its words",
         RouteOfTheDay.directionKey("Кв.  Орландовци ") == RouteOfTheDay.directionKey("КВ. ОРЛАНДОВЦИ") &&
+            RouteOfTheDay.directionKey("Ж.к. Дружба 2") == RouteOfTheDay.directionKey("Ж.К. ДРУЖБА-2") &&
+            RouteOfTheDay.directionKey("Бул.Проф.Цв.Лазаров") == RouteOfTheDay.directionKey("БУЛ. ПРОФ.ЦВ. ЛАЗАРОВ") &&
             RouteOfTheDay.directionKey(null) == "")
+    check("but not another: the digits stay apart",
+        RouteOfTheDay.directionKey("Ж.К. ЛЮЛИН-1,2") != RouteOfTheDay.directionKey("Ж.К. ЛЮЛИН-12"))
     run {
         val full = t("1", "F", a, b, c, d, e, f); val full2 = t("2", "F", a, b, c, d, e, f)
         val short = t("3", "Short", a, b, c, s("d2", 1210.0, "D"))          // ends at another pole of d
@@ -64,6 +66,13 @@ fun main(args: Array<String>) {
         check("a short run's own timetable: not the full runs, which go on past its end; the trips ending where it does, marked",
             sAtC.map { it.trip.tripId }.toSet() == setOf("3", "4", "7", "9") && sAtC.single { it.trip.tripId == "3" }.endsAt == null) {
             sAtC.map { it.trip.tripId }.toString() }
+    }
+    run {
+        // The board's row named by one day's spelling, the day's trips by another (trolley 4, data of 5 Oct 2026).
+        val today = listOf(t("1", "Ж.к. Дружба 2", a, b, c), t("2", "Ж.к. Дружба 2", a, b, c))
+        check("the board's row in another spelling than the day's trips: their route, their timetable",
+            RouteOfTheDay.routeThrough(today, "Ж.К. ДРУЖБА-2", setOf("b")) != null &&
+                RouteOfTheDay.scheduleAt(today, "Ж.К. ДРУЖБА-2", "b").size == 2)
     }
     run {
         val main = t("1", "E", a, b, c, d, e); val main2 = t("2", "E", a, b, c, d, e)
@@ -125,9 +134,11 @@ fun main(args: Array<String>) {
                         marked++
                         val way = RouteOfTheDay.routeThrough(today, dir.headsign, setOf(stop))!!
                         val from = way.stops.indexOfFirst { it.id == stop }
-                        val rest = cl.trip.stops.subList(cl.at, cl.trip.stops.lastIndex).map { it.id }
                         if (RouteOfTheDay.opposite(cl.trip, way)) { opposite++; wrongBy.merge("$who → ${cl.trip.headsign} in ${dir.headsign}", 1, Int::plus) }
-                        if (!alongIds(rest, way.stops.subList(from, way.stops.size).map { it.id })) offWay++
+                        // By place, not by the rule's ids and names: the trip's next stop near one of the way's on from here.
+                        val next = cl.trip.stops[cl.at + 1]
+                        val off = way.stops.subList(from + 1, way.stops.size).minOfOrNull { dist(next, it) } ?: Double.MAX_VALUE
+                        if (off > OFF_WAY_M) { offWay++; wrongBy.merge("$who → ${cl.trip.headsign} in ${dir.headsign} off ${off.toInt()} m", 1, Int::plus) }
                     }
                 }
                 if (dir in two) for (x in today) if (x.headsign == dir.headsign)
@@ -170,7 +181,8 @@ fun main(args: Array<String>) {
         check("$label, $date: more departures shown than before", shownNow > shownBefore)
         check("$label, $date: under 0.5 % of departures not shown", (departures - shownNow) * 200 < departures) { pct(departures - shownNow) }
         check("$label, $date: no trip of the way back in a direction's timetable", opposite == 0) { top(wrongBy) }
-        check("$label, $date: no trip leaving by another way in a direction's timetable", offWay == 0) { "$offWay" }
+        check("$label, $date: no trip leaving by another way in a direction's timetable — its next stop within $OFF_WAY_M m of the way's on",
+            offWay == 0) { "$offWay: ${top(wrongBy)}" }
         check("$label, $date: the board's route of every line, direction and stop ($routes) calls there, of that direction", routeWrong == 0) { "$routeWrong" }
     }
     finish()

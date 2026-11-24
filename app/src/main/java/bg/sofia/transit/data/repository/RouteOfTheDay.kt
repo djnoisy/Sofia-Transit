@@ -122,16 +122,23 @@ object RouteOfTheDay {
     // ── A direction at a stop: the board's options and the Lines screen ──
 
     /**
-     * The direction [headsign] names, whatever the case of its letters and its
-     * spaces: the board shows the feed's headsigns in capitals, single-spaced
-     * (RealtimeRepository), and CGM spells some directions two ways —
-     * "Кв. Орландовци" and "КВ. ОРЛАНДОВЦИ" for trams 3 and 4, "ГАРА ПОДУЯНЕ"
-     * and "Гара Подуяне" for tram 22 (the owner, 24 Nov 2026: one direction).
-     * Only for the board's options and the Lines screen: the route of the day
-     * (routeFor) and journey tracking compare headsigns exactly, as before.
+     * The direction [headsign] names, whatever the case of its letters and the
+     * marks and spaces between its words: the board shows the feed's
+     * headsigns in capitals, single-spaced (RealtimeRepository), and CGM
+     * spells some directions two ways — "Кв. Орландовци" and "КВ. ОРЛАНДОВЦИ"
+     * for trams 3 and 4, "ГАРА ПОДУЯНЕ" and "Гара Подуяне" for tram 22 (the
+     * owner, 24 Nov 2026: one direction); in the data of 5 Oct 2026 also by the
+     * day — "Ж.К. ДРУЖБА-2" and "Ж.к. Дружба 2" for trolley 4, "КВ. КНЯЖЕВО"
+     * and "Кв.Княжево" for tram 11 (review of 24 Nov 2026: the board's row
+     * named by the one, the day's trips by the other, an empty timetable). A
+     * run of anything but letters and digits is one space: "ЛЮЛИН-1,2" is not
+     * "ЛЮЛИН-12". No two directions of a line merged otherwise in the data of
+     * 5 Oct and 24 Nov 2026. Only for the board's options and the Lines
+     * screen: the route of the day (routeFor) and journey tracking compare
+     * headsigns exactly, as before.
      */
     fun directionKey(headsign: String?): String =
-        headsign.orEmpty().uppercase().replace(SPACES, " ").trim()
+        headsign.orEmpty().uppercase().replace(NOT_WORD, " ").trim()
 
     /**
      * The route of the direction [headsign] names (directionKey) through the
@@ -162,7 +169,9 @@ object RouteOfTheDay {
      * [trips] (the line's, on one day): its own trips calling there, by
      * directionKey — as the Lines screen showed, but whatever the spelling —
      * and those of the line's other directions that leave the stop its way
-     * and end sooner (runsAhead), each with where it ends: 111 at МЕТРОСТАНЦИЯ
+     * (runsAhead) — ending sooner, as a rule, or a stop past the way's end
+     * (3ТМ's to БУЛ. КН. МАРИЯ ЛУИЗА in the data of 5 Oct 2026) — each with
+     * where it ends: 111 at МЕТРОСТАНЦИЯ
      * АЛ. МАЛИНОВ towards Ж.К. ЛЮЛИН-1,2 its 70 trips and the 11 short runs to
      * БУЛ. НИКОЛА ПЕТКОВ (the owner, 24 Nov 2026: no bus leaving a stop is to
      * be lost from the Lines screen). The way is the route of the direction
@@ -313,5 +322,5 @@ object RouteOfTheDay {
     /** …to this long after it. */
     const val DUE_AFTER_S = 5 * 60
     private const val M_PER_DEG = 111_195.0
-    private val SPACES = Regex("\\s+")
+    private val NOT_WORD = Regex("[^\\p{L}\\p{N}]+")
 }

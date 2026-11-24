@@ -72,7 +72,7 @@ class ScheduleAdapter : RecyclerView.Adapter<ScheduleAdapter.VH>() {
     private var markColor: Int? = null
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        if (markColor == null) markColor = MaterialColors.getColor(parent, com.google.android.material.R.attr.colorPrimary)
+        if (markColor == null) markColor = MaterialColors.getColor(parent, androidx.appcompat.R.attr.colorPrimary)
         return VH(ItemScheduleRowBinding.inflate(LayoutInflater.from(parent.context), parent, false))
     }
 

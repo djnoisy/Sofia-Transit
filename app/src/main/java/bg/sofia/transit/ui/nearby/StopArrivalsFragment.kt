@@ -170,8 +170,11 @@ class StopArrivalsFragment : Fragment() {
     }
 
     private fun openLineOption(info: ArrivalInfo, route: Boolean) {
-        viewLifecycleOwner.lifecycleScope.launch {
+        val owner = viewLifecycleOwnerLiveData.value ?: return
+        owner.lifecycleScope.launch {
             val line = vm.lineAtStop(info, stopId)
+            // Not after the board was left meanwhile (a data import waited on).
+            if (!isResumed) return@launch
             val context = context ?: return@launch
             FileLogger.i(TAG, "${if (route) "Route" else "Timetable"} of ${info.routeId} towards '${info.headsign}' " +
                 "from the board of $stopId: ${line?.let { "trip ${it.tripId} at ${it.stopId}" } ?: "none"}")

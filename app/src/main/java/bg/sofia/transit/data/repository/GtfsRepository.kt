@@ -929,25 +929,29 @@ class GtfsRepository @Inject constructor(
      * towards [headsign] calling at any pole of the stop [stopId]
      * (stopIdsOfSamePlace: the bus and the trolley rows of one stop), today's,
      * else any day's (RouteOfTheDay.routeThrough) — and the pole it calls at.
-     * A row whose direction the feed did not say (the board's "А / Б", "—"):
-     * the direction calling there with most trips today. Null when no trip of
-     * the line calls there: a line with no timetable (CGM's replacement bus
-     * M3).
+     * A row whose direction no trip of the line calling there has (the board's
+     * "А / Б", "—", where the feed did not say): the direction leaving from
+     * there with most trips today — not one ending there, at a terminus. Null
+     * when no trip of the line calls there: a line with no timetable (CGM's
+     * replacement bus M3).
      */
     suspend fun lineAtStop(routeId: String, headsign: String, stopId: String): LineAtStop? {
         val poles = stopIdsOfSamePlace(stopId).toSet()
         val todays = todaysTrips(routeId)
-        val route = RouteOfTheDay.routeThrough(todays, headsign, poles)
+        val route = withContext(Dispatchers.Default) { RouteOfTheDay.routeThrough(todays, headsign, poles) }
             ?: run {
                 val key = RouteOfTheDay.directionKey(headsign)
                 val ids = stopTimeDao.getTripIdsOfRouteAtStops(routeId, poles.toList()).toSet()
-                val any = tripDao.getByRoute(routeId).filter { it.tripId in ids && RouteOfTheDay.directionKey(it.tripHeadsign) == key }
-                RouteOfTheDay.routeThrough(withStops(any), headsign, poles)
+                val any = withStops(tripDao.getByRoute(routeId)
+                    .filter { it.tripId in ids && RouteOfTheDay.directionKey(it.tripHeadsign) == key })
+                withContext(Dispatchers.Default) { RouteOfTheDay.routeThrough(any, headsign, poles) }
             }
-            ?: todays.filter { t -> t.stops.any { it.id in poles } }
-                .groupingBy { RouteOfTheDay.directionKey(it.headsign) }.eachCount()
-                .entries.sortedWith(compareBy({ -it.value }, { it.key })).firstOrNull()
-                ?.let { RouteOfTheDay.routeThrough(todays, it.key, poles) }
+            ?: withContext(Dispatchers.Default) {
+                todays.filter { t -> t.stops.dropLast(1).any { it.id in poles } }
+                    .groupingBy { RouteOfTheDay.directionKey(it.headsign) }.eachCount()
+                    .entries.sortedWith(compareBy({ -it.value }, { it.key })).firstOrNull()
+                    ?.let { RouteOfTheDay.routeThrough(todays, it.key, poles) }
+            }
             ?: return null
         val pole = route.stops.first { it.id in poles }.id
         FileLogger.i("GtfsRepo", "Line at stop: $routeId towards '$headsign' at $stopId → " +
@@ -961,7 +965,10 @@ class GtfsRepository @Inject constructor(
      * направления" (the owner, 24 Nov 2026; RouteOfTheDay.otherDirections).
      */
     suspend fun getOtherDirectionsForRoute(routeId: String, shown: List<Trip>): List<Trip> {
-        val others = RouteOfTheDay.otherDirections(todaysTrips(routeId), shown.mapNotNull { it.tripHeadsign })
+        val todays = todaysTrips(routeId)
+        val others = withContext(Dispatchers.Default) {
+            RouteOfTheDay.otherDirections(todays, shown.mapNotNull { it.tripHeadsign })
+        }
         if (others.isEmpty()) return emptyList()
         val trips = tripDao.getByRoute(routeId).associateBy { it.tripId }
         return others.mapNotNull { trips[it.tripId] }

@@ -6,6 +6,7 @@ import bg.sofia.transit.data.repository.GtfsRepository
 import bg.sofia.transit.data.repository.ScheduledTime
 import bg.sofia.transit.util.DateHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -31,6 +32,7 @@ class ScheduleViewModel @Inject constructor(
     private var routeId: String = ""
     private var headsign: String = ""
     private var stopId: String = ""
+    private var loadJob: Job? = null
 
     fun init(routeId: String, headsign: String, stopId: String) {
         this.routeId  = routeId
@@ -53,7 +55,10 @@ class ScheduleViewModel @Inject constructor(
             loading = true,
             noDataReason = null
         )
-        viewModelScope.launch {
+        // The day chosen last is the one shown: a load for a day tapped
+        // before is dropped (each reads all the line's trips of its day).
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             val times = repo.getScheduleForDirectionAtStop(
                 routeId  = routeId,
                 headsign = headsign,
