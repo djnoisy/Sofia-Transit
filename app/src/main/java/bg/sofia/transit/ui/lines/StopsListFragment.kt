@@ -34,8 +34,13 @@ class StopsListFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
 
-        binding.tvDirectionTitle.text = "→ ${args.headsign}"
-        binding.tvDirectionTitle.contentDescription = "към ${args.headsign}"
+        // One more route of a direction: what tells it apart, after it —
+        // "→ ГАРА ПОДУЯНЕ (от ДЕПО ИСКЪР)", for TalkBack "…, от ДЕПО ИСКЪР".
+        val via = args.via.takeIf { it.isNotEmpty() }
+        val shownVia = via?.let { " ($it)" } ?: ""
+        val saidVia = via?.let { ", $it" } ?: ""
+        binding.tvDirectionTitle.text = "→ ${args.headsign}$shownVia"
+        binding.tvDirectionTitle.contentDescription = "към ${args.headsign}$saidVia"
 
         // Same pattern as Directions/Schedule screens: replace generic
         // "Линия N" with the concrete vehicle type ("Автобус 84",
@@ -44,9 +49,9 @@ class StopsListFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             val meta = vm.getRouteMeta(args.routeId)
             val label = meta.vehicleType?.replaceFirstChar { it.uppercase() } ?: "Линия"
-            binding.tvDirectionTitle.text = "$label ${args.routeName} → ${args.headsign}"
+            binding.tvDirectionTitle.text = "$label ${args.routeName} → ${args.headsign}$shownVia"
             binding.tvDirectionTitle.contentDescription =
-                "$label ${args.routeName} към ${args.headsign}"
+                "$label ${args.routeName} към ${args.headsign}$saidVia"
         }
 
         val adapter = StopOnRouteAdapter { stop -> openSchedule(stop) }

@@ -36,7 +36,7 @@ class DirectionsFragment : Fragment() {
         binding.tvRouteTitle.text = args.routeShortName
         binding.tvRouteTitle.contentDescription = args.routeShortName
 
-        val adapter = DirectionsAdapter { trip, other -> openStops(trip, other) }
+        val adapter = DirectionsAdapter { trip, other, via -> openStops(trip, other, via) }
         binding.rvDirections.layoutManager = LinearLayoutManager(requireContext())
         binding.rvDirections.adapter = adapter
         // No contentDescription on the RecyclerView itself — it would make
@@ -62,13 +62,14 @@ class DirectionsFragment : Fragment() {
         }
     }
 
-    private fun openStops(trip: Trip, other: Boolean) {
+    private fun openStops(trip: Trip, other: Boolean, via: String?) {
         vm.selectDirection(trip, other)
         findNavController().navigate(
             DirectionsFragmentDirections.actionDirectionsToStopsList(
                 routeId   = args.routeId,
                 headsign  = trip.tripHeadsign ?: "—",
-                routeName = args.routeShortName
+                routeName = args.routeShortName,
+                via       = via ?: ""
             )
         )
     }

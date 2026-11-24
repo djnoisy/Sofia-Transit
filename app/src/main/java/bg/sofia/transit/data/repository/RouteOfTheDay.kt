@@ -33,8 +33,8 @@ import kotlin.math.hypot
  */
 object RouteOfTheDay {
 
-    /** A stop: its id, where it is, and its name where looked up (scheduleAt). */
-    class Stop(val id: String, val lat: Double, val lon: Double, val name: String = "")
+    /** A stop: its id, where it is, and its name and code ("0470") where looked up (scheduleAt, othersListed). */
+    class Stop(val id: String, val lat: Double, val lon: Double, val name: String = "", val code: String = "")
 
     /**
      * A trip that runs today: its headsign, trimmed, its stops in order, and
@@ -216,11 +216,12 @@ object RouteOfTheDay {
      * two, getDirectionsForRoute), by directionKey: each by its route today
      * (busiest), the busiest directions first, then by name — 111's БУЛ.
      * НИКОЛА ПЕТКОВ, tram 22's ДЕПО ИСКЪР (the owner, 24 Nov 2026: shown under
-     * "Други направления"). Empty headsigns are not a direction.
+     * "Други направления"). Trips without a headsign — none in the data of
+     * 5 Oct and 24 Nov 2026 — are one direction, "—": not left out.
      */
     fun otherDirections(trips: List<TodaysTrip>, shown: List<String>): List<TodaysTrip> {
         val seen = shown.map { directionKey(it) }.toSet()
-        return trips.filter { directionKey(it.headsign).let { k -> k.isNotEmpty() && k !in seen } }
+        return trips.filter { directionKey(it.headsign) !in seen }
             .groupBy { directionKey(it.headsign) }.entries
             .sortedWith(compareBy<Map.Entry<String, List<TodaysTrip>>>({ -it.value.size }, { it.key }))
             .mapNotNull { busiest(it.value) }
@@ -233,7 +234,21 @@ object RouteOfTheDay {
      * direction's other lists lack, which tells it apart: where it starts
      * ([fromStart]: "от ДЕПО ИСКЪР") or a stop on the way ("през …").
      */
-    class Listed(val route: TodaysTrip, val by: Stop? = null, val fromStart: Boolean = false)
+    class Listed(val route: TodaysTrip, val by: Stop? = null, val fromStart: Boolean = false, val sameName: Boolean = false) {
+        /**
+         * What tells it apart, as the screen says it: "от ДЕПО ИСКЪР", "през
+         * МАХАЛА ИВАНЯНЕ"; with the stop's code when a stop of that name is
+         * in the direction's lists already — another pole (tram 22's runs to
+         * ДЕПО ИСКЪР from the other pole of ГАРА ПОДУЯНЕ on weekends, review
+         * of 24 Nov 2026): "от ГАРА ПОДУЯНЕ, код 0470". Null for another
+         * direction's own route.
+         */
+        val label: String?
+            get() = by?.let { s ->
+                (if (fromStart) "от " else "през ") + s.name.ifEmpty { s.id } +
+                    (if (sameName && s.code.isNotEmpty()) ", код ${s.code}" else "")
+            }
+    }
 
     /**
      * What the Lines screen lists under "Други направления", besides the two
@@ -269,13 +284,16 @@ object RouteOfTheDay {
     private fun coverOf(trips: List<TodaysTrip>, key: String, listed: List<TodaysTrip>): List<Listed> {
         val own = trips.filter { directionKey(it.headsign) == key }
         val listedIds = listed.flatMapTo(HashSet()) { r -> r.stops.map { it.id } }
+        val listedNames = listed.flatMapTo(HashSet()) { r -> r.stops.map { directionKey(it.name) } }
         val out = ArrayList<Listed>()
         while (true) {
             val left = own.filter { t -> t.stops.subList(0, t.stops.lastIndex).any { it.id !in listedIds } }
             val route = busiest(left) ?: break
             val first = route.stops.indexOfFirst { it.id !in listedIds }
-            out += Listed(route, route.stops[first], first == 0)
+            val by = route.stops[first]
+            out += Listed(route, by, first == 0, directionKey(by.name) in listedNames)
             route.stops.mapTo(listedIds) { it.id }
+            route.stops.mapTo(listedNames) { directionKey(it.name) }
         }
         return out
     }

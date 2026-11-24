@@ -66,6 +66,8 @@
         <argument android:name="routeId"    app:argType="string"/>
         <argument android:name="headsign"   app:argType="string"/>
         <argument android:name="routeName"  app:argType="string" android:defaultValue=""/>
+        <!-- What tells one more route of a direction apart ("от ДЕПО ИСКЪР"); empty for a direction's own. -->
+        <argument android:name="via"        app:argType="string" android:defaultValue=""/>
 
         <action android:id="@+id/actionStopsListToSchedule"
             app:destination="@id/scheduleFragment"/>

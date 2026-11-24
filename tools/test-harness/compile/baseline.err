@@ -1482,6 +1482,9 @@ app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: databinding
 app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: findNavController
+app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: it
+app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: it
+app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: navArgs
 app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: onDestroyView
 app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: onViewCreated

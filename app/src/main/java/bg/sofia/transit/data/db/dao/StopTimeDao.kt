@@ -25,7 +25,7 @@ data class StopWithSequence(
  */
 data class TripStop(
     val tripId: String, val stopId: String, val stopLat: Double, val stopLon: Double,
-    val departureTime: String, val arrivalTime: String, val stopName: String
+    val departureTime: String, val arrivalTime: String, val stopName: String, val stopCode: String?
 )
 
 @Dao
@@ -38,7 +38,7 @@ interface StopTimeDao {
 
     /** The stops of [tripIds], by trip and in order, with their times. */
     @Query("""
-        SELECT st.tripId, st.stopId, s.stopLat, s.stopLon, st.departureTime, st.arrivalTime, s.stopName
+        SELECT st.tripId, st.stopId, s.stopLat, s.stopLon, st.departureTime, st.arrivalTime, s.stopName, s.stopCode
         FROM stop_times st
         JOIN stops s ON s.stopId = st.stopId
         WHERE st.tripId IN (:tripIds)

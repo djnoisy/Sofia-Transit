@@ -916,7 +916,7 @@ class GtfsRepository @Inject constructor(
             trips.mapNotNull { t ->
                 byTrip[t.tripId]?.let { r ->
                     RouteOfTheDay.TodaysTrip(t.tripId, t.tripHeadsign?.trim() ?: "",
-                        r.map { RouteOfTheDay.Stop(it.stopId, it.stopLat, it.stopLon, it.stopName) },
+                        r.map { RouteOfTheDay.Stop(it.stopId, it.stopLat, it.stopLon, it.stopName, it.stopCode.orEmpty()) },
                         r.map { s -> RouteOfTheDay.secondsOf(s.departureTime).takeIf { it >= 0 } ?: RouteOfTheDay.secondsOf(s.arrivalTime) })
                 }
             }
@@ -969,17 +969,16 @@ class GtfsRepository @Inject constructor(
     suspend fun getOtherDirectionsForRoute(routeId: String, shown: List<Trip>): List<OtherDirection> {
         val todays = todaysTrips(routeId)
         if (todays.isEmpty()) return emptyList()
-        // The two shown: their routes — of today's trips, or, from data too old
-        // to have today in it, as getDirectionsForRoute took them.
-        val main = shown.mapNotNull { m -> todays.firstOrNull { it.tripId == m.tripId } ?: withStops(listOf(m)).firstOrNull() }
-        val listed = withContext(Dispatchers.Default) { RouteOfTheDay.othersListed(todays, main) }
-        if (listed.isEmpty()) return emptyList()
+        // The two shown: the routes their screens list (getStopsForDirection),
+        // which getDirectionsForRoute's trips may not be when it falls back to
+        // the fullest of all days (review of 24 Nov 2026).
         val trips = tripDao.getByRoute(routeId).associateBy { it.tripId }
-        return listed.mapNotNull { l ->
-            trips[l.route.tripId]?.let { t ->
-                OtherDirection(t, l.by?.let { (if (l.fromStart) "от " else "през ") + it.name.ifEmpty { it.id } })
-            }
+        val main = shown.mapNotNull { m ->
+            val id = directionTripId(routeId, m.tripHeadsign ?: "") ?: m.tripId
+            todays.firstOrNull { it.tripId == id } ?: trips[id]?.let { withStops(listOf(it)).firstOrNull() }
         }
+        val listed = withContext(Dispatchers.Default) { RouteOfTheDay.othersListed(todays, main) }
+        return listed.mapNotNull { l -> trips[l.route.tripId]?.let { t -> OtherDirection(t, l.label) } }
     }
 
     /**
@@ -1399,12 +1398,14 @@ class GtfsRepository @Inject constructor(
      * IS a stable property of the route.
      */
     suspend fun getStopsForDirection(routeId: String, headsign: String): List<StopWithSequence> {
-        val tripId = representativeTrip(routeId, headsign)
-            ?: tripDao.getByRoute(routeId)
-                .firstOrNull { it.tripHeadsign == headsign }?.tripId
-            ?: return emptyList()
+        val tripId = directionTripId(routeId, headsign) ?: return emptyList()
         return getStopsOfTrip(tripId)
     }
+
+    /** The trip whose stops a direction's screen lists (getStopsForDirection). */
+    private suspend fun directionTripId(routeId: String, headsign: String): String? =
+        representativeTrip(routeId, headsign)
+            ?: tripDao.getByRoute(routeId).firstOrNull { it.tripHeadsign == headsign }?.tripId
 
     /**
      * The stops of [tripId] in order, each with the minutes from the first:

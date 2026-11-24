@@ -88,8 +88,8 @@ fun main(args: Array<String>) {
         val trips = listOf(t("1", "A", a, b), t("2", "A", a, b), t("3", "B", b, a), t("4", "Rare", a, c),
             t("5", "rare ", a, c), t("6", "Once", a, d), t("7", "", a, e), t("8", "Rare", a, c))
         val o = RouteOfTheDay.otherDirections(trips, listOf("a", "B"))
-        check("the other directions: not those shown, whatever the spelling; the busiest first; none without a headsign",
-            o.map { RouteOfTheDay.directionKey(it.headsign) } == listOf("RARE", "ONCE")) { o.map { it.headsign }.toString() }
+        check("the other directions: not those shown, whatever the spelling; the busiest first; trips without a headsign one too",
+            o.map { RouteOfTheDay.directionKey(it.headsign) } == listOf("RARE", "", "ONCE")) { o.map { it.headsign }.toString() }
     }
 
     run {
@@ -108,6 +108,12 @@ fun main(args: Array<String>) {
             l.map { "${ids(it)} ${it.by?.id} ${it.fromStart}" }.toString() }
         check("a direction's runs all along its route: nothing more",
             RouteOfTheDay.othersListed(trips.take(2), listOf(trips[0])).isEmpty())
+        check("told apart as said: from where it starts, through a stop on the way",
+            l[0].label == "от P" && l[1].label == "през X" && l[2].label == null) { l.map { it.label }.toString() }
+        // Runs from another pole of a stop the direction's route has (tram 22 to ДЕПО ИСКЪР on weekends): by its code too.
+        val pole = Stop("b2", b.lat, b.lon + 0.001, "B", "0470")
+        val pl = RouteOfTheDay.othersListed(listOf(t("1", "Main", a, b, c, d), t("2", "Main", pole, c, d)), listOf(t("1", "Main", a, b, c, d)))
+        check("from another pole of a stop listed: its code said", pl.singleOrNull()?.label == "от B, код 0470") { pl.map { it.label }.toString() }
     }
 
     // A whole feed, day by day.
@@ -120,14 +126,14 @@ fun main(args: Array<String>) {
         else {
             val st = p[7].split(";").map { it.split(":") }
             feed += FeedTrip(p[1], p[2], p[3], TodaysTrip(p[4], p[5],
-                st.map { Stop(it[0], it[1].toDouble(), it[2].toDouble(), it.getOrElse(5) { "" }) }, st.map { it[3].toInt() }), p[6])
+                st.map { Stop(it[0], it[1].toDouble(), it[2].toDouble(), it.getOrElse(5) { "" }, it.getOrElse(4) { "" }) }, st.map { it[3].toInt() }), p[6])
         }
     }
     val byRoute = feed.groupBy { it.route }
     for ((date, services) in days) {
         var departures = 0; var shownBefore = 0; var shownNow = 0; var marked = 0; var opposite = 0; var offWay = 0
         var routes = 0; var routeWrong = 0; var lines = 0; var withOthers = 0; var others = 0; var further = 0
-        val furtherBy = ArrayList<String>()
+        val furtherBy = ArrayList<String>(); val sameLabels = ArrayList<String>()
         val hidden = HashMap<String, Int>(); val wrongBy = HashMap<String, Int>()
         for ((route, all) in byRoute) {
             val today = all.filter { it.service in services }.map { it.trip }
@@ -143,7 +149,10 @@ fun main(args: Array<String>) {
             val more = listed.map { it.route }
             if (more.isNotEmpty()) withOthers++
             others += listed.count { it.by == null }; further += listed.count { it.by != null }
-            for (l in listed) if (l.by != null) furtherBy += "${all[0].name} ${l.route.headsign} (${if (l.fromStart) "от" else "през"} ${l.by.name})"
+            for (l in listed) if (l.by != null) furtherBy += "${all[0].name} ${l.route.headsign} (${l.label})"
+            val names = (two.map { RouteOfTheDay.directionKey(it.headsign) } +
+                listed.map { RouteOfTheDay.directionKey(it.route.headsign) + "|" + it.label })
+            if (names.size != names.toSet().size) sameLabels += "${all[0].name}: $names"
             val who = "${all[0].name}"
             // What the Lines screen shows: (trip, index) of each call in a listed direction's timetable at its stops.
             val seenNow = HashSet<Pair<String, Int>>(); val seenBefore = HashSet<Pair<String, Int>>()
@@ -203,6 +212,7 @@ fun main(args: Array<String>) {
         if (hidden.isNotEmpty()) println("  not shown now (${hidden.values.sum()}): ${top(hidden)}")
         check("$label, $date: more departures shown than before", shownNow > shownBefore)
         check("$label, $date: every departure from a stop shown", departures == shownNow) { "${departures - shownNow}: ${top(hidden)}" }
+        check("$label, $date: no two routes of a line under one name", sameLabels.isEmpty()) { sameLabels.toString() }
         check("$label, $date: no trip of the way back in a direction's timetable", opposite == 0) { top(wrongBy) }
         check("$label, $date: no trip leaving by another way in a direction's timetable — its next stop within $OFF_WAY_M m of the way's on",
             offWay == 0) { "$offWay: ${top(wrongBy)}" }

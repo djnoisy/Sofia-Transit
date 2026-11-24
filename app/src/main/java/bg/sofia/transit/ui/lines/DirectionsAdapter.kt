@@ -13,11 +13,11 @@ import bg.sofia.transit.util.FileLogger
  * A line's directions: the two main ones, then — under "Други направления" —
  * the others running today and the further routes a direction needs, told
  * apart by where they start or a stop on the way (the owner, 24 Nov 2026: no
- * bus leaving a stop is to be lost from the Lines screen). [onClick] gets the direction and whether
- * it is one of the others.
+ * bus leaving a stop is to be lost from the Lines screen). [onClick] gets the direction, whether
+ * it is one of the others, and what tells it apart.
  */
 class DirectionsAdapter(
-    private val onClick: (Trip, Boolean) -> Unit
+    private val onClick: (Trip, Boolean, String?) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
@@ -58,7 +58,7 @@ class DirectionsAdapter(
                 b.tvHeadsign.text = row.via?.let { "$headsign ($it)" } ?: headsign
                 b.root.contentDescription =
                     "Направление към $headsign${row.via?.let { ", $it" } ?: ""}. Натиснете за списък със спирки."
-                b.root.setOnClickListener { onClick(trip, row.other) }
+                b.root.setOnClickListener { onClick(trip, row.other, row.via) }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind failed for ${trip.tripId}", e)
             }
