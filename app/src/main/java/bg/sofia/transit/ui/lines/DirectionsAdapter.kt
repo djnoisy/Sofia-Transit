@@ -56,8 +56,11 @@ class DirectionsAdapter(
                 val headsign = trip.tripHeadsign?.ifBlank { "—" } ?: "—"
                 // "ГАРА ПОДУЯНЕ (от ДЕПО ИСКЪР)"; TalkBack: "…, от ДЕПО ИСКЪР."
                 b.tvHeadsign.text = row.via?.let { "$headsign ($it)" } ?: headsign
+                // Trips without a headsign (none in the data so far): "—" on
+                // screen, which TalkBack may not say — said in words.
+                val said = if (headsign == "—") "Направление без име" else "Направление към $headsign"
                 b.root.contentDescription =
-                    "Направление към $headsign${row.via?.let { ", $it" } ?: ""}. Натиснете за списък със спирки."
+                    "$said${row.via?.let { ", $it" } ?: ""}. Натиснете за списък със спирки."
                 b.root.setOnClickListener { onClick(trip, row.other, row.via) }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind failed for ${trip.tripId}", e)

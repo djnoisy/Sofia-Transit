@@ -162,7 +162,7 @@ object RouteOfTheDay {
      * one's way and ends sooner — its headsign, where it ends; null for the
      * direction's own.
      */
-    class Call(val trip: TodaysTrip, val at: Int, val endsAt: String?)
+    class Call(val trip: TodaysTrip, val at: Int, val endsAt: String?)  // endsAt: its last stop's name, when it has no headsign
 
     /**
      * The timetable of the direction [headsign] names at the stop [stopId], of
@@ -190,7 +190,8 @@ object RouteOfTheDay {
             if (directionKey(t.headsign) == key) continue
             // Not where it ends: it leaves from nowhere there.
             for (i in 0 until t.stops.lastIndex)
-                if (t.stops[i].id == stopId && runsAhead(t.stops.subList(i, t.stops.size), ahead)) out += Call(t, i, t.headsign)
+                if (t.stops[i].id == stopId && runsAhead(t.stops.subList(i, t.stops.size), ahead))
+                    out += Call(t, i, t.headsign.ifBlank { t.stops.last().name.ifBlank { t.stops.last().id } })
         }
         return out
     }
@@ -252,7 +253,7 @@ object RouteOfTheDay {
 
     /**
      * What the Lines screen lists under "Други направления", besides the two
-     * directions [main] (getDirectionsForRoute's routes): the routes of each
+     * directions [main] (the routes their screens list, getStopsForDirection): the routes of each
      * of those that its trips of [trips] need (coverOf), then each other
      * direction running today (otherDirections), followed by the routes it
      * needs. So every stop a trip of the day leaves from is in a list of its

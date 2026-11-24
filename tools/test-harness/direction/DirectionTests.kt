@@ -114,6 +114,9 @@ fun main(args: Array<String>) {
         val pole = Stop("b2", b.lat, b.lon + 0.001, "B", "0470")
         val pl = RouteOfTheDay.othersListed(listOf(t("1", "Main", a, b, c, d), t("2", "Main", pole, c, d)), listOf(t("1", "Main", a, b, c, d)))
         check("from another pole of a stop listed: its code said", pl.singleOrNull()?.label == "от B, код 0470") { pl.map { it.label }.toString() }
+        // A trip without a headsign running a direction's way: marked with where it ends, by its last stop's name.
+        val nameless = RouteOfTheDay.scheduleAt(listOf(t("1", "Main", a, b, c, d), t("2", "", a, b, c)), "Main", "b")
+        check("a short run without a headsign: marked with its last stop", nameless.single { it.trip.tripId == "2" }.endsAt == "C")
     }
 
     // A whole feed, day by day.
@@ -145,7 +148,10 @@ fun main(args: Array<String>) {
             val named = RouteOfTheDay.directions(today, ranking)
             val two = if (named.isNotEmpty()) named.map { it.second } else ranking.take(2).mapNotNull { hs ->
                 all.filter { it.trip.headsign == hs }.maxByOrNull { it.trip.stops.size }?.trip }
-            val listed = RouteOfTheDay.othersListed(today, two)
+            // The routes the two directions' screens list (getStopsForDirection → directionTripId): the route of the
+            // day by the exact headsign, else as getDirectionsForRoute took it.
+            val screens = two.map { d -> RouteOfTheDay.routeFor(today, d.headsign) ?: d }
+            val listed = RouteOfTheDay.othersListed(today, screens)
             val more = listed.map { it.route }
             if (more.isNotEmpty()) withOthers++
             others += listed.count { it.by == null }; further += listed.count { it.by != null }
@@ -156,7 +162,7 @@ fun main(args: Array<String>) {
             val who = "${all[0].name}"
             // What the Lines screen shows: (trip, index) of each call in a listed direction's timetable at its stops.
             val seenNow = HashSet<Pair<String, Int>>(); val seenBefore = HashSet<Pair<String, Int>>()
-            for (dir in two + more) {
+            for (dir in screens + more) {
                 for (stop in dir.stops.map { it.id }.distinct()) {
                     val calls = RouteOfTheDay.scheduleAt(today, dir.headsign, stop)
                     for (cl in calls) {
@@ -172,7 +178,7 @@ fun main(args: Array<String>) {
                         if (off > OFF_WAY_M) { offWay++; wrongBy.merge("$who → ${cl.trip.headsign} in ${dir.headsign} off ${off.toInt()} m", 1, Int::plus) }
                     }
                 }
-                if (dir in two) for (x in today) if (x.headsign == dir.headsign)
+                if (dir in screens) for (x in today) if (x.headsign == dir.headsign)
                     x.stops.forEachIndexed { i, st -> if (dir.stops.any { it.id == st.id }) seenBefore += x.tripId to i }
             }
             for (x in today) for (i in 0 until x.stops.lastIndex) {
