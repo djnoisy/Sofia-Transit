@@ -20,7 +20,13 @@ data class ScheduleState(
     /** By time; the line's short runs of other directions marked with where they end. */
     val times: List<ScheduledTime> = emptyList(),
     val loading: Boolean = false,
-    val noDataReason: String? = null      // null when data is present
+    val noDataReason: String? = null,     // null when data is present
+    /**
+     * On opening: the first time not yet passed (ScheduledTime.seconds), its
+     * hour to get TalkBack's focus (RouteOfTheDay.firstToCome; the owner,
+     * 25 Nov 2026); null otherwise — a day tapped, or none to come.
+     */
+    val focusOn: Int? = null
 )
 
 @HiltViewModel
@@ -66,7 +72,8 @@ class ScheduleViewModel @Inject constructor(
                 selectedDate = dates[open],
                 times        = times,
                 loading      = false,
-                noDataReason = if (times.isEmpty()) "Няма курсове за тази дата" else null
+                noDataReason = if (times.isEmpty()) "Няма курсове за тази дата" else null,
+                focusOn      = RouteOfTheDay.firstToCome(times.map { it.seconds }, open - 1, now)
             )
         }
     }
@@ -79,7 +86,8 @@ class ScheduleViewModel @Inject constructor(
         _state.value = _state.value.copy(
             selectedDate = date,
             loading = true,
-            noDataReason = null
+            noDataReason = null,
+            focusOn = null
         )
         // The day chosen last is the one shown: a load for a day tapped
         // before is dropped (each reads all the line's trips of its day).

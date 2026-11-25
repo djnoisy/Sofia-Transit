@@ -150,11 +150,21 @@ class ScheduleFragment : Fragment() {
                     hour    = RouteOfTheDay.clock(list.first().seconds).substring(0, 2),
                     minutes = list.map { t ->
                         val clock = RouteOfTheDay.clock(t.seconds)
-                        ScheduleAdapter.Minute(clock.substring(3, 5), t.endsAt?.let { marks[it] }, t.endsAt, clock)
+                        ScheduleAdapter.Minute(clock.substring(3, 5), t.endsAt?.let { marks[it] }, t.endsAt, clock, t.seconds)
                     }
                 )
             }
+        // On opening: TalkBack's focus to the hour of the first time not yet
+        // passed — with the day said first when it is not today (the owner,
+        // 25 Nov 2026).
+        val focusRow = state.focusOn?.takeIf { !focusGiven && !state.loading }
+            ?.let { t -> groups.indexOfFirst { row -> row.minutes.any { it.seconds == t } } }?.takeIf { it >= 0 }
+        // "Утре, понеделник, 30 ноември" — none for today.
+        val dayWords = relative?.takeIf { it != "днес" }
+            ?.let { "${it.replaceFirstChar { c -> c.uppercase() }}, ${DateHelper.chipContentDescription(state.selectedDate, null)}" }
+        adapter.setLead(focusRow ?: -1, focusRow?.let { dayWords })
         adapter.submitList(groups)
+        if (focusRow != null) { focusGiven = true; focusOnRow(focusRow) }
         binding.tvLegend.text = marks.entries.joinToString("\n") { (end, mark) -> "$mark — до $end" }
         binding.tvLegend.visibility = if (marks.isEmpty() || state.loading) View.GONE else View.VISIBLE
 
@@ -173,20 +183,33 @@ class ScheduleFragment : Fragment() {
         } else {
             binding.tvEmpty.visibility = View.GONE
             binding.rvSchedule.visibility = View.VISIBLE
-
-            // Announce the count for TalkBack, and for which day — the
-            // screen may open on yesterday or tomorrow (review of 25 Nov 2026):
-            // "Намерени 24 курса за петък, 27 ноември, утре".
-            val total = state.times.size
-            binding.rvSchedule.announceForAccessibility(
-                "Намерени $total курса за ${DateHelper.chipContentDescription(state.selectedDate, relative)}"
-            )
+            // No count said (the owner, 25 Nov 2026).
         }
     }
+
+    /**
+     * The row [pos] at the top, with TalkBack's focus — after the window's own
+     * first focus, as RouteStopsFragment brings the board's stop.
+     */
+    private fun focusOnRow(pos: Int) {
+        val rv = binding.rvSchedule
+        rv.post {
+            (rv.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(pos, 0)
+            rv.postDelayed({
+                _binding?.rvSchedule?.findViewHolderForAdapterPosition(pos)?.itemView
+                    ?.performAccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
+            }, FOCUS_DELAY_MS)
+        }
+    }
+
+    /** The focus given on opening — once, not on every redraw. */
+    private var focusGiven = false
 
     private companion object {
         /** The letters short runs are marked with, by where they end. */
         const val MARK_LETTERS = "абвгдежзиклмнопрстуф"
+        /** After the window's opening, for TalkBack's own first focus to have come and gone. */
+        const val FOCUS_DELAY_MS = 500L
     }
 
     override fun onDestroyView() {

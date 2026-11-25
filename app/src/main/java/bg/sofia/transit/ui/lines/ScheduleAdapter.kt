@@ -21,11 +21,24 @@ class ScheduleAdapter : RecyclerView.Adapter<ScheduleAdapter.VH>() {
      * is marked with on screen ([mark], explained above the list) and where
      * it ends ([endsAt], said by TalkBack); [clock], the whole time, as said.
      */
-    data class Minute(val minute: String, val mark: String? = null, val endsAt: String? = null, val clock: String = minute)
+    data class Minute(val minute: String, val mark: String? = null, val endsAt: String? = null, val clock: String = minute,
+                      val seconds: Int = 0)
 
     data class Row(val hour: String, val minutes: List<Minute>)
 
     private val items = mutableListOf<Row>()
+
+    /**
+     * Said before one row's times — the row given TalkBack's focus on
+     * opening, when the day shown is not today: "Утре, понеделник, 30
+     * ноември: 07:05, 07:20" (the owner, 25 Nov 2026: no count said, the day
+     * still known). Its position and the words; none by default.
+     */
+    private var lead: Pair<Int, String>? = null
+
+    fun setLead(position: Int, words: String?) {
+        lead = words?.let { position to it }
+    }
 
     fun submitList(newItems: List<Row>) {
         FileLogger.i(TAG, "submitList ${newItems.size} items (current=${items.size})")
@@ -37,14 +50,16 @@ class ScheduleAdapter : RecyclerView.Adapter<ScheduleAdapter.VH>() {
     }
 
     inner class VH(val b: ItemScheduleRowBinding) : RecyclerView.ViewHolder(b.root) {
-        fun bind(row: Row) {
+        fun bind(row: Row, pos: Int) {
             try {
                 b.tvHour.text    = "${row.hour}:"
                 b.tvMinutes.text = shown(row.minutes)
                 // Each time whole, the hour and the minutes (the owner, 25 Nov
                 // 2026): "10:05, 10:30 до БУЛ. НИКОЛА ПЕТКОВ, 10:50".
-                b.root.contentDescription = row.minutes.joinToString(", ") { m ->
+                val said = row.minutes.joinToString(", ") { m ->
                     if (m.endsAt == null) m.clock else "${m.clock} до ${m.endsAt}" }
+                b.root.contentDescription = lead?.takeIf { it.first == pos }
+                    ?.let { "${it.second}: $said" } ?: said
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind failed for ${row.hour}", e)
             }
@@ -75,7 +90,7 @@ class ScheduleAdapter : RecyclerView.Adapter<ScheduleAdapter.VH>() {
         return VH(ItemScheduleRowBinding.inflate(LayoutInflater.from(parent.context), parent, false))
     }
 
-    override fun onBindViewHolder(holder: VH, pos: Int) = holder.bind(items[pos])
+    override fun onBindViewHolder(holder: VH, pos: Int) = holder.bind(items[pos], pos)
 
     override fun getItemCount(): Int = items.size
 }

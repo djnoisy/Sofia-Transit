@@ -249,7 +249,17 @@ object RouteOfTheDay {
      * beginning tonight), else today. Null when none has.
      */
     fun openOn(days: List<List<Int>>, today: Int, now: Int): Int? =
-        days.indices.firstOrNull { i -> days[i].any { it >= now - (i - today) * DAY_S } }
+        days.indices.firstOrNull { i -> firstToCome(days[i], i - today, now) != null }
+
+    /**
+     * Of the [times] of a timetable shown under the date [dayOffset] days
+     * from today (0 today, -1 yesterday, 1 tomorrow), in order, the first not
+     * yet passed at [now] (seconds from today's midnight) — where the screen
+     * puts TalkBack's focus on opening (the owner, 25 Nov 2026); null when all
+     * have.
+     */
+    fun firstToCome(times: List<Int>, dayOffset: Int, now: Int): Int? =
+        times.firstOrNull { it >= now - dayOffset * DAY_S }
 
     /** A time of timetableOfDate as a clock, "HH:MM": "23:32" for the evening before, "00:32" for 24:32. */
     fun clock(seconds: Int): String {

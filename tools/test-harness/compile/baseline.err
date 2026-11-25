@@ -1351,6 +1351,7 @@ app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolv
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: LayoutInflater
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: LinearLayout
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: LinearLayoutManager
+app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: LinearLayoutManager
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: R
@@ -1373,6 +1374,7 @@ app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolv
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: ViewGroup
+app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: android
