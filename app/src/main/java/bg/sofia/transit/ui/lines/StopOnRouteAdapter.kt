@@ -52,7 +52,7 @@ class StopOnRouteAdapter(
                 b.tvTime.text = mins?.let { "$it мин" } ?: ""
                 b.tvTime.visibility = if (mins == null) android.view.View.GONE else android.view.View.VISIBLE
                 b.root.contentDescription = "Спирка ${stop.stopSequence}: ${stop.stopName}" +
-                    (if (isHere) ", тази спирка" else "") + (mins?.let { ", $it минути" } ?: "")
+                    (if (isHere) ", тази спирка" else "") + (mins?.let { if (it == 1) ", 1 минута" else ", $it минути" } ?: "")
                 b.root.setOnClickListener { onClick(stop) }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind failed for ${stop.stopId}", e)

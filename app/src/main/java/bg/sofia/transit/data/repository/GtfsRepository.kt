@@ -1457,8 +1457,8 @@ class GtfsRepository @Inject constructor(
     ): List<ScheduledTime> {
         val dayBefore = java.time.LocalDate.parse(date, java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
             .minusDays(1).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
-        val services = calendarDateDao.getActiveServicesForDate(date).toSet()
-        val servicesBefore = calendarDateDao.getActiveServicesForDate(dayBefore).toSet()
+        val services = servicesOn(date)
+        val servicesBefore = servicesOn(dayBefore)
         if (services.isEmpty() && servicesBefore.isEmpty()) return emptyList()
         val all = tripDao.getByRoute(routeId)
         val day = withStops(all.filter { it.serviceId in services })
@@ -1466,6 +1466,26 @@ class GtfsRepository @Inject constructor(
         return withContext(Dispatchers.Default) {
             RouteOfTheDay.timetableOfDate(before, day, headsign, stopId).map { ScheduledTime(it.seconds, it.endsAt) }
         }
+    }
+
+    /**
+     * The services running on [date] (YYYYMMDD), for the timetable: each date
+     * shown needs the day before too, and calendar_dates has no index on the
+     * date — a lookup reads it whole — so the last few dates are kept until
+     * the next import (review of 25 Nov 2026).
+     */
+    private suspend fun servicesOn(date: String): Set<String> {
+        val generation = servicesTodayGeneration
+        val key = "$date|$generation"
+        synchronized(servicesOnCache) { servicesOnCache[key] }?.let { return it }
+        val services = calendarDateDao.getActiveServicesForDate(date).toSet()
+        if (generation == servicesTodayGeneration) synchronized(servicesOnCache) { servicesOnCache[key] = services }
+        return services
+    }
+
+    /** servicesOn by date and import; the eldest go. */
+    private val servicesOnCache = object : LinkedHashMap<String, Set<String>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Set<String>>) = size > 9
     }
 
     // ── Calendar / Service Days ──────────────────────────────────────────

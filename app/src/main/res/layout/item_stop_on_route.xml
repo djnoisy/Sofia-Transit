@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A stop along a line's direction: a card — its number in a circle, its
      name (and "тази спирка" for the board's own, on a route opened from a
-     board), the minutes from the start. Read as one by TalkBack (the adapter's
+     board), the minutes from the start — on a board's route, from its stop
+     on (StopOnRouteAdapter). Read as one by TalkBack (the adapter's
      description on the card). -->
 <com.google.android.material.card.MaterialCardView
     xmlns:android="http://schemas.android.com/apk/res/android"
