@@ -24,8 +24,9 @@ import kotlinx.coroutines.launch
  * the direction's trips and, marked, the line's short runs of other
  * directions that leave the stop its way (GtfsRepository.getScheduleForDirectionAtStop).
  *
- * The user browses by concrete date via a 7-day strip (today + 6 days), with
- * today selected by default. Reached by tapping a stop in StopsListFragment,
+ * The user browses by concrete date via a 7-day strip (today + 6 days; from
+ * yesterday when it opens on yesterday), opened on the first day with a time
+ * not yet passed (ScheduleViewModel; the owner, 25 Nov 2026). Reached by tapping a stop in StopsListFragment,
  * and from the "Виртуално табло" in a window of its own (LineWindowActivity).
  */
 @AndroidEntryPoint
@@ -96,7 +97,7 @@ class ScheduleFragment : Fragment() {
             chip.findViewById<TextView>(R.id.tvChipDay).text = day.dayShortBg
             chip.findViewById<TextView>(R.id.tvChipNum).text = day.dayNumber
             chip.contentDescription =
-                DateHelper.chipContentDescription(day.date, day.isToday)
+                DateHelper.chipContentDescription(day.date, day.isToday, day.isYesterday)
             chip.setOnClickListener { vm.selectDate(day.date) }
 
             // Distribute chips equally across the strip width.

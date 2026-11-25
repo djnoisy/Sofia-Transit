@@ -13,8 +13,9 @@ import java.time.format.DateTimeFormatter
  * both simpler and more honest: it naturally covers public holidays, seasonal
  * timetables and one-off changes that a weekday/weekend toggle would hide.
  *
- * The screen shows a 7-day window starting today; the user taps a day to see
- * that date's schedule.
+ * The screen shows a 7-day window starting today — or yesterday, when the
+ * timetable opens on it (upcomingDays) — and the user taps a day to see that
+ * date's schedule.
  */
 object DateHelper {
 
@@ -25,27 +26,35 @@ object DateHelper {
         val date: String,        // YYYYMMDD — key for schedule lookup
         val dayShortBg: String,  // "вт" — short weekday, shown on the chip
         val dayNumber: String,   // "20"  — day-of-month, shown on the chip
-        val isToday: Boolean
+        val isToday: Boolean,
+        val isYesterday: Boolean = false
     )
 
     fun todayString(): String = LocalDate.now().format(FMT)
 
     /**
-     * Builds the [count]-day window starting from today (inclusive).
-     * We never show past dates — a transit schedule for yesterday is useless.
+     * Builds the [count]-day window starting from today (inclusive) — or from
+     * yesterday ([fromYesterday]), when the timetable opens on it: a day
+     * line's runs after midnight still to come (ScheduleViewModel; the owner,
+     * 25 Nov 2026). No other past dates.
      */
-    fun upcomingDays(count: Int = 7): List<DayChip> {
+    fun upcomingDays(count: Int = 7, fromYesterday: Boolean = false): List<DayChip> {
         val today = LocalDate.now()
-        return (0 until count).map { offset ->
+        val first = if (fromYesterday) -1 else 0
+        return (first until first + count).map { offset ->
             val d = today.plusDays(offset.toLong())
             DayChip(
-                date       = d.format(FMT),
-                dayShortBg = shortDayBg(d.dayOfWeek),
-                dayNumber  = d.dayOfMonth.toString(),
-                isToday    = offset == 0
+                date        = d.format(FMT),
+                dayShortBg  = shortDayBg(d.dayOfWeek),
+                dayNumber   = d.dayOfMonth.toString(),
+                isToday     = offset == 0,
+                isYesterday = offset == -1
             )
         }
     }
+
+    /** Yesterday, today and tomorrow, YYYYMMDD, for where the timetable opens. */
+    fun aroundToday(): List<String> = (-1..1).map { LocalDate.now().plusDays(it.toLong()).format(FMT) }
 
     /**
      * Full, human-readable Bulgarian label for the big header above the
@@ -91,9 +100,13 @@ object DateHelper {
      * Full accessibility description of a chip, e.g.
      * "вторник, 20 юли, днес". Read by TalkBack instead of the terse "вт 20".
      */
-    fun chipContentDescription(date: String, isToday: Boolean): String = try {
+    fun chipContentDescription(date: String, isToday: Boolean, isYesterday: Boolean = false): String = try {
         val d = LocalDate.parse(date, FMT)
         val base = "${longDayBg(d.dayOfWeek)}, ${d.dayOfMonth} ${monthBg(d.monthValue)}"
-        if (isToday) "$base, днес" else base
+        when {
+            isToday -> "$base, днес"
+            isYesterday -> "$base, вчера"
+            else -> base
+        }
     } catch (_: Exception) { "" }
 }

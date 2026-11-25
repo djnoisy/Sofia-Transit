@@ -1420,6 +1420,7 @@ app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: variable
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: suspend function 'getScheduleForDirectionAtStop' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: suspend function 'getScheduleForDirectionAtStop' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: unresolved reference: HiltViewModel
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: unresolved reference: Inject
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: unresolved reference: ViewModel
@@ -1427,6 +1428,7 @@ app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: unresolved reference: inject
+app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: unresolved reference: viewModelScope
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: unresolved reference: viewModelScope
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: 'getItemCount' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: 'onBindViewHolder' overrides nothing

@@ -139,6 +139,21 @@ fun main(args: Array<String>) {
             d.map { RouteOfTheDay.clock(it.seconds) } == listOf("06:02", "14:02", "00:17")) { d.map { RouteOfTheDay.clock(it.seconds) }.toString() }
     }
 
+    run {
+        // Where the timetable opens (openOn): yesterday, today, tomorrow; times from each date's midnight.
+        val nightDay = listOf(-1680, 1920, 5520, 9120, 12_720)            // 23:32 the evening before, 00:32 … 03:32
+        val dayLine = listOf(21_600, 50_400, 87_300)                        // 06:00, 14:00, 00:15 after midnight
+        val m2 = listOf(19_800, 82_800, 90_180)                             // 05:30, 23:00, 01:03 after midnight
+        check("a day line at 00:50: yesterday, its 01:03 to come", RouteOfTheDay.openOn(listOf(m2, m2, m2), 1, 3000) == 0)
+        check("a day line at 10:00: today", RouteOfTheDay.openOn(listOf(dayLine, dayLine, dayLine), 1, 36_000) == 1)
+        check("a day line at 23:30, its 00:15 to come: today", RouteOfTheDay.openOn(listOf(dayLine, dayLine, dayLine), 1, 84_600) == 1)
+        check("a night line at 22:00: tomorrow, the night beginning tonight",
+            RouteOfTheDay.openOn(listOf(nightDay, nightDay, nightDay), 1, 79_200) == 2)
+        check("a night line at 01:00: today, its 01:32 to come", RouteOfTheDay.openOn(listOf(nightDay, nightDay, nightDay), 1, 3600) == 1)
+        check("no time to come in the three: none (today shown)",
+            RouteOfTheDay.openOn(listOf(emptyList(), listOf(3600), emptyList()), 1, 7200) == null)
+    }
+
     // A whole feed, day by day.
     val file = args.getOrNull(0)?.let { File(it) }
     if (file == null || !file.isFile) { println("(no feed extract)"); return finish() }

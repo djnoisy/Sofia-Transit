@@ -239,6 +239,18 @@ object RouteOfTheDay {
         return out.sortedBy { it.seconds }
     }
 
+    /**
+     * Which of [days] — the times (TimetableTime.seconds) of the timetables
+     * shown under consecutive dates, today's at the index [today] — the
+     * timetable opens on (the owner, 25 Nov 2026): the first with a time not
+     * yet passed at [now] (seconds from today's midnight). So a day line's
+     * yesterday after midnight while its last runs are still to come (M2's
+     * 01:03 at 00:50), a night line's tomorrow in the evening (the night
+     * beginning tonight), else today. Null when none has.
+     */
+    fun openOn(days: List<List<Int>>, today: Int, now: Int): Int? =
+        days.indices.firstOrNull { i -> days[i].any { it >= now - (i - today) * DAY_S } }
+
     /** A time of timetableOfDate as a clock, "HH:MM": "23:32" for the evening before, "00:32" for 24:32. */
     fun clock(seconds: Int): String {
         val s = Math.floorMod(seconds, DAY_S)

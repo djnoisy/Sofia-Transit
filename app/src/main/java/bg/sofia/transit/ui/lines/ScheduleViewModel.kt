@@ -3,6 +3,7 @@ package bg.sofia.transit.ui.lines
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import bg.sofia.transit.data.repository.GtfsRepository
+import bg.sofia.transit.data.repository.RouteOfTheDay
 import bg.sofia.transit.data.repository.ScheduledTime
 import bg.sofia.transit.util.DateHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -10,6 +11,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.time.LocalTime
 import javax.inject.Inject
 
 data class ScheduleState(
@@ -39,10 +41,27 @@ class ScheduleViewModel @Inject constructor(
         this.headsign = headsign
         this.stopId   = stopId
 
-        val days = DateHelper.upcomingDays(7)
-        _state.value = _state.value.copy(days = days)
-        // Default selection: today (first chip).
-        days.firstOrNull()?.let { selectDate(it.date) }
+        // Opens on the first day, from yesterday, with a time not yet passed
+        // (RouteOfTheDay.openOn; the owner, 25 Nov 2026): a day line's
+        // yesterday after midnight while its last runs are to come — the day
+        // strip then begins with it — a night line's tomorrow in the evening;
+        // else today.
+        _state.value = _state.value.copy(loading = true, noDataReason = null)
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            val now = LocalTime.now().toSecondOfDay()
+            val dates = DateHelper.aroundToday()
+            val timetables = dates.map { repo.getScheduleForDirectionAtStop(routeId, headsign, stopId, it) }
+            val open = RouteOfTheDay.openOn(timetables.map { t -> t.map { it.seconds } }, 1, now) ?: 1
+            val times = timetables[open]
+            _state.value = ScheduleState(
+                days         = DateHelper.upcomingDays(7, fromYesterday = open == 0),
+                selectedDate = dates[open],
+                times        = times,
+                loading      = false,
+                noDataReason = if (times.isEmpty()) "Няма курсове за тази дата" else null
+            )
+        }
     }
 
     /** Per-route metadata for the screen header — same source as the

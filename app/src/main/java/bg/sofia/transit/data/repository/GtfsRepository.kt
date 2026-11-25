@@ -1460,9 +1460,8 @@ class GtfsRepository @Inject constructor(
         val services = servicesOn(date)
         val servicesBefore = servicesOn(dayBefore)
         if (services.isEmpty() && servicesBefore.isEmpty()) return emptyList()
-        val all = tripDao.getByRoute(routeId)
-        val day = withStops(all.filter { it.serviceId in services })
-        val before = withStops(all.filter { it.serviceId in servicesBefore })
+        val day = tripsOn(routeId, date, services)
+        val before = tripsOn(routeId, dayBefore, servicesBefore)
         return withContext(Dispatchers.Default) {
             RouteOfTheDay.timetableOfDate(before, day, headsign, stopId).map { ScheduledTime(it.seconds, it.endsAt) }
         }
@@ -1481,6 +1480,26 @@ class GtfsRepository @Inject constructor(
         val services = calendarDateDao.getActiveServicesForDate(date).toSet()
         if (generation == servicesTodayGeneration) synchronized(servicesOnCache) { servicesOnCache[key] = services }
         return services
+    }
+
+    /**
+     * The trips of [routeId] on [date] (its [services]), with their stops,
+     * for the timetable: kept for the last few, as each date shown needs the
+     * day before too, and the timetable opens by three dates (ScheduleViewModel).
+     */
+    private suspend fun tripsOn(routeId: String, date: String, services: Set<String>): List<RouteOfTheDay.TodaysTrip> {
+        if (services.isEmpty()) return emptyList()
+        val key = "$routeId|$date|$servicesTodayGeneration"
+        synchronized(tripsOnCache) { tripsOnCache[key] }?.let { return it }
+        val generation = servicesTodayGeneration
+        val trips = withStops(tripDao.getByRoute(routeId).filter { it.serviceId in services })
+        if (generation == servicesTodayGeneration) synchronized(tripsOnCache) { tripsOnCache[key] = trips }
+        return trips
+    }
+
+    /** tripsOn by line, date and import; the eldest go. */
+    private val tripsOnCache = object : LinkedHashMap<String, List<RouteOfTheDay.TodaysTrip>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<RouteOfTheDay.TodaysTrip>>) = size > 5
     }
 
     /** servicesOn by date and import; the eldest go. */
