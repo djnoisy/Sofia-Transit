@@ -107,7 +107,7 @@ class ScheduleFragment : Fragment() {
             chip.findViewById<TextView>(R.id.tvChipDay).text = day.dayShortBg
             chip.findViewById<TextView>(R.id.tvChipNum).text = day.dayNumber
             chip.contentDescription =
-                DateHelper.chipContentDescription(day.date)
+                DateHelper.chipContentDescription(day.date, day.isToday)
             chip.setOnClickListener { vm.selectDate(day.date) }
 
             // Distribute chips equally across the strip width.

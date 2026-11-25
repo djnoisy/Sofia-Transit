@@ -101,12 +101,13 @@ object DateHelper {
     }
 
     /**
-     * Full accessibility description of a chip, e.g. "вторник, 20 юли" — the
-     * date only, no "вчера", "днес", "утре" (the owner, 25 Nov 2026). Read by
-     * TalkBack instead of the terse "вт 20".
+     * Full accessibility description of a chip, e.g. "вторник, 20 юли, днес"
+     * — "днес" on today's, as before; no "вчера", "утре" (the owner, 25 Nov
+     * 2026). Read by TalkBack instead of the terse "вт 20".
      */
-    fun chipContentDescription(date: String): String = try {
+    fun chipContentDescription(date: String, isToday: Boolean): String = try {
         val d = LocalDate.parse(date, FMT)
-        "${longDayBg(d.dayOfWeek)}, ${d.dayOfMonth} ${monthBg(d.monthValue)}"
+        val base = "${longDayBg(d.dayOfWeek)}, ${d.dayOfMonth} ${monthBg(d.monthValue)}"
+        if (isToday) "$base, днес" else base
     } catch (_: Exception) { "" }
 }
