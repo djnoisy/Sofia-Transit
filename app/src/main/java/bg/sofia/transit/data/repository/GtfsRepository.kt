@@ -1438,14 +1438,16 @@ class GtfsRepository @Inject constructor(
     // ── Schedules ─────────────────────────────────────────────────────────
 
     /**
-     * The timetable of a direction at a stop on [date] (YYYYMMDD), by time:
-     * the trips towards [headsign] calling there — whatever its spelling
-     * (RouteOfTheDay.directionKey) — and, marked with where they end, the
-     * line's trips of other directions that leave the stop this one's way and
-     * end sooner (RouteOfTheDay.scheduleAt; the owner, 24 Nov 2026: 111's
-     * short runs to БУЛ. НИКОЛА ПЕТКОВ were in no timetable of the Lines
-     * screen). Of the services running that day; none on a day outside the
-     * data.
+     * The timetable of a direction at a stop shown under [date] (YYYYMMDD),
+     * by time: the trips towards [headsign] calling there — whatever its
+     * spelling (RouteOfTheDay.directionKey) — and, marked with where they
+     * end, the line's trips of other directions that leave the stop this
+     * one's way and end sooner (RouteOfTheDay.scheduleAt; the owner, 24 Nov
+     * 2026: 111's short runs to БУЛ. НИКОЛА ПЕТКОВ were in no timetable of
+     * the Lines screen); of the day of the timetable most of whose departures
+     * fall on the date — a night line's, of the day before
+     * (RouteOfTheDay.timetableOfDate; the owner, 25 Nov 2026). None on a day
+     * outside the data.
      */
     suspend fun getScheduleForDirectionAtStop(
         routeId: String,
@@ -1453,13 +1455,16 @@ class GtfsRepository @Inject constructor(
         stopId: String,
         date: String
     ): List<ScheduledTime> {
+        val dayBefore = java.time.LocalDate.parse(date, java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+            .minusDays(1).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
         val services = calendarDateDao.getActiveServicesForDate(date).toSet()
-        if (services.isEmpty()) return emptyList()
-        val trips = withStops(tripDao.getByRoute(routeId).filter { it.serviceId in services })
+        val servicesBefore = calendarDateDao.getActiveServicesForDate(dayBefore).toSet()
+        if (services.isEmpty() && servicesBefore.isEmpty()) return emptyList()
+        val all = tripDao.getByRoute(routeId)
+        val day = withStops(all.filter { it.serviceId in services })
+        val before = withStops(all.filter { it.serviceId in servicesBefore })
         return withContext(Dispatchers.Default) {
-            RouteOfTheDay.scheduleAt(trips, headsign, stopId)
-                .mapNotNull { c -> c.trip.times.getOrNull(c.at)?.takeIf { it >= 0 }?.let { ScheduledTime(it, c.endsAt) } }
-                .sortedBy { it.seconds }
+            RouteOfTheDay.timetableOfDate(before, day, headsign, stopId).map { ScheduledTime(it.seconds, it.endsAt) }
         }
     }
 
@@ -1573,8 +1578,10 @@ class GtfsRepository @Inject constructor(
 const val METRO_ROUTE_TYPE = 1
 
 /**
- * A time in a direction's timetable at a stop: seconds after midnight of the
- * service day (past 24:00 after midnight), and where the trip ends when it is
+ * A time in a direction's timetable at a stop: seconds from midnight of the
+ * date it is shown under — below 0 the evening before (a night line), 24:00
+ * and past after midnight (RouteOfTheDay.timetableOfDate; as a clock:
+ * RouteOfTheDay.clock) — and where the trip ends when it is
  * another direction's short run (getScheduleForDirectionAtStop); null for the
  * direction's own.
  */

@@ -9,6 +9,7 @@
 //    nor leaves the stop by another way than the direction's route through it — judged by place: its next stop
 //    within OFF_WAY_M of one of the route's on from the stop;
 //  - the board's route (routeThrough) of every line, direction and stop: a route of that direction calling there;
+//  - night lines (timetableOfDate: most departures after midnight) — none near the line between (20–80 %);
 //  - 111 at МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ (A0169): towards Ж.К. ЛЮЛИН-1,2 its own trips and the short runs to БУЛ. НИКОЛА
 //    ПЕТКОВ, marked; towards БУЛ. НИКОЛА ПЕТКОВ, its 22 stops and none of the full runs.
 import bg.sofia.transit.data.repository.RouteOfTheDay
@@ -119,6 +120,25 @@ fun main(args: Array<String>) {
         check("a short run without a headsign: marked with its last stop", nameless.single { it.trip.tripId == "2" }.endsAt == "C")
     }
 
+    run {
+        // The timetable under a date (the owner, 25 Nov 2026). N1: from 23:30 every hour to 03:30, every night.
+        fun at(id: String, hs: String, depart: Int) = TodaysTrip(id, hs, listOf(a, b, c), listOf(depart, depart + 120, depart + 240))
+        val night = { day: String -> (0..4).map { at("n$day$it", "L", 84_600 + 3600 * it) } }   // 23:30 … 27:30 at a
+        val dayLine = { day: String -> listOf(at("d${day}1", "L", 21_600), at("d${day}2", "L", 50_400), at("d${day}3", "L", 87_300)) } // 06:00, 14:00, 24:15
+        check("a clock: the evening before, after midnight, the day",
+            RouteOfTheDay.clock(-1680) == "23:32" && RouteOfTheDay.clock(88_320) == "00:32" && RouteOfTheDay.clock(36_300) == "10:05")
+        check("a night line: most departures after midnight; a day line: not",
+            RouteOfTheDay.mostlyAfterMidnight(night("w")) && !RouteOfTheDay.mostlyAfterMidnight(dayLine("w")) &&
+                !RouteOfTheDay.mostlyAfterMidnight(emptyList()))
+        val n = RouteOfTheDay.timetableOfDate(night("w"), night("t"), "L", "b")
+        check("a night line under a date: the night before it, its evening first — 23:32, 00:32 … 03:32; not the night after",
+            n.map { RouteOfTheDay.clock(it.seconds) } == listOf("23:32", "00:32", "01:32", "02:32", "03:32") && n.first().seconds < 0) {
+            n.map { RouteOfTheDay.clock(it.seconds) }.toString() }
+        val d = RouteOfTheDay.timetableOfDate(dayLine("w"), dayLine("t"), "L", "b")
+        check("a day line under a date: its own day, its run after midnight last as 00:17; not the day before's",
+            d.map { RouteOfTheDay.clock(it.seconds) } == listOf("06:02", "14:02", "00:17")) { d.map { RouteOfTheDay.clock(it.seconds) }.toString() }
+    }
+
     // A whole feed, day by day.
     val file = args.getOrNull(0)?.let { File(it) }
     if (file == null || !file.isFile) { println("(no feed extract)"); return finish() }
@@ -133,10 +153,25 @@ fun main(args: Array<String>) {
         }
     }
     val byRoute = feed.groupBy { it.route }
+    var servicesBefore: Set<String>? = null
     for ((date, services) in days) {
+        // N1 at БЛ. 472 Ж.К. МЛАДОСТ-4 towards Ж.К. ЛЮЛИН-1,2 under the date: the night before it (the owner, 25 Nov 2026).
+        servicesBefore?.let { before ->
+            val n1 = feed.filter { it.name == "N1" }
+            val stop = n1.filter { it.trip.headsign == "Ж.К. ЛЮЛИН-1,2" }.flatMap { it.trip.stops }.firstOrNull { it.name == "БЛ. 472 Ж.К. МЛАДОСТ-4" }?.id
+            if (stop != null) {
+                val shown = RouteOfTheDay.timetableOfDate(n1.filter { it.service in before }.map { it.trip },
+                    n1.filter { it.service in services }.map { it.trip }, "Ж.К. ЛЮЛИН-1,2", stop).map { RouteOfTheDay.clock(it.seconds) }
+                println("  N1 at БЛ. 472 towards ЛЮЛИН-1,2 under $date: $shown")
+                check("$label, $date: N1 at БЛ. 472 — the night before the date, 23:32 first", shown.firstOrNull() == "23:32" &&
+                    shown.drop(1).all { it < "05:00" }) { shown.toString() }
+            }
+        }
+        servicesBefore = services
         var departures = 0; var shownBefore = 0; var shownNow = 0; var marked = 0; var opposite = 0; var offWay = 0
         var routes = 0; var routeWrong = 0; var lines = 0; var withOthers = 0; var others = 0; var further = 0
         val furtherBy = ArrayList<String>(); val sameLabels = ArrayList<String>()
+        val nightLines = ArrayList<String>(); val borderline = ArrayList<String>()
         val hidden = HashMap<String, Int>(); val wrongBy = HashMap<String, Int>()
         for ((route, all) in byRoute) {
             val today = all.filter { it.service in services }.map { it.trip }
@@ -151,6 +186,11 @@ fun main(args: Array<String>) {
             // The routes the two directions' screens list (getStopsForDirection → directionTripId): the route of the
             // day by the exact headsign, else as getDirectionsForRoute took it.
             val screens = two.map { d -> RouteOfTheDay.routeFor(today, d.headsign) ?: d }
+            // Night lines (timetableOfDate): most departures after midnight — and none near the line between.
+            var after = 0; var dep = 0
+            for (x in today) for (i in 0 until x.stops.lastIndex) if (x.times[i] >= 0) { dep++; if (x.times[i] >= 86_400) after++ }
+            if (RouteOfTheDay.mostlyAfterMidnight(today)) nightLines += all[0].name
+            if (dep > 0 && after * 5 > dep && after * 5 < dep * 4) borderline += "${all[0].name} ${100 * after / dep} %"
             val listed = RouteOfTheDay.othersListed(today, screens)
             val more = listed.map { it.route }
             if (more.isNotEmpty()) withOthers++
@@ -219,6 +259,8 @@ fun main(args: Array<String>) {
         check("$label, $date: more departures shown than before", shownNow > shownBefore)
         check("$label, $date: every departure from a stop shown", departures == shownNow) { "${departures - shownNow}: ${top(hidden)}" }
         check("$label, $date: no two routes of a line under one name", sameLabels.isEmpty()) { sameLabels.toString() }
+        println("  night lines (timetable under the next date): ${nightLines.sorted()}")
+        check("$label, $date: no line between a night line and a day line (20–80 % of departures after midnight)", borderline.isEmpty()) { borderline.toString() }
         check("$label, $date: no trip of the way back in a direction's timetable", opposite == 0) { top(wrongBy) }
         check("$label, $date: no trip leaving by another way in a direction's timetable — its next stop within $OFF_WAY_M m of the way's on",
             offWay == 0) { "$offWay: ${top(wrongBy)}" }

@@ -19,9 +19,9 @@ class ScheduleAdapter : RecyclerView.Adapter<ScheduleAdapter.VH>() {
     /**
      * A minute of the hour; for another direction's short run, the letter it
      * is marked with on screen ([mark], explained above the list) and where
-     * it ends ([endsAt], said by TalkBack).
+     * it ends ([endsAt], said by TalkBack); [clock], the whole time, as said.
      */
-    data class Minute(val minute: String, val mark: String? = null, val endsAt: String? = null)
+    data class Minute(val minute: String, val mark: String? = null, val endsAt: String? = null, val clock: String = minute)
 
     data class Row(val hour: String, val minutes: List<Minute>)
 
@@ -41,11 +41,10 @@ class ScheduleAdapter : RecyclerView.Adapter<ScheduleAdapter.VH>() {
             try {
                 b.tvHour.text    = "${row.hour}:"
                 b.tvMinutes.text = shown(row.minutes)
-                // "10 часа: 05, 30 до БУЛ. НИКОЛА ПЕТКОВ, 50 минути".
-                val minutesSpoken = row.minutes.joinToString(", ") { m ->
-                    if (m.endsAt == null) m.minute else "${m.minute} до ${m.endsAt}" }
-                b.root.contentDescription =
-                    "${row.hour.toIntOrNull() ?: row.hour} часа: $minutesSpoken минути"
+                // Each time whole, the hour and the minutes (the owner, 25 Nov
+                // 2026): "10:05, 10:30 до БУЛ. НИКОЛА ПЕТКОВ, 10:50".
+                b.root.contentDescription = row.minutes.joinToString(", ") { m ->
+                    if (m.endsAt == null) m.clock else "${m.clock} до ${m.endsAt}" }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind failed for ${row.hour}", e)
             }

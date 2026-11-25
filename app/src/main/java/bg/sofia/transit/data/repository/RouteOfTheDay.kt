@@ -197,6 +197,55 @@ object RouteOfTheDay {
     }
 
     /**
+     * A time of the timetable shown under a date (timetableOfDate): seconds
+     * from that date's midnight — below 0 the evening before (a night line's
+     * first runs), 24:00 and past after midnight (a day line's last runs);
+     * said and shown as a clock (clock) — and where the trip ends, as Call.
+     */
+    class TimetableTime(val seconds: Int, val endsAt: String?)
+
+    /**
+     * Whether most departures of [trips] — a line's, of one day of the
+     * timetable — are after its midnight (24:00 and past, in the data): a
+     * night line. N1–N4, 90 % on 24 Nov 2026; every other line at most 3 %.
+     */
+    fun mostlyAfterMidnight(trips: List<TodaysTrip>): Boolean {
+        var after = 0; var before = 0
+        for (t in trips) for (i in 0 until t.stops.lastIndex) {
+            val at = t.times.getOrNull(i) ?: continue
+            if (at < 0) continue
+            if (at >= DAY_S) after++ else before++
+        }
+        return after > before
+    }
+
+    /**
+     * The timetable of the direction [headsign] at the stop [stopId] shown
+     * under a date (scheduleAt; the owner, 25 Nov 2026): a day of the
+     * timetable under the date most of the line's departures fall on
+     * (mostlyAfterMidnight) — a day line's under its own date, its runs after
+     * midnight last (00:15, not 24:15); a night line's under the next: the
+     * night from Wednesday to Thursday under Thursday, its 23:32 first.
+     * [dayBefore]: the line's trips of the day before the date, [day]: of the
+     * date. By time.
+     */
+    fun timetableOfDate(dayBefore: List<TodaysTrip>, day: List<TodaysTrip>, headsign: String, stopId: String): List<TimetableTime> {
+        val out = ArrayList<TimetableTime>()
+        fun add(trips: List<TodaysTrip>, shift: Int) = scheduleAt(trips, headsign, stopId).forEach { c ->
+            c.trip.times.getOrNull(c.at)?.takeIf { it >= 0 }?.let { out += TimetableTime(it - shift, c.endsAt) }
+        }
+        if (mostlyAfterMidnight(dayBefore)) add(dayBefore, DAY_S)
+        if (!mostlyAfterMidnight(day)) add(day, 0)
+        return out.sortedBy { it.seconds }
+    }
+
+    /** A time of timetableOfDate as a clock, "HH:MM": "23:32" for the evening before, "00:32" for 24:32. */
+    fun clock(seconds: Int): String {
+        val s = Math.floorMod(seconds, DAY_S)
+        return "%02d:%02d".format(s / 3600, s % 3600 / 60)
+    }
+
+    /**
      * Whether a trip that leaves a stop by [rest] (that stop first, then on to
      * where it ends) runs the way [ahead] goes from it (the same stop first):
      * its stops, each one of the way's, by id, in order (along) — but for
@@ -396,4 +445,6 @@ object RouteOfTheDay {
     const val DUE_AFTER_S = 5 * 60
     private const val M_PER_DEG = 111_195.0
     private val NOT_WORD = Regex("[^\\p{L}\\p{N}]+")
+    /** A day, in seconds. */
+    private const val DAY_S = 24 * 3600
 }

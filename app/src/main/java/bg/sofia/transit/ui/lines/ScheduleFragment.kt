@@ -12,6 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.navArgs
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.R
+import bg.sofia.transit.data.repository.RouteOfTheDay
 import bg.sofia.transit.databinding.FragmentScheduleBinding
 import bg.sofia.transit.util.DateHelper
 import dagger.hilt.android.AndroidEntryPoint
@@ -135,14 +136,16 @@ class ScheduleFragment : Fragment() {
         state.times.mapNotNull { it.endsAt }.distinct().forEachIndexed { i, end ->
             marks[end] = MARK_LETTERS.getOrNull(i)?.toString() ?: "${i + 1}"
         }
+        // By time, as they come (a night line's evening before first); each
+        // as a clock — 00:32, not 24:32 (the owner, 25 Nov 2026).
         val groups = state.times
-            .groupBy { it.seconds / 3600 }
-            .toSortedMap()
-            .map { (hour, list) ->
+            .groupBy { Math.floorDiv(it.seconds, 3600) }
+            .map { (_, list) ->
                 ScheduleAdapter.Row(
-                    hour    = "%02d".format(hour),
+                    hour    = RouteOfTheDay.clock(list.first().seconds).substring(0, 2),
                     minutes = list.map { t ->
-                        ScheduleAdapter.Minute("%02d".format(t.seconds / 60 % 60), t.endsAt?.let { marks[it] }, t.endsAt)
+                        val clock = RouteOfTheDay.clock(t.seconds)
+                        ScheduleAdapter.Minute(clock.substring(3, 5), t.endsAt?.let { marks[it] }, t.endsAt, clock)
                     }
                 )
             }
