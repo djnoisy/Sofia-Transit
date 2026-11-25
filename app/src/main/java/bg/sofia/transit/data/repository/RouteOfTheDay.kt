@@ -261,14 +261,6 @@ object RouteOfTheDay {
     fun firstToCome(times: List<Int>, dayOffset: Int, now: Int): Int? =
         times.firstOrNull { it >= now - dayOffset * DAY_S }
 
-    /**
-     * The day, from today, a time of a timetable shown [dayOffset] days from
-     * today falls on by the clock: yesterday's 25:03 is today's 01:03, a
-     * night line's 23:32 under tomorrow is tonight's (review of 25 Nov 2026:
-     * the day said before the focused time is the clock's, not the
-     * timetable's).
-     */
-    fun dayOfTime(dayOffset: Int, seconds: Int): Int = dayOffset + Math.floorDiv(seconds, DAY_S)
 
     /** A time of timetableOfDate as a clock, "HH:MM": "23:32" for the evening before, "00:32" for 24:32. */
     fun clock(seconds: Int): String {

@@ -107,7 +107,7 @@ class ScheduleFragment : Fragment() {
             chip.findViewById<TextView>(R.id.tvChipDay).text = day.dayShortBg
             chip.findViewById<TextView>(R.id.tvChipNum).text = day.dayNumber
             chip.contentDescription =
-                DateHelper.chipContentDescription(day.date, day.relative)
+                DateHelper.chipContentDescription(day.date)
             chip.setOnClickListener { vm.selectDate(day.date) }
 
             // Distribute chips equally across the strip width.
@@ -129,13 +129,12 @@ class ScheduleFragment : Fragment() {
             chip.isSelected = (date == state.selectedDate)
         }
 
-        // Big header: full date of the selected day — for TalkBack with
-        // "вчера", "днес", "утре": the screen may open on any of the three.
-        val relative = state.days.firstOrNull { it.date == state.selectedDate }?.relative
+        // Big header: full date of the selected day — no "вчера", "днес",
+        // "утре" (the owner, 25 Nov 2026).
         if (state.selectedDate.isNotEmpty()) {
             val full = DateHelper.fullDateLabelBg(state.selectedDate)
             binding.tvSelectedDate.text = full
-            binding.tvSelectedDate.contentDescription = "Разписание за $full${relative?.let { ", $it" } ?: ""}"
+            binding.tvSelectedDate.contentDescription = "Разписание за $full"
         }
 
         binding.pbLoading.visibility =
@@ -163,11 +162,9 @@ class ScheduleFragment : Fragment() {
                 )
             }
         // On opening: TalkBack's focus to the hour of the first time not yet
-        // passed — with its day said first when it is not today by the clock
-        // (the owner, 25 Nov 2026; ScheduleState.focusLead).
+        // passed — its times only, no day or date said (the owner, 25 Nov 2026).
         val focusRow = state.focusOn?.takeIf { !focusGiven && !state.loading }
             ?.let { t -> groups.indexOfFirst { row -> row.minutes.any { it.seconds == t } } }?.takeIf { it >= 0 }
-        adapter.setLead(focusRow ?: -1, focusRow?.let { state.focusLead })
         adapter.submitList(groups)
         draws++
         if (focusRow != null) { focusGiven = true; focusOnRow(focusRow) }

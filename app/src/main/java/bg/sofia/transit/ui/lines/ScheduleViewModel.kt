@@ -26,12 +26,7 @@ data class ScheduleState(
      * hour to get TalkBack's focus (RouteOfTheDay.firstToCome; the owner,
      * 25 Nov 2026); null otherwise — a day tapped, or none to come.
      */
-    val focusOn: Int? = null,
-    /**
-     * Said before the focused row's times when that time is not today by the
-     * clock (RouteOfTheDay.dayOfTime): "Утре, понеделник, 30 ноември".
-     */
-    val focusLead: String? = null
+    val focusOn: Int? = null
 )
 
 @HiltViewModel
@@ -92,12 +87,7 @@ class ScheduleViewModel @Inject constructor(
                 times        = times,
                 loading      = false,
                 noDataReason = if (times.isEmpty()) "Няма курсове за тази дата" else null,
-                focusOn      = focusOn,
-                focusLead    = focusOn?.let { RouteOfTheDay.dayOfTime(open - 1, it) }?.takeIf { it != 0 }?.let { day ->
-                    val date = moment.toLocalDate().plusDays(day.toLong())
-                    val words = DateHelper.chipContentDescription(date.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE), null)
-                    when (day) { 1 -> "Утре, $words"; -1 -> "Вчера, $words"; else -> words.replaceFirstChar { it.uppercase() } }
-                }
+                focusOn      = focusOn
             )
         }
     }

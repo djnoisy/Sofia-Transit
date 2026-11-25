@@ -33,9 +33,7 @@ object DateHelper {
         val date: String,        // YYYYMMDD — key for schedule lookup
         val dayShortBg: String,  // "вт" — short weekday, shown on the chip
         val dayNumber: String,   // "20"  — day-of-month, shown on the chip
-        val isToday: Boolean,
-        /** "вчера", "днес", "утре", said by TalkBack after the date; null for another day. */
-        val relative: String? = null
+        val isToday: Boolean
     )
 
     fun todayString(): String = LocalDate.now(SOFIA).format(FMT)
@@ -54,8 +52,7 @@ object DateHelper {
                 date        = d.format(FMT),
                 dayShortBg  = shortDayBg(d.dayOfWeek),
                 dayNumber   = d.dayOfMonth.toString(),
-                isToday     = offset == 0,
-                relative    = when (offset) { -1 -> "вчера"; 0 -> "днес"; 1 -> "утре"; else -> null }
+                isToday     = offset == 0
             )
         }
     }
@@ -104,14 +101,12 @@ object DateHelper {
     }
 
     /**
-     * Full accessibility description of a chip, e.g. "вторник, 20 юли,
-     * днес" — and "вчера", "утре": the timetable may open on either (review
-     * of 25 Nov 2026). Read by TalkBack instead of the terse "вт 20"; and in
-     * the count said when a day's times are shown.
+     * Full accessibility description of a chip, e.g. "вторник, 20 юли" — the
+     * date only, no "вчера", "днес", "утре" (the owner, 25 Nov 2026). Read by
+     * TalkBack instead of the terse "вт 20".
      */
-    fun chipContentDescription(date: String, relative: String?): String = try {
+    fun chipContentDescription(date: String): String = try {
         val d = LocalDate.parse(date, FMT)
-        val base = "${longDayBg(d.dayOfWeek)}, ${d.dayOfMonth} ${monthBg(d.monthValue)}"
-        if (relative != null) "$base, $relative" else base
+        "${longDayBg(d.dayOfWeek)}, ${d.dayOfMonth} ${monthBg(d.monthValue)}"
     } catch (_: Exception) { "" }
 }
