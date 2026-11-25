@@ -51,6 +51,8 @@ class ScheduleFragment : Fragment() {
 
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
+        // A new view: opened afresh (ScheduleViewModel.init), the focus given again.
+        focusGiven = false
 
         binding.tvHeader.text =
             "Линия ${args.routeName} → ${args.headsign}"
@@ -75,22 +77,28 @@ class ScheduleFragment : Fragment() {
         binding.rvSchedule.layoutManager = LinearLayoutManager(requireContext())
         binding.rvSchedule.adapter = adapter
 
-        viewLifecycleOwner.lifecycleScope.launch {
-            vm.state.collectLatest { state -> renderState(state) }
-        }
-
+        // Opened afresh before the state is first drawn: else the state of
+        // before — its focus a time since passed — would be drawn first.
         vm.init(
             routeId  = args.routeId,
             headsign = args.headsign,
             stopId   = args.stopId
         )
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            vm.state.collectLatest { state -> renderState(state) }
+        }
     }
+
+    /** The days the strip was built of. */
+    private var stripDays: List<DateHelper.DayChip> = emptyList()
 
     /** Builds the 7 day chips — again when the days change (the strip may begin yesterday). */
     private fun buildDayStrip(days: List<DateHelper.DayChip>) {
-        if (chipViews.keys.toList() == days.map { it.date }) return
+        if (chipViews.isNotEmpty() && stripDays == days) return
         binding.dayStrip.removeAllViews()
         chipViews.clear()
+        stripDays = days
         val inflater = LayoutInflater.from(requireContext())
         days.forEach { day ->
             val chip = inflater.inflate(
@@ -155,22 +163,19 @@ class ScheduleFragment : Fragment() {
                 )
             }
         // On opening: TalkBack's focus to the hour of the first time not yet
-        // passed — with the day said first when it is not today (the owner,
-        // 25 Nov 2026).
+        // passed — with its day said first when it is not today by the clock
+        // (the owner, 25 Nov 2026; ScheduleState.focusLead).
         val focusRow = state.focusOn?.takeIf { !focusGiven && !state.loading }
             ?.let { t -> groups.indexOfFirst { row -> row.minutes.any { it.seconds == t } } }?.takeIf { it >= 0 }
-        // "Утре, понеделник, 30 ноември" — none for today.
-        val dayWords = relative?.takeIf { it != "днес" }
-            ?.let { "${it.replaceFirstChar { c -> c.uppercase() }}, ${DateHelper.chipContentDescription(state.selectedDate, null)}" }
-        adapter.setLead(focusRow ?: -1, focusRow?.let { dayWords })
+        adapter.setLead(focusRow ?: -1, focusRow?.let { state.focusLead })
         adapter.submitList(groups)
         if (focusRow != null) { focusGiven = true; focusOnRow(focusRow) }
         binding.tvLegend.text = marks.entries.joinToString("\n") { (end, mark) -> "$mark — до $end" }
         binding.tvLegend.visibility = if (marks.isEmpty() || state.loading) View.GONE else View.VISIBLE
 
         if (state.loading) {
-            // On opening — three days looked at, nothing yet to show — said;
-            // a day tapped: quiet, it comes quickly.
+            // On opening — three days looked at, nothing yet to show — shown;
+            // a day tapped: nothing, it comes quickly.
             if (state.days.isEmpty()) {
                 binding.tvEmpty.text = "Зареждане на разписанието…"
                 binding.tvEmpty.visibility = View.VISIBLE

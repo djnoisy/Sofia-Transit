@@ -153,6 +153,8 @@ fun main(args: Array<String>) {
         check("the focus on opening: the first time to come — yesterday's 01:03 at 00:50, today's 14:00 at 10:00, none when all passed",
             RouteOfTheDay.firstToCome(m2, -1, 3000) == 90_180 && RouteOfTheDay.firstToCome(dayLine, 0, 36_000) == 50_400 &&
                 RouteOfTheDay.firstToCome(listOf(3600), 0, 7200) == null)
+        check("the day of the focused time by the clock: yesterday's 25:03 today, tomorrow's 23:32 of a night line today, tomorrow's 05:40 tomorrow",
+            RouteOfTheDay.dayOfTime(-1, 90_180) == 0 && RouteOfTheDay.dayOfTime(1, -1680) == 0 && RouteOfTheDay.dayOfTime(1, 20_400) == 1)
         check("no time to come in the three: none (today shown)",
             RouteOfTheDay.openOn(listOf(emptyList(), listOf(3600), emptyList()), 1, 7200) == null)
     }

@@ -26,7 +26,12 @@ data class ScheduleState(
      * hour to get TalkBack's focus (RouteOfTheDay.firstToCome; the owner,
      * 25 Nov 2026); null otherwise — a day tapped, or none to come.
      */
-    val focusOn: Int? = null
+    val focusOn: Int? = null,
+    /**
+     * Said before the focused row's times when that time is not today by the
+     * clock (RouteOfTheDay.dayOfTime): "Утре, понеделник, 30 ноември".
+     */
+    val focusLead: String? = null
 )
 
 @HiltViewModel
@@ -43,10 +48,9 @@ class ScheduleViewModel @Inject constructor(
     private var loadJob: Job? = null
 
     fun init(routeId: String, headsign: String, stopId: String) {
-        // The view made again (rotation, a theme change): as it was — the day
-        // chosen kept, the strip the same (review of 25 Nov 2026).
-        if (routeId == this.routeId && headsign == this.headsign && stopId == this.stopId &&
-            _state.value.days.isNotEmpty()) return
+        // Each time the screen is shown again — a tab switched back, a
+        // rotation, the next day — opened afresh, on the time it is then
+        // (review of 25 Nov 2026: kept, it focused a time long passed).
         this.routeId  = routeId
         this.headsign = headsign
         this.stopId   = stopId
@@ -67,13 +71,19 @@ class ScheduleViewModel @Inject constructor(
             val timetables = dates.map { repo.getScheduleForDirectionAtStop(routeId, headsign, stopId, it) }
             val open = RouteOfTheDay.openOn(timetables.map { t -> t.map { it.seconds } }, 1, now) ?: 1
             val times = timetables[open]
+            val focusOn = RouteOfTheDay.firstToCome(times.map { it.seconds }, open - 1, now)
             _state.value = ScheduleState(
                 days         = DateHelper.upcomingDays(7, fromYesterday = open == 0, today = moment.toLocalDate()),
                 selectedDate = dates[open],
                 times        = times,
                 loading      = false,
                 noDataReason = if (times.isEmpty()) "Няма курсове за тази дата" else null,
-                focusOn      = RouteOfTheDay.firstToCome(times.map { it.seconds }, open - 1, now)
+                focusOn      = focusOn,
+                focusLead    = focusOn?.let { RouteOfTheDay.dayOfTime(open - 1, it) }?.takeIf { it != 0 }?.let { day ->
+                    val date = moment.toLocalDate().plusDays(day.toLong())
+                    val words = DateHelper.chipContentDescription(date.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE), null)
+                    when (day) { 1 -> "Утре, $words"; -1 -> "Вчера, $words"; else -> words.replaceFirstChar { it.uppercase() } }
+                }
             )
         }
     }
