@@ -169,6 +169,7 @@ class ScheduleFragment : Fragment() {
             ?.let { t -> groups.indexOfFirst { row -> row.minutes.any { it.seconds == t } } }?.takeIf { it >= 0 }
         adapter.setLead(focusRow ?: -1, focusRow?.let { state.focusLead })
         adapter.submitList(groups)
+        draws++
         if (focusRow != null) { focusGiven = true; focusOnRow(focusRow) }
         binding.tvLegend.text = marks.entries.joinToString("\n") { (end, mark) -> "$mark — до $end" }
         binding.tvLegend.visibility = if (marks.isEmpty() || state.loading) View.GONE else View.VISIBLE
@@ -194,16 +195,33 @@ class ScheduleFragment : Fragment() {
 
     /**
      * The row [pos] at the top, with TalkBack's focus — after the window's own
-     * first focus, as RouteStopsFragment brings the board's stop.
+     * first focus, as RouteStopsFragment brings the board's stop. Not if the
+     * list was drawn again meanwhile (a day tapped at once).
      */
     private fun focusOnRow(pos: Int) {
         val rv = binding.rvSchedule
+        val drawn = draws
         rv.post {
+            if (drawn != draws) return@post
             (rv.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(pos, 0)
             rv.postDelayed({
+                if (drawn != draws) return@postDelayed
                 _binding?.rvSchedule?.findViewHolderForAdapterPosition(pos)?.itemView
                     ?.performAccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
             }, FOCUS_DELAY_MS)
+        }
+    }
+
+    /** How many times the list was drawn: a focus asked for one drawing is not given on another. */
+    private var draws = 0
+
+    override fun onStart() {
+        super.onStart()
+        // Left open overnight (Home, the screen off): opened afresh on the
+        // new day, the focus given again (review of 25 Nov 2026).
+        if (vm.openedBeforeToday()) {
+            focusGiven = false
+            vm.init(routeId = args.routeId, headsign = args.headsign, stopId = args.stopId)
         }
     }
 

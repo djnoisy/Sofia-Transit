@@ -47,6 +47,17 @@ class ScheduleViewModel @Inject constructor(
     private var stopId: String = ""
     private var loadJob: Job? = null
 
+    /** The date, in Sofia, the timetable was last opened on (init). */
+    private var openedOn: java.time.LocalDate? = null
+
+    /**
+     * Whether it is another day, in Sofia, than the one the timetable was
+     * opened on — the screen left open overnight, its "днес" and its focus of
+     * yesterday: to be opened afresh (ScheduleFragment.onStart).
+     */
+    fun openedBeforeToday(): Boolean =
+        openedOn?.let { it != java.time.LocalDate.now(DateHelper.SOFIA) } ?: false
+
     fun init(routeId: String, headsign: String, stopId: String) {
         // Each time the screen is shown again — a tab switched back, a
         // rotation, the next day — opened afresh, on the time it is then
@@ -60,12 +71,15 @@ class ScheduleViewModel @Inject constructor(
         // yesterday after midnight while its last runs are to come — the day
         // strip then begins with it — a night line's tomorrow in the evening;
         // else today.
-        _state.value = _state.value.copy(loading = true, noDataReason = null)
+        // Nothing of before shown meanwhile: its days and "днес" may be of
+        // yesterday (review of 25 Nov 2026).
+        _state.value = ScheduleState(loading = true)
         loadJob?.cancel()
+        // One moment, in Sofia: the dates and the time of day agree, at
+        // midnight too.
+        val moment = ZonedDateTime.now(DateHelper.SOFIA)
+        openedOn = moment.toLocalDate()
         loadJob = viewModelScope.launch {
-            // One moment, in Sofia: the dates and the time of day agree, at
-            // midnight too.
-            val moment = ZonedDateTime.now(DateHelper.SOFIA)
             val now = moment.toLocalTime().toSecondOfDay()
             val dates = DateHelper.aroundToday(moment.toLocalDate())
             val timetables = dates.map { repo.getScheduleForDirectionAtStop(routeId, headsign, stopId, it) }

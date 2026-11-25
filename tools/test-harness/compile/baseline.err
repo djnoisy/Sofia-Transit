@@ -1336,6 +1336,7 @@ app/src/main/java/bg/sofia/transit/ui/lines/ScheduleAdapter.kt: error: variable 
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: 'onCreateView' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: 'onDestroyView' overrides nothing
+app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: 'onStart' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: 'onViewCreated' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: overload resolution ambiguity: 
@@ -1390,6 +1391,7 @@ app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolv
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: databinding
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: navArgs
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: onDestroyView
+app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: onStart
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: onViewCreated
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: requireContext
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: requireContext
