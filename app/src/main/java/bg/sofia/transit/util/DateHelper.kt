@@ -2,6 +2,7 @@ package bg.sofia.transit.util
 
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
@@ -21,16 +22,23 @@ object DateHelper {
 
     private val FMT = DateTimeFormatter.ofPattern("yyyyMMdd")
 
+    /**
+     * Sofia's time zone, whatever the phone's: the timetable's dates and
+     * times are Sofia's (as GtfsRepository.servicesToday; review of 25 Nov 2026).
+     */
+    val SOFIA: ZoneId = ZoneId.of("Europe/Sofia")
+
     /** One day in the date strip. */
     data class DayChip(
         val date: String,        // YYYYMMDD — key for schedule lookup
         val dayShortBg: String,  // "вт" — short weekday, shown on the chip
         val dayNumber: String,   // "20"  — day-of-month, shown on the chip
         val isToday: Boolean,
-        val isYesterday: Boolean = false
+        /** "вчера", "днес", "утре", said by TalkBack after the date; null for another day. */
+        val relative: String? = null
     )
 
-    fun todayString(): String = LocalDate.now().format(FMT)
+    fun todayString(): String = LocalDate.now(SOFIA).format(FMT)
 
     /**
      * Builds the [count]-day window starting from today (inclusive) — or from
@@ -38,8 +46,7 @@ object DateHelper {
      * line's runs after midnight still to come (ScheduleViewModel; the owner,
      * 25 Nov 2026). No other past dates.
      */
-    fun upcomingDays(count: Int = 7, fromYesterday: Boolean = false): List<DayChip> {
-        val today = LocalDate.now()
+    fun upcomingDays(count: Int = 7, fromYesterday: Boolean = false, today: LocalDate = LocalDate.now(SOFIA)): List<DayChip> {
         val first = if (fromYesterday) -1 else 0
         return (first until first + count).map { offset ->
             val d = today.plusDays(offset.toLong())
@@ -48,13 +55,13 @@ object DateHelper {
                 dayShortBg  = shortDayBg(d.dayOfWeek),
                 dayNumber   = d.dayOfMonth.toString(),
                 isToday     = offset == 0,
-                isYesterday = offset == -1
+                relative    = when (offset) { -1 -> "вчера"; 0 -> "днес"; 1 -> "утре"; else -> null }
             )
         }
     }
 
-    /** Yesterday, today and tomorrow, YYYYMMDD, for where the timetable opens. */
-    fun aroundToday(): List<String> = (-1..1).map { LocalDate.now().plusDays(it.toLong()).format(FMT) }
+    /** Yesterday, today and tomorrow of [today], YYYYMMDD, for where the timetable opens. */
+    fun aroundToday(today: LocalDate): List<String> = (-1..1).map { today.plusDays(it.toLong()).format(FMT) }
 
     /**
      * Full, human-readable Bulgarian label for the big header above the
@@ -97,16 +104,14 @@ object DateHelper {
     }
 
     /**
-     * Full accessibility description of a chip, e.g.
-     * "вторник, 20 юли, днес". Read by TalkBack instead of the terse "вт 20".
+     * Full accessibility description of a chip, e.g. "вторник, 20 юли,
+     * днес" — and "вчера", "утре": the timetable may open on either (review
+     * of 25 Nov 2026). Read by TalkBack instead of the terse "вт 20"; and in
+     * the count said when a day's times are shown.
      */
-    fun chipContentDescription(date: String, isToday: Boolean, isYesterday: Boolean = false): String = try {
+    fun chipContentDescription(date: String, relative: String?): String = try {
         val d = LocalDate.parse(date, FMT)
         val base = "${longDayBg(d.dayOfWeek)}, ${d.dayOfMonth} ${monthBg(d.monthValue)}"
-        when {
-            isToday -> "$base, днес"
-            isYesterday -> "$base, вчера"
-            else -> base
-        }
+        if (relative != null) "$base, $relative" else base
     } catch (_: Exception) { "" }
 }

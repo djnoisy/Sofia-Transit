@@ -40,7 +40,7 @@ class ScheduleFragment : Fragment() {
     private lateinit var adapter: ScheduleAdapter
 
     /** Chip views by date string, so we can toggle their selected state. */
-    private val chipViews = mutableMapOf<String, View>()
+    private val chipViews = linkedMapOf<String, View>()
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, saved: Bundle?
@@ -86,9 +86,11 @@ class ScheduleFragment : Fragment() {
         )
     }
 
-    /** Builds the 7 day chips once, the first time the day list arrives. */
+    /** Builds the 7 day chips — again when the days change (the strip may begin yesterday). */
     private fun buildDayStrip(days: List<DateHelper.DayChip>) {
-        if (chipViews.isNotEmpty()) return
+        if (chipViews.keys.toList() == days.map { it.date }) return
+        binding.dayStrip.removeAllViews()
+        chipViews.clear()
         val inflater = LayoutInflater.from(requireContext())
         days.forEach { day ->
             val chip = inflater.inflate(
@@ -97,7 +99,7 @@ class ScheduleFragment : Fragment() {
             chip.findViewById<TextView>(R.id.tvChipDay).text = day.dayShortBg
             chip.findViewById<TextView>(R.id.tvChipNum).text = day.dayNumber
             chip.contentDescription =
-                DateHelper.chipContentDescription(day.date, day.isToday, day.isYesterday)
+                DateHelper.chipContentDescription(day.date, day.relative)
             chip.setOnClickListener { vm.selectDate(day.date) }
 
             // Distribute chips equally across the strip width.
@@ -119,11 +121,13 @@ class ScheduleFragment : Fragment() {
             chip.isSelected = (date == state.selectedDate)
         }
 
-        // Big header: full date of the selected day.
+        // Big header: full date of the selected day — for TalkBack with
+        // "вчера", "днес", "утре": the screen may open on any of the three.
+        val relative = state.days.firstOrNull { it.date == state.selectedDate }?.relative
         if (state.selectedDate.isNotEmpty()) {
             val full = DateHelper.fullDateLabelBg(state.selectedDate)
             binding.tvSelectedDate.text = full
-            binding.tvSelectedDate.contentDescription = "Разписание за $full"
+            binding.tvSelectedDate.contentDescription = "Разписание за $full${relative?.let { ", $it" } ?: ""}"
         }
 
         binding.pbLoading.visibility =
@@ -155,7 +159,12 @@ class ScheduleFragment : Fragment() {
         binding.tvLegend.visibility = if (marks.isEmpty() || state.loading) View.GONE else View.VISIBLE
 
         if (state.loading) {
-            binding.tvEmpty.visibility = View.GONE
+            // On opening — three days looked at, nothing yet to show — said;
+            // a day tapped: quiet, it comes quickly.
+            if (state.days.isEmpty()) {
+                binding.tvEmpty.text = "Зареждане на разписанието…"
+                binding.tvEmpty.visibility = View.VISIBLE
+            } else binding.tvEmpty.visibility = View.GONE
             binding.rvSchedule.visibility = View.GONE
         } else if (groups.isEmpty()) {
             binding.tvEmpty.text = state.noDataReason ?: "Няма курсове за тази дата"
@@ -165,10 +174,12 @@ class ScheduleFragment : Fragment() {
             binding.tvEmpty.visibility = View.GONE
             binding.rvSchedule.visibility = View.VISIBLE
 
-            // Announce the count for TalkBack
+            // Announce the count for TalkBack, and for which day — the
+            // screen may open on yesterday or tomorrow (review of 25 Nov 2026):
+            // "Намерени 24 курса за петък, 27 ноември, утре".
             val total = state.times.size
             binding.rvSchedule.announceForAccessibility(
-                "Намерени $total курса за избрания ден"
+                "Намерени $total курса за ${DateHelper.chipContentDescription(state.selectedDate, relative)}"
             )
         }
     }

@@ -1023,6 +1023,9 @@ class GtfsRepository @Inject constructor(
     private fun forgetServicesToday() {
         servicesTodayGeneration++
         servicesTodayCache = null
+        // The timetable's, of the data before: not kept in memory till evicted.
+        synchronized(servicesOnCache) { servicesOnCache.clear() }
+        synchronized(tripsOnCache) { tripsOnCache.clear() }
     }
 
     @Volatile private var servicesTodayCache: Pair<String, Set<String>>? = null
@@ -1457,11 +1460,13 @@ class GtfsRepository @Inject constructor(
     ): List<ScheduledTime> {
         val dayBefore = java.time.LocalDate.parse(date, java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
             .minusDays(1).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+        // The import the services are of: trips kept under it (tripsOn).
+        val generation = servicesTodayGeneration
         val services = servicesOn(date)
         val servicesBefore = servicesOn(dayBefore)
         if (services.isEmpty() && servicesBefore.isEmpty()) return emptyList()
-        val day = tripsOn(routeId, date, services)
-        val before = tripsOn(routeId, dayBefore, servicesBefore)
+        val day = tripsOn(routeId, date, services, generation)
+        val before = tripsOn(routeId, dayBefore, servicesBefore, generation)
         return withContext(Dispatchers.Default) {
             RouteOfTheDay.timetableOfDate(before, day, headsign, stopId).map { ScheduledTime(it.seconds, it.endsAt) }
         }
@@ -1487,19 +1492,22 @@ class GtfsRepository @Inject constructor(
      * for the timetable: kept for the last few, as each date shown needs the
      * day before too, and the timetable opens by three dates (ScheduleViewModel).
      */
-    private suspend fun tripsOn(routeId: String, date: String, services: Set<String>): List<RouteOfTheDay.TodaysTrip> {
+    private suspend fun tripsOn(routeId: String, date: String, services: Set<String>, generation: Int): List<RouteOfTheDay.TodaysTrip> {
         if (services.isEmpty()) return emptyList()
-        val key = "$routeId|$date|$servicesTodayGeneration"
+        val key = "$routeId|$date|$generation"
         synchronized(tripsOnCache) { tripsOnCache[key] }?.let { return it }
-        val generation = servicesTodayGeneration
         val trips = withStops(tripDao.getByRoute(routeId).filter { it.serviceId in services })
         if (generation == servicesTodayGeneration) synchronized(tripsOnCache) { tripsOnCache[key] = trips }
         return trips
     }
 
-    /** tripsOn by line, date and import; the eldest go. */
+    /**
+     * tripsOn by line, date and import; the eldest go — four: the days the
+     * timetable opens by (the day before yesterday to tomorrow). A line-day
+     * of tram 22 is near 9 000 stop rows (review of 25 Nov 2026).
+     */
     private val tripsOnCache = object : LinkedHashMap<String, List<RouteOfTheDay.TodaysTrip>>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<RouteOfTheDay.TodaysTrip>>) = size > 5
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<RouteOfTheDay.TodaysTrip>>) = size > 4
     }
 
     /** servicesOn by date and import; the eldest go. */

@@ -1371,6 +1371,7 @@ app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolv
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: ViewGroup
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: android
@@ -1393,6 +1394,8 @@ app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolv
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: unresolved reference: viewModels
+app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/ScheduleFragment.kt: error: variable expected

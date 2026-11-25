@@ -11,7 +11,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import java.time.LocalTime
+import java.time.ZonedDateTime
 import javax.inject.Inject
 
 data class ScheduleState(
@@ -37,6 +37,10 @@ class ScheduleViewModel @Inject constructor(
     private var loadJob: Job? = null
 
     fun init(routeId: String, headsign: String, stopId: String) {
+        // The view made again (rotation, a theme change): as it was — the day
+        // chosen kept, the strip the same (review of 25 Nov 2026).
+        if (routeId == this.routeId && headsign == this.headsign && stopId == this.stopId &&
+            _state.value.days.isNotEmpty()) return
         this.routeId  = routeId
         this.headsign = headsign
         this.stopId   = stopId
@@ -49,13 +53,16 @@ class ScheduleViewModel @Inject constructor(
         _state.value = _state.value.copy(loading = true, noDataReason = null)
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            val now = LocalTime.now().toSecondOfDay()
-            val dates = DateHelper.aroundToday()
+            // One moment, in Sofia: the dates and the time of day agree, at
+            // midnight too.
+            val moment = ZonedDateTime.now(DateHelper.SOFIA)
+            val now = moment.toLocalTime().toSecondOfDay()
+            val dates = DateHelper.aroundToday(moment.toLocalDate())
             val timetables = dates.map { repo.getScheduleForDirectionAtStop(routeId, headsign, stopId, it) }
             val open = RouteOfTheDay.openOn(timetables.map { t -> t.map { it.seconds } }, 1, now) ?: 1
             val times = timetables[open]
             _state.value = ScheduleState(
-                days         = DateHelper.upcomingDays(7, fromYesterday = open == 0),
+                days         = DateHelper.upcomingDays(7, fromYesterday = open == 0, today = moment.toLocalDate()),
                 selectedDate = dates[open],
                 times        = times,
                 loading      = false,
