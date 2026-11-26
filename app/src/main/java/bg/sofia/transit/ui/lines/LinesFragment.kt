@@ -138,7 +138,8 @@ class LinesFragment : Fragment() {
         val list = if (query.isEmpty()) all else LineSearch.rank(all, query, { it.routeShortName })
         adapter.submitList(list)
         updateFilterButtonStates()
-        val none = query.isNotEmpty() && list.isEmpty()
+        // Not while the lines are still loading (review of 26 Nov 2026).
+        val none = query.isNotEmpty() && list.isEmpty() && grouped.isNotEmpty()
         // Said once, as it comes (as Спирки → "Търсене").
         if (none && binding.tvEmpty.visibility != View.VISIBLE) binding.tvEmpty.announceForAccessibility(binding.tvEmpty.text)
         binding.tvEmpty.visibility = if (none) View.VISIBLE else View.GONE
