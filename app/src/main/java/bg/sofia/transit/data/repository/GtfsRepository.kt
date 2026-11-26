@@ -394,14 +394,23 @@ class GtfsRepository @Inject constructor(
     }
 
     /**
-     * Searches the static DB for stops matching [query] (by code or name).
-     * Returns up to 10 results. Empty query returns an empty list.
+     * The stops [query] finds — by code or name (util/StopSearch; Спирки →
+     * "Търсене", the owner, 26 Nov 2026) — at most ten, one a code: the
+     * poles of one code are one stop, their board one (getArrivalsForStopCode).
+     * The stops are read once, and again after each import.
      */
-    suspend fun searchStops(query: String, limit: Int = 10): List<bg.sofia.transit.data.db.entity.Stop> {
-        val trimmed = query.trim()
-        if (trimmed.isEmpty()) return emptyList()
-        return stopDao.searchStops(trimmed, trimmed, limit)
+    suspend fun searchStops(query: String): List<bg.sofia.transit.data.db.entity.Stop> {
+        val generation = servicesTodayGeneration
+        val stops = searchable?.takeIf { it.first == generation }?.second
+            ?: stopDao.getCalledAt().distinctBy { it.stopCode?.takeIf { c -> c.isNotBlank() } ?: it.stopId }
+                .also { if (generation == servicesTodayGeneration) searchable = generation to it }
+        return withContext(Dispatchers.Default) {
+            bg.sofia.transit.util.StopSearch.find(stops, query, { it.stopName }, { it.stopCode?.takeIf { c -> c.isNotBlank() } })
+        }
     }
+
+    /** The stops searchStops looks in, of the import of the number given (servicesTodayGeneration). */
+    @Volatile private var searchable: Pair<Int, List<bg.sofia.transit.data.db.entity.Stop>>? = null
 
     /** Bulk lookup of trips by ID — for diagnostics & realtime resolution. */
     suspend fun getTripsByIds(ids: List<String>) = tripDao.getByIds(ids)

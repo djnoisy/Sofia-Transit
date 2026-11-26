@@ -18,8 +18,8 @@ import javax.inject.Inject
 
 /**
  * Спирки → "Любими" (the owner, 9 Nov 2026; in place of "Търсене"): the
- * favourite stops, in the order added; a tap opens the stop's virtual board,
- * where it is also removed from them. Follows the list as it changes.
+ * favourite stops, in the order added; a tap opens the stop's window,
+ * where it is also removed from them (its window, StopBoardActivity). Follows the list as it changes.
  */
 @AndroidEntryPoint
 class FavoritesTabFragment : Fragment() {

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A tab of Спирки — "Наблизо", "Любими", "Търсене" (the owner, 26 Nov
+     2026: not as a stop's window's): the selected one a pill in the primary
+     colour, on the band of the three (bg_stops_tabs_band); the others bare.
+     In high contrast: yellow. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <inset android:insetLeft="4dp" android:insetRight="4dp"
+            android:insetTop="4dp" android:insetBottom="4dp">
+            <shape android:shape="rectangle">
+                <solid android:color="?attr/colorPrimary"/>
+                <corners android:radius="999dp"/>
+            </shape>
+        </inset>
+    </item>
+    <item android:drawable="@android:color/transparent"/>
+</selector>

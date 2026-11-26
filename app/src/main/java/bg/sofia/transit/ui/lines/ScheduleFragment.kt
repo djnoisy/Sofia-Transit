@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * The "Разписание" tab of a stop's window (StopBoardActivity; the owner,
+ * The "Разписания" tab of a stop's window (StopBoardActivity; the owner,
  * 26 Nov 2026): the timetable of a line at the stop, chosen from a drop-down
  * list of every line calling there (GtfsRepository.linesAtStop) — the one
  * asked for, from a stop of a direction in Линии, else the first — as Линии
@@ -104,12 +104,11 @@ class ScheduleFragment : Fragment() {
      * The drop-down list of the lines, once known: "Автобус 111 към Ж.К.
      * ЛЮЛИН-1,2" (or "Автобус 84, само слизане", as the board says it) — "към"
      * on screen too, not "→": the selection TalkBack announces is the item's
-     * text (review of 26 Nov 2026); the one shown selected. Hidden, with its
-     * caption, while not known and when there is none.
+     * text (review of 26 Nov 2026); the one shown selected; no caption over
+     * it (the owner, 26 Nov 2026). Hidden while not known and when there is none.
      */
     private fun bindLines(lines: List<StopLine>?) {
         val any = !lines.isNullOrEmpty()
-        binding.tvLineLabel.visibility = if (any) View.VISIBLE else View.GONE
         binding.spinnerLine.visibility = if (any) View.VISIBLE else View.GONE
         if (lines == null || !any || lines === listed) return
         listed = lines

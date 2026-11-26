@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The band of Спирки's three tabs (bg_stops_tab): rounded, a shade off the
+     page, with an edge — white in high contrast, where the band is black. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="?attr/colorSurfaceVariant"/>
+    <stroke android:width="?attr/lineDividerWidth" android:color="?attr/colorOutline"/>
+    <corners android:radius="999dp"/>
+</shape>

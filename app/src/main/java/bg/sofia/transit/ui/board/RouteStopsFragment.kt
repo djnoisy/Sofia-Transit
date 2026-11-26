@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 
 /**
- * "Спирки по маршрута" from a row of a stop's board (the "Табло" tab of the
+ * "Спирки по маршрута" from a row of a stop's board (the "Табло с пристигания" tab of the
  * stop's window; the owner, 24 and 26 Nov 2026): the stops of the route the row's direction takes through the
  * board's stop (GtfsRepository.lineAtStop) — 111 towards БУЛ. НИКОЛА ПЕТКОВ
  * its short run's 22, not the full run's 41 — as the Lines screen lists a

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A tab of a stop's window, "Табло с пристигания" / "Разписания" (the
+     owner, 26 Nov 2026: "framed"): each in a frame of its own, side by side;
+     the selected one filled as the active section of the navigation bar
+     (colorNavActive), apart from the other by its lightness, not only its
+     colour. In high contrast: white frames, the selected one yellow. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <inset android:insetLeft="6dp" android:insetRight="6dp"
+            android:insetTop="6dp" android:insetBottom="6dp">
+            <shape android:shape="rectangle">
+                <solid android:color="?attr/colorNavActive"/>
+                <stroke android:width="?attr/lineDividerWidth" android:color="?attr/colorOutline"/>
+                <corners android:radius="8dp"/>
+            </shape>
+        </inset>
+    </item>
+    <item>
+        <inset android:insetLeft="6dp" android:insetRight="6dp"
+            android:insetTop="6dp" android:insetBottom="6dp">
+            <shape android:shape="rectangle">
+                <solid android:color="@android:color/transparent"/>
+                <stroke android:width="?attr/lineDividerWidth" android:color="?attr/colorOutline"/>
+                <corners android:radius="8dp"/>
+            </shape>
+        </inset>
+    </item>
+</selector>

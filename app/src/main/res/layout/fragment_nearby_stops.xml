@@ -1,23 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- "Спирки": the title, "Настройки" and "Диагностика" are in the top app
-     bar (activity_main.xml); here the two tabs and their pages. -->
+     bar (activity_main.xml); here the three tabs and their pages. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- The selected tab: marked by a 4dp bar in the primary colour (6:1 on
-         the page in light, 11:1 in dark); its text differs from the other's
-         by little in light and dark, as in Material 3. -->
+    <!-- "Наблизо", "Любими", "Търсене" (the owner, 26 Nov 2026): on a
+         rounded band of their own (bg_stops_tabs_band), the selected one a
+         pill in the primary colour (bg_stops_tab), its name bold
+         (ui/common/Tabs) — not as a stop's window's framed tabs; no line
+         under it. -->
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayout"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        app:tabTextColor="?attr/colorOnSurfaceVariant"
-        app:tabSelectedTextColor="?attr/colorPrimary"
-        app:tabIndicatorColor="?attr/colorPrimary"
-        app:tabIndicatorHeight="4dp"/>
+        android:layout_height="52dp"
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="4dp"
+        android:background="@drawable/bg_stops_tabs_band"
+        app:tabMode="fixed"
+        app:tabGravity="fill"
+        app:tabBackground="@drawable/bg_stops_tab"
+        app:tabTextColor="?attr/colorOnSurface"
+        app:tabSelectedTextColor="?attr/colorOnPrimary"
+        app:tabIndicatorHeight="0dp"/>
 
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/viewPager"

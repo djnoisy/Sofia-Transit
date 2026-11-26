@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * The arrivals at one stop — the "Табло" tab of the stop's window
+ * The arrivals at one stop — the "Табло с пристигания" tab of the stop's window
  * (StopBoardActivity; the virtual board of before, the owner, 26 Nov 2026),
  * with "Обнови" in the window's top bar while it is shown (the owner,
  * 9 Nov 2026). A row activated opens its line's route through the stop

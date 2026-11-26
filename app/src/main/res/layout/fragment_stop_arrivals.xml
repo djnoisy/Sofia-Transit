@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The board, the "Табло" tab of a stop's window (StopArrivalsFragment): the
+<!-- The board, the "Табло с пристигания" tab of a stop's window (StopArrivalsFragment): the
      stop's name is the window's, above (activity_stop_board.xml); while the
      arrivals load, a small indicator at the top right, over the list. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"

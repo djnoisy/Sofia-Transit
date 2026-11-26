@@ -34,7 +34,7 @@ data class ScheduleState(
 )
 
 /**
- * The "Разписание" tab of a stop's window (ScheduleFragment; the owner,
+ * The "Разписания" tab of a stop's window (ScheduleFragment; the owner,
  * 26 Nov 2026): the lines calling at the stop to choose from
  * (GtfsRepository.linesAtStop) — [lines], null until known — the one shown
  * ([selected]), and its timetable there ([state]), as Линии showed it.

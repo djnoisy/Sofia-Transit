@@ -2,9 +2,10 @@
 <!-- A stop's window, "Спирка" (StopBoardActivity; the owner, 26 Nov 2026): a
      window of its own, opened from anywhere in the app — no navigation bar;
      in the top bar the back arrow, the title, "Обнови" (on the board) and the
-     favourites. Below, the stop's name and code, then its two tabs,
-     "Табло" — the arrivals, StopArrivalsFragment — and "Разписание" — the
-     timetable of a line there, ScheduleFragment — then the tab's page. -->
+     favourites, and under them, on the bar's background, the stop's name and
+     code; then its two tabs, "Табло с пристигания" — the arrivals,
+     StopArrivalsFragment — and "Разписания" — the timetable of a line
+     there, ScheduleFragment — then the tab's page. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -12,6 +13,10 @@
     android:orientation="vertical"
     android:background="?attr/colorSurface">
 
+    <!-- The window's head: the top bar and, on its background, the stop's
+         name and code, "Метростанция Ал. Малинов (код 0169)" — part of the
+         title, said first (the owner, 26 Nov 2026; under the bar, it hung
+         in nothing on the page's background). Wraps, not cut short. -->
     <com.google.android.material.appbar.AppBarLayout
         android:id="@+id/appBar"
         android:layout_width="match_parent"
@@ -23,31 +28,34 @@
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"/>
+
+        <TextView android:id="@+id/tvStopName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="14dp"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="?attr/colorOnSurface"
+            android:accessibilityHeading="true"/>
     </com.google.android.material.appbar.AppBarLayout>
 
-    <!-- The stop's name and code, "Метростанция Ал. Малинов (код 0169)":
-         above the tabs, for both — said first, then the choice (the owner,
-         26 Nov 2026, №136). -->
-    <TextView android:id="@+id/tvStopName"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingHorizontal="20dp"
-        android:paddingTop="16dp"
-        android:paddingBottom="8dp"
-        android:textSize="21sp"
-        android:textStyle="bold"
-        android:textColor="?attr/colorOnSurface"
-        android:accessibilityHeading="true"/>
-
-    <!-- As the tabs of "Спирки" (fragment_nearby_stops.xml). -->
+    <!-- The two tabs, "Табло с пристигания" and "Разписания": each framed,
+         the selected one filled (bg_stop_tab; the owner, 26 Nov 2026) and its
+         name bold (ui/common/Tabs); no line under it. -->
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayout"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        app:tabTextColor="?attr/colorOnSurfaceVariant"
-        app:tabSelectedTextColor="?attr/colorPrimary"
-        app:tabIndicatorColor="?attr/colorPrimary"
-        app:tabIndicatorHeight="4dp"/>
+        android:layout_height="60dp"
+        android:layout_marginHorizontal="6dp"
+        android:layout_marginTop="6dp"
+        app:tabMode="fixed"
+        app:tabGravity="fill"
+        app:tabBackground="@drawable/bg_stop_tab"
+        app:tabTextColor="?attr/colorOnSurface"
+        app:tabSelectedTextColor="?attr/colorOnNavActive"
+        app:tabIndicatorHeight="0dp"/>
 
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/viewPager"

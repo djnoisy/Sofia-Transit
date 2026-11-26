@@ -12,6 +12,7 @@ import androidx.viewpager2.adapter.FragmentStateAdapter
 import bg.sofia.transit.R
 import bg.sofia.transit.databinding.ActivityStopBoardBinding
 import bg.sofia.transit.ui.common.SubWindow
+import bg.sofia.transit.ui.common.Tabs
 import bg.sofia.transit.ui.lines.ScheduleFragment
 import bg.sofia.transit.ui.nearby.StopArrivalsFragment
 import bg.sofia.transit.util.FavoriteStop
@@ -26,11 +27,13 @@ import javax.inject.Inject
  * A stop's window, "Спирка" (the owner, 26 Nov 2026: the virtual board and
  * the timetables of a stop in one window): a window of its own — no
  * navigation bar; in the top bar the back arrow, the title, "Обнови" while
- * the board is shown (StopArrivalsFragment's) and the favourites. Two tabs,
- * as "Спирки" has: "Табло" — the arrivals, the virtual board of before
- * (StopArrivalsFragment) — and "Разписание" — the timetable of any line
- * calling there, chosen from a drop-down list (ScheduleFragment); above
- * them, the stop's name and code (the owner, 26 Nov 2026, №136: said first).
+ * the board is shown (StopArrivalsFragment's) and the favourites, and under
+ * them, on the bar's background, the stop's name and code — part of the
+ * title, said first (the owner, 26 Nov 2026). Two tabs, each framed, the
+ * selected one filled (bg_stop_tab): "Табло с пристигания" — the arrivals,
+ * the virtual board of before (StopArrivalsFragment) — and "Разписания" —
+ * the timetable of any line calling there, chosen from a drop-down list
+ * (ScheduleFragment).
  *
  * Opened from anywhere in the app: on the board with [start] (Спирки — near
  * us and the favourites — and a stop of a line's route opened from a board,
@@ -63,12 +66,13 @@ class StopBoardActivity : AppCompatActivity() {
 
         binding.viewPager.adapter = Pages(this)
         TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
-            tab.text = if (position == PAGE_BOARD) "Табло" else "Разписание"
+            tab.text = if (position == PAGE_BOARD) "Табло с пристигания" else "Разписания"
         }.attach()
         // Opened on the tab asked for; on recreation, ViewPager2 keeps its own.
         if (savedInstanceState == null) {
             binding.viewPager.setCurrentItem(intent.getIntExtra(EXTRA_PAGE, PAGE_BOARD), false)
         }
+        Tabs.boldSelected(binding.tabLayout)
     }
 
     /** The two tabs' pages, made once each and kept, as in Спирки. */
