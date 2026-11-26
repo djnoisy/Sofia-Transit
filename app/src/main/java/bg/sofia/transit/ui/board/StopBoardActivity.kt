@@ -29,8 +29,8 @@ import javax.inject.Inject
  * the board is shown (StopArrivalsFragment's) and the favourites. Two tabs,
  * as "Спирки" has: "Табло" — the arrivals, the virtual board of before
  * (StopArrivalsFragment) — and "Разписание" — the timetable of any line
- * calling there, chosen from a drop-down list (ScheduleFragment); between
- * them and the page, the stop's name and code.
+ * calling there, chosen from a drop-down list (ScheduleFragment); above
+ * them, the stop's name and code (the owner, 26 Nov 2026, №136: said first).
  *
  * Opened from anywhere in the app: on the board with [start] (Спирки — near
  * us and the favourites — and a stop of a line's route opened from a board,

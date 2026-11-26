@@ -78,7 +78,7 @@ class StopArrivalsFragment : Fragment() {
 
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
-        // The stop's name and code: the window's, under its tabs (StopBoardActivity).
+        // The stop's name and code: the window's, above its tabs (StopBoardActivity).
 
         adapter = ArrivalAdapter { info -> openRoute(info) }
         binding.rvArrivals.layoutManager = LinearLayoutManager(requireContext())
