@@ -1897,9 +1897,12 @@ app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unreso
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: ViewCompat
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: ViewCompat
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: ViewGroup
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: WindowInsetsCompat
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: activity
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: android

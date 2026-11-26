@@ -48,7 +48,6 @@
         android:padding="24dp"
         android:gravity="center"
         android:text="Няма намерени спирки"
-        android:accessibilityLiveRegion="polite"
         android:textSize="17sp"
         android:textColor="?attr/colorOnSurface"
         android:visibility="gone"/>

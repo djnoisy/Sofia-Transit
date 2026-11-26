@@ -107,12 +107,19 @@ class SearchTabFragment : Fragment() {
         adapter.submitList(found.orEmpty()) { s ->
             at?.let { LocationHelper.distanceMetres(it.latitude, it.longitude, s.stopLat, s.stopLon) }
         }
-        binding.tvEmpty.visibility = if (found != null && found.isEmpty()) View.VISIBLE else View.GONE
+        val none = found != null && found.isEmpty()
+        // Said once, as it comes: shown with the list hidden in the same
+        // frame, a live region may not be told apart (review of 26 Nov 2026).
+        if (none && binding.tvEmpty.visibility != View.VISIBLE) binding.tvEmpty.announceForAccessibility(binding.tvEmpty.text)
+        binding.tvEmpty.visibility = if (none) View.VISIBLE else View.GONE
         binding.rvResults.visibility = if (found.isNullOrEmpty()) View.GONE else View.VISIBLE
     }
 
     override fun onResume() {
         super.onResume()
+        // The keyboard may have gone while the page was away, unseen by it:
+        // the room under the list worked out again.
+        ViewCompat.requestApplyInsets(binding.rvResults)
         // Where we are, for how far: the phone's last known place, if allowed —
         // no updates asked for; the stops found shown again with it.
         val ctx = requireContext()
@@ -145,9 +152,15 @@ class SearchTabFragment : Fragment() {
         hideKeyboard()
     }
 
+    /**
+     * By the window's token, not the field's: on another tab chosen, the page
+     * is paused only once it has scrolled away, detached — its field then has
+     * none, and the keyboard stayed over the list (review of 26 Nov 2026).
+     */
     private fun hideKeyboard() {
         val field = _binding?.etSearch ?: return
-        context?.getSystemService<InputMethodManager>()?.hideSoftInputFromWindow(field.windowToken, 0)
+        val token = activity?.window?.decorView?.windowToken ?: field.windowToken
+        context?.getSystemService<InputMethodManager>()?.hideSoftInputFromWindow(token, 0)
         field.clearFocus()
     }
 

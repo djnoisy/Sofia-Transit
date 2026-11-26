@@ -57,7 +57,7 @@ object StopSearch {
         val shown = byCode.toHashSet()
         val byName = if (wanted.sumOf { it.length } < 2) emptyList() else stops
             .filter { it !in shown }
-            .mapNotNull { s -> match(words(nameOf(s)), wanted)?.let { Triple(s, it, nameOf(s).uppercase()) } }
+            .mapNotNull { s -> match(words(nameOf(s)), wanted)?.let { Triple(s, it, plain(nameOf(s))) } }
             .sortedWith(compareBy({ it.second }, { it.third }, { codeOf(it.first).orEmpty() }))
             .map { it.first }
         return (byCode + byName).take(limit)
@@ -80,6 +80,9 @@ object StopSearch {
         }
         return score
     }
+
+    /** [name] in capitals, its words parted by one space: "Ул. Хемус" and "УЛ.ХЕМУС" side by side. */
+    private fun plain(name: String) = name.uppercase().split(NOT_WORD).filter { it.isNotEmpty() }.joinToString(" ")
 
     /** Whether [code] starts with the digits [typed], its leading zeros or not ("169": 0169, 1690). */
     private fun codeMatches(code: String, typed: String): Boolean {

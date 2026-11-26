@@ -28,6 +28,9 @@ class SearchResultAdapter(
     fun submitList(newItems: List<Stop>, distance: (Stop) -> Double?) {
         distanceOf = distance
         if (newItems.map { it.stopId } == items.map { it.stopId }) {
+            // Their data anew too: a data update may have renamed or moved one.
+            items.clear()
+            items.addAll(newItems)
             if (items.isNotEmpty()) notifyItemRangeChanged(0, items.size)
             return
         }

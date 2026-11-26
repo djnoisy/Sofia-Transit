@@ -44,7 +44,11 @@
          the selected one's name bold — told apart by more than its colour
          and background (TabLayout's tabSelectedTextAppearance). -->
     <style name="TextAppearance.SofiaTransit.Tab" parent="TextAppearance.Material3.TitleSmall">
-        <item name="android:textSize">15sp</item>
+        <!-- Regular, not TitleSmall's medium: apart from the bold selected one. -->
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="fontFamily">sans-serif</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:textSize">14sp</item>
     </style>
 
     <style name="TextAppearance.SofiaTransit.Tab.Selected">
