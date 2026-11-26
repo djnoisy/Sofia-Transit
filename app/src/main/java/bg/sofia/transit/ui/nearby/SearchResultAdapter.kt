@@ -20,9 +20,17 @@ class SearchResultAdapter(
     private val items = mutableListOf<Stop>()
     private var distanceOf: (Stop) -> Double? = { null }
 
-    /** The stops found, and their distance from us (null when not known). */
+    /**
+     * The stops found, and their distance from us (null when not known). The
+     * same stops again — a new distance — changed in place: the cards keep
+     * their views, and TalkBack its focus (as the arrivals board).
+     */
     fun submitList(newItems: List<Stop>, distance: (Stop) -> Double?) {
         distanceOf = distance
+        if (newItems.map { it.stopId } == items.map { it.stopId }) {
+            if (items.isNotEmpty()) notifyItemRangeChanged(0, items.size)
+            return
+        }
         val oldSize = items.size
         items.clear()
         if (oldSize > 0) notifyItemRangeRemoved(0, oldSize)

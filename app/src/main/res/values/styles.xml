@@ -40,6 +40,17 @@
         <item name="android:textStyle">bold</item>
     </style>
 
+    <!-- The tabs of a stop's window and of Спирки (the owner, 26 Nov 2026):
+         the selected one's name bold — told apart by more than its colour
+         and background (TabLayout's tabSelectedTextAppearance). -->
+    <style name="TextAppearance.SofiaTransit.Tab" parent="TextAppearance.Material3.TitleSmall">
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <style name="TextAppearance.SofiaTransit.Tab.Selected">
+        <item name="android:textStyle">bold</item>
+    </style>
+
     <!-- Cards: each item or section a clearly bounded block. -->
     <style name="Widget.SofiaTransit.Card" parent="Widget.Material3.CardView.Outlined">
         <item name="cardBackgroundColor">?attr/colorSurfaceContainerLow</item>

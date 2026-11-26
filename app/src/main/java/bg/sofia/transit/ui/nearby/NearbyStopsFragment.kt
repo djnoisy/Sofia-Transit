@@ -8,7 +8,6 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import bg.sofia.transit.databinding.FragmentNearbyStopsBinding
-import bg.sofia.transit.ui.common.Tabs
 import com.google.android.material.tabs.TabLayoutMediator
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -49,7 +48,6 @@ class NearbyStopsFragment : Fragment() {
         TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
             tab.text = TAB_NAMES[position]
         }.attach()
-        Tabs.boldSelected(binding.tabLayout)
     }
 
     override fun onDestroyView() {

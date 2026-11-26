@@ -15,8 +15,8 @@
 
     <!-- The window's head: the top bar and, on its background, the stop's
          name and code, "Метростанция Ал. Малинов (код 0169)" — part of the
-         title, said first (the owner, 26 Nov 2026; under the bar, it hung
-         in nothing on the page's background). Wraps, not cut short. -->
+         title, said before the tabs (the owner, 26 Nov 2026; under the bar,
+         it hung in nothing on the page's background). Wraps, not cut short. -->
     <com.google.android.material.appbar.AppBarLayout
         android:id="@+id/appBar"
         android:layout_width="match_parent"
@@ -43,11 +43,11 @@
 
     <!-- The two tabs, "Табло с пристигания" and "Разписания": each framed,
          the selected one filled (bg_stop_tab; the owner, 26 Nov 2026) and its
-         name bold (ui/common/Tabs); no line under it. -->
+         name bold (tabSelectedTextAppearance); no line under it. -->
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayout"
         android:layout_width="match_parent"
-        android:layout_height="60dp"
+        android:layout_height="64dp"
         android:layout_marginHorizontal="6dp"
         android:layout_marginTop="6dp"
         app:tabMode="fixed"
@@ -55,6 +55,8 @@
         app:tabBackground="@drawable/bg_stop_tab"
         app:tabTextColor="?attr/colorOnSurface"
         app:tabSelectedTextColor="?attr/colorOnNavActive"
+        app:tabTextAppearance="@style/TextAppearance.SofiaTransit.Tab"
+        app:tabSelectedTextAppearance="@style/TextAppearance.SofiaTransit.Tab.Selected"
         app:tabIndicatorHeight="0dp"/>
 
     <androidx.viewpager2.widget.ViewPager2

@@ -23,6 +23,14 @@ fun main(args: Array<String>) {
     check("digits: the codes first, then the names with them", f("472") == listOf("4720", "0091")) { f("472").toString() }
     check("a name from two letters, a code from one digit", f("о").isEmpty() && f("об") == listOf("Обеля") && f("0").isNotEmpty())
     check("nothing typed: none", f("").isEmpty() && f("  ").isEmpty())
+    val zk = listOf(S("Ж.К. МЛАДОСТ-1", "0001"), S("ЖК МЛАДОСТ 4", "0002"), S("МЛАДОСТ", "0003"))
+    fun z(q: String) = StopSearch.find(zk, q, { it.name }, { it.code }).map { it.code }
+    check("'жк' finds Ж.К. as ЖК, and 'ж.к.' finds ЖК", z("жк младост").toSet() == setOf("0001", "0002") &&
+        z("ж.к. младост").toSet() == setOf("0001", "0002")) { "${z("жк младост")} ${z("ж.к. младост")}" }
+    val codes = listOf(S("А", "0016"), S("Б", "1600"), S("В", "0160"), S("Г", "0169"), S("Д", "1690"))
+    fun c(q: String) = StopSearch.find(codes, q, { it.name }, { it.code }).map { it.code }
+    check("the code typed itself first, then those beginning with it, then without leading zeros",
+        c("016") == listOf("0016", "0160", "0169", "1600", "1690") && c("169") == listOf("0169", "1690")) { "${c("016")} ${c("169")}" }
     val many = (1..30).map { S("СПИРКА $it", "%04d".format(it)) }
     check("at most ten", StopSearch.find(many, "спирка", { it.name }, { it.code }).size == 10)
 
@@ -42,6 +50,10 @@ fun main(args: Array<String>) {
             g("малинов").indexOfFirst { it.code == "0169" }.let { it >= 0 && it < g("малинов").indexOfFirst { s -> "ДОЛИНА" in s.name } })
         check("feed: '169' finds 0169 first", g("169").firstOrNull()?.code == "0169")
         check("feed: 'ал. малинов' and 'Ал Малинов' alike", g("ал. малинов").map { it.code } == g("Ал Малинов").map { it.code })
+        println("  'жк люлин': ${g("жк люлин").size}, 'ж.к. люлин': ${g("ж.к. люлин").size}; '016': ${g("016").map { it.code }}")
+        check("feed: 'жк люлин' finds what 'ж.к. люлин' does", g("жк люлин").isNotEmpty() &&
+            g("жк люлин").map { it.code } == g("ж.к. люлин").map { it.code })
+        check("feed: '0169' finds 0169 first", g("0169").firstOrNull()?.code == "0169")
     }
     println(if (fails == 0) "ALL PASS" else "$fails FAILED")
     kotlin.system.exitProcess(if (fails == 0) 0 else 1)

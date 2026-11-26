@@ -10,7 +10,7 @@
     <!-- "Наблизо", "Любими", "Търсене" (the owner, 26 Nov 2026): on a
          rounded band of their own (bg_stops_tabs_band), the selected one a
          pill in the primary colour (bg_stops_tab), its name bold
-         (ui/common/Tabs) — not as a stop's window's framed tabs; no line
+         (tabSelectedTextAppearance) — not as a stop's window's framed tabs; no line
          under it. -->
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayout"
@@ -25,6 +25,8 @@
         app:tabBackground="@drawable/bg_stops_tab"
         app:tabTextColor="?attr/colorOnSurface"
         app:tabSelectedTextColor="?attr/colorOnPrimary"
+        app:tabTextAppearance="@style/TextAppearance.SofiaTransit.Tab"
+        app:tabSelectedTextAppearance="@style/TextAppearance.SofiaTransit.Tab.Selected"
         app:tabIndicatorHeight="0dp"/>
 
     <androidx.viewpager2.widget.ViewPager2

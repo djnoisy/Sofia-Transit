@@ -12,7 +12,6 @@ import androidx.viewpager2.adapter.FragmentStateAdapter
 import bg.sofia.transit.R
 import bg.sofia.transit.databinding.ActivityStopBoardBinding
 import bg.sofia.transit.ui.common.SubWindow
-import bg.sofia.transit.ui.common.Tabs
 import bg.sofia.transit.ui.lines.ScheduleFragment
 import bg.sofia.transit.ui.nearby.StopArrivalsFragment
 import bg.sofia.transit.util.FavoriteStop
@@ -29,7 +28,7 @@ import javax.inject.Inject
  * navigation bar; in the top bar the back arrow, the title, "Обнови" while
  * the board is shown (StopArrivalsFragment's) and the favourites, and under
  * them, on the bar's background, the stop's name and code — part of the
- * title, said first (the owner, 26 Nov 2026). Two tabs, each framed, the
+ * title, said before the tabs (the owner, 26 Nov 2026). Two tabs, each framed, the
  * selected one filled (bg_stop_tab): "Табло с пристигания" — the arrivals,
  * the virtual board of before (StopArrivalsFragment) — and "Разписания" —
  * the timetable of any line calling there, chosen from a drop-down list
@@ -72,7 +71,6 @@ class StopBoardActivity : AppCompatActivity() {
         if (savedInstanceState == null) {
             binding.viewPager.setCurrentItem(intent.getIntExtra(EXTRA_PAGE, PAGE_BOARD), false)
         }
-        Tabs.boldSelected(binding.tabLayout)
     }
 
     /** The two tabs' pages, made once each and kept, as in Спирки. */

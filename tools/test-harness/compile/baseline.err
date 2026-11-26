@@ -726,26 +726,6 @@ app/src/main/java/bg/sofia/transit/ui/common/SubWindow.kt: error: unresolved ref
 app/src/main/java/bg/sofia/transit/ui/common/SubWindow.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/ui/common/SubWindow.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/ui/common/SubWindow.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: 'onTabReselected' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: 'onTabSelected' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: 'onTabUnselected' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: overload resolution ambiguity: 
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: TabLayout
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: TabLayout
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: TabLayout
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: TabLayout
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: TabLayout
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: TabLayout
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: TextView
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: Typeface
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: Typeface
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: google
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: it
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: it
-app/src/main/java/bg/sofia/transit/ui/common/Tabs.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/ui/diagnostics/DiagnosticsFragment.kt: error: 'onCreateView' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/diagnostics/DiagnosticsFragment.kt: error: 'onDestroyView' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/diagnostics/DiagnosticsFragment.kt: error: 'onViewCreated' overrides nothing
@@ -1862,6 +1842,7 @@ app/src/main/java/bg/sofia/transit/ui/nearby/SearchResultAdapter.kt: error: unre
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchResultAdapter.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchResultAdapter.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchResultAdapter.kt: error: unresolved reference: databinding
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchResultAdapter.kt: error: unresolved reference: notifyItemRangeChanged
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchResultAdapter.kt: error: unresolved reference: notifyItemRangeInserted
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchResultAdapter.kt: error: unresolved reference: notifyItemRangeRemoved
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchResultAdapter.kt: error: variable expected
@@ -1870,24 +1851,43 @@ app/src/main/java/bg/sofia/transit/ui/nearby/SearchResultAdapter.kt: error: vari
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchResultAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: 'onCreateView' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: 'onDestroyView' overrides nothing
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: 'onPause' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: 'onResume' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: 'onViewCreated' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: overload resolution ambiguity: 
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: suspend function 'collect' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<List<Stop>?> was expected
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: AndroidEntryPoint
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: Bundle
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: Bundle
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: EditorInfo
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: Fragment
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: FragmentSearchTabBinding
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: FragmentSearchTabBinding
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: InputMethodManager
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: LayoutInflater
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: LinearLayoutManager
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: Location
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: LocationServices
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: SystemClock
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
@@ -1896,7 +1896,13 @@ app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unreso
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: ViewCompat
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: ViewGroup
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: WindowInsetsCompat
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: android
@@ -1907,12 +1913,20 @@ app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unreso
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: clearFocus
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: context
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: databinding
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: google
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: onDestroyView
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: onPause
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: onResume
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: onViewCreated
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: requireContext
@@ -1920,6 +1934,8 @@ app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unreso
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: requireContext
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: viewModels
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: unresolved reference: windowToken
+app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/SearchTabFragment.kt: error: variable expected
