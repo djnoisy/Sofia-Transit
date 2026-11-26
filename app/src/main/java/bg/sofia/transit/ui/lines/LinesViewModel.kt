@@ -59,6 +59,13 @@ class LinesViewModel @Inject constructor(
     var currentFilter: TransportType? = null
     var lastSelectedRouteId: String? = null
 
+    /**
+     * The number typed in the screen's search field (the owner, 26 Nov
+     * 2026): kept here, with the kind, while a line is opened and back;
+     * cleared when another kind is chosen.
+     */
+    var lineQuery: String = ""
+
     fun loadRoutes() {
         viewModelScope.launch {
             // An import empties the tables before refilling them, so a read

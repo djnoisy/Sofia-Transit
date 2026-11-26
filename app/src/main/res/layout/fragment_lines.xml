@@ -77,10 +77,56 @@
             style="@style/Widget.Material3.Button.OutlinedButton"/>
     </LinearLayout>
 
-    <TextView android:id="@+id/tvRouteCount"
-        android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:textSize="14sp" android:textColor="?attr/colorOnSurfaceVariant"
-        android:paddingHorizontal="16dp" android:paddingVertical="6dp"/>
+    <!-- A line of the kind chosen by its number (the owner, 26 Nov 2026), as
+         in "Пътуване" (util/LineSearch); "Изчисти" while something is typed.
+         None for the metro (four lines). No count of the lines any more.
+         Not saved by the view: what is typed is the screen's own
+         (LinesViewModel.lineQuery), cleared on another kind chosen. -->
+    <LinearLayout android:id="@+id/searchRow"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical"
+        android:paddingHorizontal="12dp" android:paddingTop="8dp" android:paddingBottom="4dp">
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:hint="Номер на линия"
+            android:textColorHint="?attr/colorHintText"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etSearch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="56dp"
+                android:textSize="17sp"
+                android:inputType="textCapCharacters"
+                android:imeOptions="actionSearch"
+                android:maxLines="1"
+                android:saveEnabled="false"
+                android:importantForAutofill="no"/>
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <Button android:id="@+id/btnClearSearch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:minHeight="56dp"
+            android:minWidth="48dp"
+            android:text="Изчисти"
+            android:layout_marginStart="8dp"
+            android:visibility="gone"
+            style="@style/Widget.Material3.Button.TonalButton"/>
+    </LinearLayout>
+
+    <TextView android:id="@+id/tvEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="24dp"
+        android:gravity="center"
+        android:text="Няма намерени линии"
+        android:textSize="17sp"
+        android:textColor="?attr/colorOnSurface"
+        android:visibility="gone"/>
 
     <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvRoutes"
         android:layout_width="match_parent" android:layout_height="0dp"

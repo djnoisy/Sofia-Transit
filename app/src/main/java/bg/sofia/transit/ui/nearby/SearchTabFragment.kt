@@ -7,11 +7,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
-import androidx.core.content.getSystemService
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.updatePadding
 import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
@@ -19,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.databinding.FragmentSearchTabBinding
 import bg.sofia.transit.ui.board.StopBoardActivity
+import bg.sofia.transit.ui.common.Keyboard
 import bg.sofia.transit.util.LocationHelper
 import bg.sofia.transit.util.NearbyLinesLoader
 import bg.sofia.transit.util.Permissions
@@ -64,25 +60,8 @@ class SearchTabFragment : Fragment() {
         (binding.rvResults.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)
             ?.supportsChangeAnimations = false
 
-        // The keyboard lies over the window (the owner, 9 Nov 2026; as in
-        // "Пътуване", JourneyFragment): while it is open, room under the last
-        // card as tall as the part of the list it covers, so the last ones
-        // scroll up above it.
-        val listPadBottom = binding.rvResults.paddingBottom
-        var keyboard = 0
-        fun roomForKeyboard(v: View) {
-            val at = IntArray(2).also { v.getLocationInWindow(it) }
-            val below = v.rootView.height - (at[1] + v.height)   // the bars under the list
-            v.updatePadding(bottom = listPadBottom + (keyboard - below).coerceAtLeast(0))
-        }
-        ViewCompat.setOnApplyWindowInsetsListener(binding.rvResults) { v, insets ->
-            keyboard = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-            roomForKeyboard(v)
-            insets
-        }
-        binding.rvResults.addOnLayoutChangeListener { v, _, top, _, bottom, _, oldTop, _, oldBottom ->
-            if (top != oldTop || bottom != oldBottom) roomForKeyboard(v)
-        }
+        // The keyboard lies over the window: room under the last card (as in "Пътуване").
+        Keyboard.keepClear(binding.rvResults)
         // "Търсене" on the keyboard: it is put away, the stops found stay.
         binding.etSearch.setOnEditorActionListener { _, action, _ ->
             if (action == EditorInfo.IME_ACTION_SEARCH) { hideKeyboard(); true } else false
@@ -119,7 +98,7 @@ class SearchTabFragment : Fragment() {
         super.onResume()
         // The keyboard may have gone while the page was away, unseen by it:
         // the room under the list worked out again.
-        ViewCompat.requestApplyInsets(binding.rvResults)
+        Keyboard.again(binding.rvResults)
         // Where we are, for how far: the phone's last known place, if allowed —
         // no updates asked for; the stops found shown again with it.
         val ctx = requireContext()
@@ -152,16 +131,8 @@ class SearchTabFragment : Fragment() {
         hideKeyboard()
     }
 
-    /**
-     * By the window's token, not the field's: on another tab chosen, the page
-     * is paused only once it has scrolled away, detached — its field then has
-     * none, and the keyboard stayed over the list (review of 26 Nov 2026).
-     */
     private fun hideKeyboard() {
-        val field = _binding?.etSearch ?: return
-        val token = activity?.window?.decorView?.windowToken ?: field.windowToken
-        context?.getSystemService<InputMethodManager>()?.hideSoftInputFromWindow(token, 0)
-        field.clearFocus()
+        _binding?.etSearch?.let { Keyboard.hide(it) }
     }
 
     private companion object {

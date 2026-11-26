@@ -2,6 +2,8 @@ package bg.sofia.transit.ui.lines
 
 import android.os.Bundle
 import android.view.*
+import android.view.inputmethod.EditorInfo
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
@@ -11,6 +13,8 @@ import bg.sofia.transit.R
 import bg.sofia.transit.data.db.entity.Route
 import bg.sofia.transit.data.db.entity.TransportType
 import bg.sofia.transit.databinding.FragmentLinesBinding
+import bg.sofia.transit.ui.common.Keyboard
+import bg.sofia.transit.util.LineSearch
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -59,7 +63,7 @@ class LinesFragment : Fragment() {
                 // Re-apply whatever filter was active before navigating
                 // away (survives in the shared VM), instead of always
                 // resetting to "all".
-                applyCurrentFilter(announce = false)
+                applyCurrentFilter()
                 restoreFocusToLastSelected()
             }
         }
@@ -76,30 +80,68 @@ class LinesFragment : Fragment() {
             }
         }
 
+        // A line by its number (the owner, 26 Nov 2026): the list of the kind
+        // narrowed as it is typed. What is typed is the screen's (the view
+        // does not save it): put back before the watcher, which then leaves
+        // the same text alone — a list drawn anew moves TalkBack's focus off
+        // the line opened before.
+        binding.etSearch.setText(vm.lineQuery)
+        binding.btnClearSearch.visibility = if (vm.lineQuery.isEmpty()) View.GONE else View.VISIBLE
+        binding.etSearch.doAfterTextChanged { text ->
+            val query = text?.toString().orEmpty()
+            binding.btnClearSearch.visibility = if (query.isEmpty()) View.GONE else View.VISIBLE
+            if (query == vm.lineQuery) return@doAfterTextChanged
+            vm.lineQuery = query
+            applyCurrentFilter()
+        }
+        binding.btnClearSearch.setOnClickListener {
+            binding.etSearch.text?.clear()
+            binding.etSearch.requestFocus()
+        }
+        // "Търсене" on the keyboard: it is put away, the lines found stay.
+        binding.etSearch.setOnEditorActionListener { _, action, _ ->
+            if (action == EditorInfo.IME_ACTION_SEARCH) { Keyboard.hide(binding.etSearch); true } else false
+        }
+        // The keyboard lies over the window: room under the last line (as in "Пътуване").
+        Keyboard.keepClear(binding.rvRoutes)
+
         updateFilterButtonStates()
         vm.loadRoutes()
     }
 
+    /** Another kind chosen: the search field cleared, the keyboard put away (the owner, 26 Nov 2026). */
     private fun filterType(type: TransportType) {
+        if (type != vm.currentFilter) {
+            vm.lineQuery = ""
+            binding.etSearch.text?.clear()
+        }
+        Keyboard.hide(binding.etSearch)
         vm.currentFilter = type
-        applyCurrentFilter(announce = true)
+        applyCurrentFilter()
     }
 
     /**
-     * Applies vm.currentFilter to the list and syncs the button states.
-     * When [announce] is true (user just tapped a category), TalkBack
-     * announces the new category and count.
+     * Applies vm.currentFilter — and the number typed, for every kind but
+     * the metro, whose four lines have no search field — to the list and
+     * syncs the button states. No count of the lines shown or said (the
+     * owner, 26 Nov 2026): the kind chosen says "избрано" by itself.
      */
-    private fun applyCurrentFilter(announce: Boolean) {
+    private fun applyCurrentFilter() {
         val grouped = vm.groupedRoutes.value
         val filter = vm.currentFilter ?: TransportType.BUS
-        val list = grouped[filter] ?: emptyList()
+        val all = grouped[filter] ?: emptyList()
+        val searchable = filter != TransportType.METRO
+        binding.searchRow.visibility = if (searchable) View.VISIBLE else View.GONE
+        val query = if (searchable) vm.lineQuery.trim() else ""
+        // As in "Пътуване": exact, then beginning with it, then containing it
+        // — whatever the case and the alphabet ("3тм" finds 3ТМ).
+        val list = if (query.isEmpty()) all else LineSearch.rank(all, query, { it.routeShortName })
         adapter.submitList(list)
-        updateAccessibilityCount(list.size)
         updateFilterButtonStates()
-        if (announce) {
-            binding.rvRoutes.announceForAccessibility("${filter.labelBg}: ${list.size} линии")
-        }
+        val none = query.isNotEmpty() && list.isEmpty()
+        // Said once, as it comes (as Спирки → "Търсене").
+        if (none && binding.tvEmpty.visibility != View.VISIBLE) binding.tvEmpty.announceForAccessibility(binding.tvEmpty.text)
+        binding.tvEmpty.visibility = if (none) View.VISIBLE else View.GONE
     }
 
     /**
@@ -164,12 +206,20 @@ class LinesFragment : Fragment() {
         }
     }
 
-    private fun updateAccessibilityCount(count: Int) {
-        binding.tvRouteCount.text = "$count линии"
-        binding.tvRouteCount.contentDescription = "$count транспортни линии"
+    override fun onResume() {
+        super.onResume()
+        // The keyboard may have gone while the screen was away.
+        Keyboard.again(binding.rvRoutes)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // A line opened, another section chosen: the keyboard not left over it.
+        Keyboard.hide(binding.etSearch)
     }
 
     private fun openDirections(route: Route) {
+        Keyboard.hide(binding.etSearch)
         vm.selectRoute(route)
         vm.lastSelectedRouteId = route.routeId
         findNavController().navigate(
