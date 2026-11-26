@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The virtual board of a stop (StopBoardActivity): a window of its own,
-     opened from anywhere in the app — no navigation bar; in the top bar the
-     back arrow, the title "Виртуално табло", "Обнови" and the favourites
-     (the owner, 9 Nov 2026). The board itself is StopArrivalsFragment. -->
+<!-- A stop's window, "Спирка" (StopBoardActivity; the owner, 26 Nov 2026): a
+     window of its own, opened from anywhere in the app — no navigation bar;
+     in the top bar the back arrow, the title, "Обнови" (on the board) and the
+     favourites. Below, its two tabs, "Табло" — the arrivals,
+     StopArrivalsFragment — and "Разписание" — the timetable of a line there,
+     ScheduleFragment — then the stop's name and code, then the tab's page. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -22,8 +25,31 @@
             android:layout_height="?attr/actionBarSize"/>
     </com.google.android.material.appbar.AppBarLayout>
 
-    <androidx.fragment.app.FragmentContainerView
-        android:id="@+id/boardContainer"
+    <!-- As the tabs of "Спирки" (fragment_nearby_stops.xml). -->
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/tabLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:tabTextColor="?attr/colorOnSurfaceVariant"
+        app:tabSelectedTextColor="?attr/colorPrimary"
+        app:tabIndicatorColor="?attr/colorPrimary"
+        app:tabIndicatorHeight="4dp"/>
+
+    <!-- The stop's name and code, "Метростанция Ал. Малинов (код 0169)":
+         under the tabs, for both (the owner, 26 Nov 2026). -->
+    <TextView android:id="@+id/tvStopName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="20dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="4dp"
+        android:textSize="21sp"
+        android:textStyle="bold"
+        android:textColor="?attr/colorOnSurface"
+        android:accessibilityHeading="true"/>
+
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/viewPager"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"/>

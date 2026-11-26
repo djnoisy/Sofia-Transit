@@ -1,59 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="match_parent"
-    android:orientation="vertical" android:padding="8dp">
+<!-- The board, the "Табло" tab of a stop's window (StopArrivalsFragment): the
+     stop's name is the window's, above (activity_stop_board.xml); while the
+     arrivals load, a small indicator at the top right, over the list. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent">
 
-    <!-- The stop's name, the whole width ("Обнови" is in the top bar now,
-         and the caption over the list is gone: the owner, 9 Nov 2026). -->
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="12dp"
-        android:gravity="center_vertical">
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:padding="8dp">
 
-        <TextView android:id="@+id/tvStopName"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="21sp"
-            android:textStyle="bold"
-            android:textColor="?attr/colorOnSurface"
-            android:accessibilityHeading="true"/>
-
-        <ProgressBar android:id="@+id/pbLoading"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:visibility="gone"
-            android:importantForAccessibility="no"/>
-
-    </LinearLayout>
-
-
-    <!-- Debug / empty state — small, capped height, scrollable -->
-    <ScrollView
-        android:id="@+id/svEmpty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:maxHeight="200dp"
-        android:visibility="gone">
-
-        <TextView android:id="@+id/tvEmpty"
+        <!-- Debug / empty state — small, capped height, scrollable -->
+        <ScrollView
+            android:id="@+id/svEmpty"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="13sp"
-            android:textColor="?attr/colorOnSurface"
-            android:fontFamily="monospace"
-            android:padding="12dp"
-            android:textIsSelectable="true"/>
-    </ScrollView>
+            android:maxHeight="200dp"
+            android:visibility="gone">
 
-    <!-- Arrivals list — gets all remaining vertical space via weight=1 -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rvArrivals"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:paddingBottom="8dp"/>
-</LinearLayout>
+            <TextView android:id="@+id/tvEmpty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="?attr/colorOnSurface"
+                android:fontFamily="monospace"
+                android:padding="12dp"
+                android:textIsSelectable="true"/>
+        </ScrollView>
+
+        <!-- Arrivals list — gets all remaining vertical space via weight=1 -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvArrivals"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:paddingBottom="8dp"/>
+    </LinearLayout>
+
+    <ProgressBar android:id="@+id/pbLoading"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="12dp"
+        android:visibility="gone"
+        android:importantForAccessibility="no"/>
+</FrameLayout>

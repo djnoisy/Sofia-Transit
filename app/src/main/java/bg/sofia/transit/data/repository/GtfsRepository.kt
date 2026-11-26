@@ -2,6 +2,7 @@ package bg.sofia.transit.data.repository
 
 import android.content.Context
 import bg.sofia.transit.util.FileLogger
+import bg.sofia.transit.util.LineOrder
 import bg.sofia.transit.util.VehicleLabels
 import bg.sofia.transit.data.db.TransitDatabase
 import bg.sofia.transit.data.db.dao.StopWithSequence
@@ -909,13 +910,17 @@ class GtfsRepository @Inject constructor(
     }
 
     /** [trips] with their stops, names and times, for RouteOfTheDay; those without stops left out. */
-    private suspend fun withStops(trips: List<Trip>): List<RouteOfTheDay.TodaysTrip> {
-        val rows = trips.map { it.tripId }.chunked(TRIP_IDS_PER_QUERY).flatMap { stopTimeDao.getStopsOfTrips(it) }
+    private suspend fun withStops(trips: List<Trip>): List<RouteOfTheDay.TodaysTrip> =
+        withStopsOf(trips.map { it.tripId to it.tripHeadsign })
+
+    /** As withStops, of trips by their ids and headsigns. */
+    private suspend fun withStopsOf(trips: List<Pair<String, String?>>): List<RouteOfTheDay.TodaysTrip> {
+        val rows = trips.map { it.first }.chunked(TRIP_IDS_PER_QUERY).flatMap { stopTimeDao.getStopsOfTrips(it) }
         return withContext(Dispatchers.Default) {
             val byTrip = rows.groupBy { it.tripId }
-            trips.mapNotNull { t ->
-                byTrip[t.tripId]?.let { r ->
-                    RouteOfTheDay.TodaysTrip(t.tripId, t.tripHeadsign?.trim() ?: "",
+            trips.mapNotNull { (tripId, headsign) ->
+                byTrip[tripId]?.let { r ->
+                    RouteOfTheDay.TodaysTrip(tripId, headsign?.trim() ?: "",
                         r.map { RouteOfTheDay.Stop(it.stopId, it.stopLat, it.stopLon, it.stopName, it.stopCode.orEmpty()) },
                         r.map { s -> RouteOfTheDay.secondsOf(s.departureTime).takeIf { it >= 0 } ?: RouteOfTheDay.secondsOf(s.arrivalTime) })
                 }
@@ -957,6 +962,51 @@ class GtfsRepository @Inject constructor(
         FileLogger.i("GtfsRepo", "Line at stop: $routeId towards '$headsign' at $stopId → " +
             "route ${route.tripId} (${route.stops.size} stops, '${route.headsign}'), at $pole")
         return LineAtStop(route.tripId, route.headsign, pole)
+    }
+
+    /**
+     * The lines a stop's timetable offers to choose (the owner, 26 Nov 2026):
+     * every line calling at any pole of the stop [stopId] (stopIdsOfSamePlace),
+     * on any day — the timetable's days are seven — once, by the direction most
+     * of its trips leave there towards, and again only for trips of its no
+     * timetable offered has (RouteOfTheDay.directionsAt); in the Lines screen's
+     * order: by kind, then by number. Each trip of a variant (the first two
+     * parts of its id: the line and its road shape, GtfsRepository's
+     * tripIdDirectionPrefix) and headsign stands for all of them: their stops
+     * are read once. Empty when none calls there.
+     *
+     * [wanted]: a line and direction asked for there — from a stop of a
+     * direction in Линии — offered too, after the line's own, if not among
+     * them at that pole (111's short runs to БУЛ. НИКОЛА ПЕТКОВ, in the
+     * timetable towards Ж.К. ЛЮЛИН-1,2 but asked for on their own), with
+     * its timetable as Линии had it.
+     */
+    suspend fun linesAtStop(stopId: String, wanted: Pair<String, String>? = null): List<StopLine> {
+        val poles = stopIdsOfSamePlace(stopId)
+        val calls = stopTimeDao.getTripsAtStops(poles)
+        val routes = (calls.map { it.routeId } + listOfNotNull(wanted?.first)).distinct().mapNotNull { routeDao.getById(it) }
+        // One trip of each variant and headsign, standing for as many as there are.
+        val runsOf = calls.groupBy { it.routeId }.mapValues { (_, trips) ->
+            trips.groupBy { (tripIdDirectionPrefix(it.tripId) ?: it.tripId) + "|" + it.headsign.orEmpty().trim() }.values
+                .map { v -> v.minByOrNull { it.tripId }!! to v.size }
+        }
+        val withStops = withStopsOf(runsOf.values.flatten().map { (t, _) -> t.tripId to t.headsign }).associateBy { it.tripId }
+        val trolleys = getTrolleyRouteIds()
+        return withContext(Dispatchers.Default) {
+            routes.sortedWith(compareBy<Route> { it.getTransportType().ordinal }
+                .thenComparator { a, b -> LineOrder.compare(a.routeShortName, b.routeShortName) })
+                .flatMap { r ->
+                    val kind = VehicleLabels.singular(r.routeType, r.routeId in trolleys)
+                    val runs = runsOf[r.routeId].orEmpty().mapNotNull { (t, n) -> withStops[t.tripId]?.let { it to n } }
+                    val offered = RouteOfTheDay.directionsAt(runs, poles.toSet()).map { d ->
+                        StopLine(r.routeId, r.routeShortName, kind, d.headsign, d.pole, d.dropOffOnly, d.way)
+                    }
+                    val asked = wanted?.takeIf { (routeId, headsign) -> routeId == r.routeId &&
+                        offered.none { it.matches(routeId, headsign, stopId) } }
+                        ?.let { (routeId, headsign) -> StopLine(routeId, r.routeShortName, kind, headsign, stopId, false, emptyList()) }
+                    offered + listOfNotNull(asked)
+                }
+        }
     }
 
     /**
@@ -1449,14 +1499,16 @@ class GtfsRepository @Inject constructor(
      * 2026: 111's short runs to БУЛ. НИКОЛА ПЕТКОВ were in no timetable of
      * the Lines screen); of the day of the timetable most of whose departures
      * fall on the date — a night line's, of the day before
-     * (RouteOfTheDay.timetableOfDate; the owner, 25 Nov 2026). None on a day
-     * outside the data.
+     * (RouteOfTheDay.timetableOfDate; the owner, 25 Nov 2026). [way]: for a
+     * line offered in a stop's timetable, its way on from the stop
+     * (StopLine.way, RouteOfTheDay.scheduleAt). None on a day outside the data.
      */
     suspend fun getScheduleForDirectionAtStop(
         routeId: String,
         headsign: String,
         stopId: String,
-        date: String
+        date: String,
+        way: List<RouteOfTheDay.Stop>? = null
     ): List<ScheduledTime> {
         val dayBefore = java.time.LocalDate.parse(date, java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
             .minusDays(1).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
@@ -1468,7 +1520,7 @@ class GtfsRepository @Inject constructor(
         val day = tripsOn(routeId, date, services, generation)
         val before = tripsOn(routeId, dayBefore, servicesBefore, generation)
         return withContext(Dispatchers.Default) {
-            RouteOfTheDay.timetableOfDate(before, day, headsign, stopId).map { ScheduledTime(it.seconds, it.endsAt) }
+            RouteOfTheDay.timetableOfDate(before, day, headsign, stopId, way).map { ScheduledTime(it.seconds, it.endsAt) }
         }
     }
 
@@ -1648,6 +1700,26 @@ data class OtherDirection(val trip: Trip, val via: String?)
  * the stop it calls at.
  */
 data class LineAtStop(val tripId: String, val headsign: String, val stopId: String)
+
+/**
+ * A line offered in a stop's timetable (GtfsRepository.linesAtStop): the
+ * line, its kind ("Автобус"), the direction ([headsign]) and the pole of the
+ * stop ([stopId]) of its timetable there, whether its trips only end there
+ * ("само слизане"), and its way on from the pole (RouteOfTheDay.AtStop.way).
+ */
+data class StopLine(
+    val routeId: String,
+    val routeShortName: String,
+    val vehicleType: String,
+    val headsign: String,
+    val stopId: String,
+    val dropOffOnly: Boolean,
+    val way: List<RouteOfTheDay.Stop>
+) {
+    /** Whether it is the line [routeId] towards [headsign] (RouteOfTheDay.directionKey) at the pole [stopId]. */
+    fun matches(routeId: String, headsign: String, stopId: String) = this.routeId == routeId && this.stopId == stopId &&
+        RouteOfTheDay.directionKey(this.headsign) == RouteOfTheDay.directionKey(headsign)
+}
 
 data class SampleStops(
     val totalCount: Int,

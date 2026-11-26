@@ -73,7 +73,7 @@ class NearbyTabFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
 
-        // A stop's arrivals: the "Виртуално табло" window (StopBoardActivity).
+        // A stop: its window, "Спирка", on its board (StopBoardActivity).
         nearbyAdapter = NearbyStopAdapter { stopWithDist ->
             StopBoardActivity.start(requireContext(),
                 stopId   = stopWithDist.stop.stopId,

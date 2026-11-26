@@ -1,6 +1,7 @@
 package bg.sofia.transit.ui.nearby
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuInflater
@@ -8,7 +9,6 @@ import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.core.os.bundleOf
 import androidx.core.view.MenuProvider
 import androidx.fragment.app.Fragment
@@ -20,19 +20,18 @@ import bg.sofia.transit.R
 import bg.sofia.transit.data.repository.ArrivalInfo
 import bg.sofia.transit.databinding.FragmentStopArrivalsBinding
 import bg.sofia.transit.ui.board.LineWindowActivity
-import bg.sofia.transit.util.FavoriteStop
-import bg.sofia.transit.util.FavoriteStops
 import bg.sofia.transit.util.FileLogger
 import dagger.hilt.android.AndroidEntryPoint
-import javax.inject.Inject
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * The arrivals at one stop — the board of the "Виртуално табло" window
- * (StopBoardActivity), with its top-bar actions: "Обнови" and adding to or
- * removing from the favourites (the owner, 9 Nov 2026). A row activated
- * offers its line's route and timetable (the owner, 24 Nov 2026).
+ * The arrivals at one stop — the "Табло" tab of the stop's window
+ * (StopBoardActivity; the virtual board of before, the owner, 26 Nov 2026),
+ * with "Обнови" in the window's top bar while it is shown (the owner,
+ * 9 Nov 2026). A row activated opens its line's route through the stop
+ * (the owner, 24 Nov 2026; straight, 26 Nov 2026: the timetable is the
+ * window's other tab).
  */
 @AndroidEntryPoint
 class StopArrivalsFragment : Fragment() {
@@ -40,15 +39,20 @@ class StopArrivalsFragment : Fragment() {
     companion object {
         private const val TAG = "StopArrivalsFrag"
         private const val ARG_STOP_ID = "stopId"
-        private const val ARG_STOP_NAME = "stopName"
         private const val ARG_STOP_CODE = "stopCode"
-        private const val OPTION_ROUTE = "Спирки по маршрута"
-        private const val OPTION_SCHEDULE = "Разписание за тази спирка"
+        /**
+         * The arrivals refreshed this often while shown — frequent enough to
+         * stay current, infrequent enough that TalkBack users aren't
+         * constantly interrupted by the list re-rendering; "Обнови" in the
+         * top bar is there for anyone who wants an immediate refresh — and
+         * loaded at once when shown again after so long.
+         */
+        private const val REFRESH_MS = 60_000L
 
-        fun newInstance(stopId: String, stopName: String, stopCode: String?) =
+        /** The board of the stop [stopId]; [stopCode], e.g. "0170", gathers its poles. */
+        fun newInstance(stopId: String, stopCode: String?) =
             StopArrivalsFragment().apply {
-                arguments = bundleOf(ARG_STOP_ID to stopId, ARG_STOP_NAME to stopName,
-                    ARG_STOP_CODE to stopCode)
+                arguments = bundleOf(ARG_STOP_ID to stopId, ARG_STOP_CODE to stopCode)
             }
     }
 
@@ -56,14 +60,14 @@ class StopArrivalsFragment : Fragment() {
     private val binding get() = _binding!!
     private val vm: StopArrivalsViewModel by viewModels()
 
-    @Inject lateinit var favorites: FavoriteStops
-
     private val stopId: String get() = requireArguments().getString(ARG_STOP_ID).orEmpty()
-    private val stopName: String get() = requireArguments().getString(ARG_STOP_NAME) ?: stopId
     private val stopCode: String? get() = requireArguments().getString(ARG_STOP_CODE)
 
     private lateinit var adapter: ArrivalAdapter
     private var refreshJob: kotlinx.coroutines.Job? = null
+
+    /** When the arrivals were last asked for (elapsed real time; 0: not yet). */
+    private var loadedAt = 0L
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, saved: Bundle?
@@ -74,15 +78,9 @@ class StopArrivalsFragment : Fragment() {
 
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
+        // The stop's name and code: the window's, under its tabs (StopBoardActivity).
 
-        // Show "stop_code" (e.g. "0170") rather than internal stop_id ("A0170")
-        // — matches what's printed on physical stop signs and the CGM website.
-        val codeSuffix = stopCode?.takeIf { it.isNotBlank() }?.let { " (код $it)" } ?: ""
-        binding.tvStopName.text = "$stopName$codeSuffix"
-        binding.tvStopName.contentDescription =
-            "Спирка $stopName${codeSuffix.ifEmpty { "" }}. Списък с пристигания."
-
-        adapter = ArrivalAdapter { info -> showLineOptions(info) }
+        adapter = ArrivalAdapter { info -> openRoute(info) }
         binding.rvArrivals.layoutManager = LinearLayoutManager(requireContext())
         binding.rvArrivals.adapter = adapter
         // Disable the "change" animation: when a row's contents update in
@@ -95,7 +93,9 @@ class StopArrivalsFragment : Fragment() {
         // TalkBack treat the whole list as one element and may have been
         // suppressing child rendering.
 
-        // "Обнови" and the favourites, in the window's top bar.
+        // "Обнови", in the window's top bar while the board is shown — its
+        // tab the current one: only then is it resumed. The favourites are
+        // the window's, on both tabs.
         requireActivity().addMenuProvider(boardMenu, viewLifecycleOwner, Lifecycle.State.RESUMED)
 
         // The lines' official colours for the badges (redesign, stage b).
@@ -113,80 +113,42 @@ class StopArrivalsFragment : Fragment() {
         }
 
         loadArrivals()
-        scheduleAutoRefresh()
     }
 
     private fun loadArrivals() {
+        loadedAt = SystemClock.elapsedRealtime()
         vm.loadArrivals(stopId = stopId, stopCode = stopCode)
     }
 
-    /** The top bar's actions: refresh, and the favourite's state, shown and changed. */
+    /** The top bar's action while the board is shown: refresh. */
     private val boardMenu = object : MenuProvider {
         override fun onCreateMenu(menu: Menu, inflater: MenuInflater) {
-            inflater.inflate(R.menu.stop_board, menu)
-        }
-
-        override fun onPrepareMenu(menu: Menu) {
-            val fav = favorites.contains(stopId)
-            menu.findItem(R.id.actionFavorite)?.apply {
-                title = if (fav) "Премахни от любими" else "Добави в любими"
-                setIcon(if (fav) R.drawable.ic_star else R.drawable.ic_star_outline)
-            }
+            inflater.inflate(R.menu.stop_board_refresh, menu)
         }
 
         override fun onMenuItemSelected(item: MenuItem): Boolean = when (item.itemId) {
             R.id.actionRefresh -> { loadArrivals(); true }
-            R.id.actionFavorite -> { toggleFavorite(); true }
             else -> false
         }
     }
 
-    private fun toggleFavorite() {
-        val message = if (favorites.contains(stopId)) {
-            favorites.remove(stopId)
-            "Спирката е премахната от любими"
-        } else {
-            favorites.add(FavoriteStop(stopId, stopName, stopCode))
-            "Спирката е добавена в любими"
-        }
-        FileLogger.i(TAG, "$message: $stopId")
-        requireActivity().invalidateOptionsMenu()
-        Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
-    }
-
     /**
-     * A row activated: its line's options (the owner, 24 Nov 2026) — the
-     * stops of the route its direction takes through this stop, or its
-     * timetable here — each in a window of its own over the board.
+     * A row activated: the stops of the route its line's direction takes
+     * through this stop, in a window of its own over the stop's (the owner,
+     * 24 Nov 2026; straight, 26 Nov 2026).
      */
-    private fun showLineOptions(info: ArrivalInfo) {
-        val label = ArrivalAdapter.labelOf(info)
-        val title = if (info.dropOffOnly) "$label, само слизане" else "$label към ${info.headsign}"
-        AlertDialog.Builder(requireContext())
-            .setTitle(title)
-            .setItems(arrayOf(OPTION_ROUTE, OPTION_SCHEDULE)) { _, which -> openLineOption(info, route = which == 0) }
-            .setNegativeButton("Затвори", null)
-            .show()
-    }
-
-    private fun openLineOption(info: ArrivalInfo, route: Boolean) {
+    private fun openRoute(info: ArrivalInfo) {
         val owner = viewLifecycleOwnerLiveData.value ?: return
         owner.lifecycleScope.launch {
             val line = vm.lineAtStop(info, stopId)
             // Not after the board was left meanwhile (a data import waited on).
             if (!isResumed) return@launch
             val context = context ?: return@launch
-            FileLogger.i(TAG, "${if (route) "Route" else "Timetable"} of ${info.routeId} towards '${info.headsign}' " +
+            FileLogger.i(TAG, "Route of ${info.routeId} towards '${info.headsign}' " +
                 "from the board of $stopId: ${line?.let { "trip ${it.tripId} at ${it.stopId}" } ?: "none"}")
-            when {
-                line == null -> Toast.makeText(context,
-                    if (route) "Маршрутът на линията не е известен" else "Няма разписание за тази линия",
-                    Toast.LENGTH_LONG).show()
-                route -> LineWindowActivity.openRoute(context, info.routeId, info.routeShortName,
-                    line.headsign, line.tripId, line.stopId)
-                else -> LineWindowActivity.openSchedule(context, info.routeId, info.routeShortName,
-                    line.headsign, line.stopId, stopName)
-            }
+            if (line == null) Toast.makeText(context, "Маршрутът на линията не е известен", Toast.LENGTH_LONG).show()
+            else LineWindowActivity.openRoute(context, info.routeId, info.routeShortName,
+                line.headsign, line.tripId, line.stopId)
         }
     }
 
@@ -194,11 +156,7 @@ class StopArrivalsFragment : Fragment() {
         refreshJob?.cancel()
         refreshJob = viewLifecycleOwner.lifecycleScope.launch {
             while (true) {
-                // 60 s: frequent enough to stay current, infrequent enough
-                // that TalkBack users aren't constantly interrupted by the
-                // list re-rendering. "Обнови" in the top bar is there for
-                // anyone who wants an immediate refresh.
-                kotlinx.coroutines.delay(60_000L)
+                kotlinx.coroutines.delay(REFRESH_MS)
                 loadArrivals()
             }
         }
@@ -233,8 +191,16 @@ class StopArrivalsFragment : Fragment() {
         }
     }
 
+    // Refreshed only while shown: its tab the current one, the window in front.
     override fun onPause() { super.onPause(); refreshJob?.cancel() }
-    override fun onResume() { super.onResume(); if (_binding != null) scheduleAutoRefresh() }
+    override fun onResume() {
+        super.onResume()
+        if (_binding == null) return
+        // Shown again — its tab chosen, the window back — with arrivals of a
+        // minute before or more: loaded at once, not a minute on.
+        if (SystemClock.elapsedRealtime() - loadedAt >= REFRESH_MS) loadArrivals()
+        scheduleAutoRefresh()
+    }
     override fun onDestroyView() {
         super.onDestroyView()
         refreshJob?.cancel()

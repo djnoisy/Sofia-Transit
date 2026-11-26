@@ -11,7 +11,11 @@
 //  - the board's route (routeThrough) of every line, direction and stop: a route of that direction calling there;
 //  - night lines (timetableOfDate: most departures after midnight) — none near the line between (20–80 %);
 //  - 111 at МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ (A0169): towards Ж.К. ЛЮЛИН-1,2 its own trips and the short runs to БУЛ. НИКОЛА
-//    ПЕТКОВ, marked; towards БУЛ. НИКОЛА ПЕТКОВ, its 22 stops and none of the full runs.
+//    ПЕТКОВ, marked; towards БУЛ. НИКОЛА ПЕТКОВ, its 22 stops and none of the full runs;
+//  - a stop's timetable (directionsAt; the owner, 26 Nov 2026): the lines offered at each stop — its code, all its
+//    poles — from all days' trips, one row a line but for trips of its no row's timetable has: every departure of the
+//    day from a stop in the timetable of a row offered there (scheduleAt, with the row's way); no two rows of a line
+//    towards one direction; 111 at АЛ. МАЛИНОВ one row, towards Ж.К. ЛЮЛИН-1,2.
 import bg.sofia.transit.data.repository.RouteOfTheDay
 import bg.sofia.transit.data.repository.RouteOfTheDay.Stop
 import bg.sofia.transit.data.repository.RouteOfTheDay.TodaysTrip
@@ -157,6 +161,26 @@ fun main(args: Array<String>) {
             RouteOfTheDay.openOn(listOf(emptyList(), listOf(3600), emptyList()), 1, 7200) == null)
     }
 
+    run {
+        // A stop's timetable: the lines to choose from (directionsAt; the owner, 26 Nov 2026).
+        val main = t("1", "F", a, b, c, d, e, f); val short = t("2", "Short", a, b, c, s("d2", 1210.0, "D"))
+        val beyond = t("3", "Beyond", b, c, s("x", 900.0)); val back = t("4", "Back", f, e, d, c, b, a)
+        val endsAtC = t("5", "EndsAtC", a, b, c); val atPole = t("6", "OtherPole", s("c2", 805.0, "C"), d, e)
+        fun names(r: List<RouteOfTheDay.AtStop>) = r.map { "${it.headsign}@${it.pole}${if (it.dropOffOnly) "!" else ""}" }
+        val one = RouteOfTheDay.directionsAt(listOf(main to 70, short to 11, endsAtC to 5), setOf("c", "c2"))
+        check("one line, one row: the direction most leave towards; its short runs and the trips ending there not offered",
+            names(one) == listOf("F@c")) { names(one).toString() }
+        check("by weight, not by the runs given: the short runs' direction first when most trips are of it",
+            names(RouteOfTheDay.directionsAt(listOf(main to 5, short to 11), setOf("c"))) == listOf("Short@c", "F@c"))
+        val two = RouteOfTheDay.directionsAt(listOf(main to 70, back to 60, beyond to 3, atPole to 2, short to 11), setOf("c", "c2"))
+        check("another row only for trips leaving another way or from another pole, the busier first",
+            names(two) == listOf("F@c", "Back@c", "Beyond@c", "OtherPole@c2")) { names(two).toString() }
+        check("a terminus: the direction ending there, drop-off only",
+            names(RouteOfTheDay.directionsAt(listOf(endsAtC to 5, main to 1), setOf("c"))) == listOf("F@c") &&
+                names(RouteOfTheDay.directionsAt(listOf(endsAtC to 5), setOf("c"))) == listOf("EndsAtC@c!"))
+        check("none calling there: none", RouteOfTheDay.directionsAt(listOf(endsAtC to 5), setOf("q")).isEmpty())
+    }
+
     // A whole feed, day by day.
     val file = args.getOrNull(0)?.let { File(it) }
     if (file == null || !file.isFile) { println("(no feed extract)"); return finish() }
@@ -171,8 +195,58 @@ fun main(args: Array<String>) {
         }
     }
     val byRoute = feed.groupBy { it.route }
+    // A stop's timetable (directionsAt; the owner, 26 Nov 2026): the rows offered at each stop — its code, all its
+    // poles — for each line calling there, of the line's trips of all days, one a variant and headsign, as
+    // GtfsRepository.linesAtStop gives them.
+    val codeOf = HashMap<String, String>()
+    for (x in feed) for (st in x.trip.stops) codeOf[st.id] = st.code.ifEmpty { st.id }
+    val polesOf = codeOf.entries.groupBy({ it.value }, { it.key }).mapValues { it.value.toSet() }
+    val rowsAt = HashMap<Pair<String, String>, List<RouteOfTheDay.AtStop>>()
+    for ((route, all) in byRoute) {
+        for (code in all.flatMap { x -> x.trip.stops.map { codeOf[it.id]!! } }.toSet()) {
+            val poles = polesOf[code]!!
+            val runs = all.filter { x -> x.trip.stops.any { it.id in poles } }
+                .groupBy { x -> x.trip.tripId.split("-").take(2).joinToString("-") + "|" + x.trip.headsign }.values
+                .map { v -> v.minByOrNull { it.trip.tripId }!!.trip to v.size }
+            rowsAt[route to code] = RouteOfTheDay.directionsAt(runs, poles)
+        }
+    }
+    val manyRows = rowsAt.filter { it.value.size > 1 }
+    println("$label: a stop's timetable — ${rowsAt.size} lines at stops, ${manyRows.size} with more than one row, " +
+        "${rowsAt.count { r -> r.value.any { it.dropOffOnly } }} drop-off only, ${rowsAt.count { it.value.isEmpty() }} none")
+    println("  more than one row, e.g.: " + manyRows.entries.take(15).joinToString("; ") { (k, v) ->
+        "${byRoute[k.first]!![0].name} at ${k.second}: ${v.joinToString(" | ") { it.headsign }}" })
+    check("$label: every line calling at a stop offered there", rowsAt.values.none { it.isEmpty() })
+    // Each row said apart from the line's others there: "Автобус 111 → Ж.К. ЛЮЛИН-1,2" (ScheduleFragment).
+    val alike = rowsAt.filter { (_, r) -> r.map { RouteOfTheDay.directionKey(it.headsign) }.let { it.size != it.toSet().size } }
+    check("$label: no two rows of a line at a stop towards one direction", alike.isEmpty()) {
+        alike.entries.take(10).joinToString { (k, v) -> "${k.first} at ${k.second}: ${v.map { it.headsign + "@" + it.pole }}" } }
+    rowsAt["A3" to "0169"]?.let { r ->
+        check("$label: 111 at МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ — one row, towards Ж.К. ЛЮЛИН-1,2",
+            r.map { RouteOfTheDay.directionKey(it.headsign) } == listOf(RouteOfTheDay.directionKey("Ж.К. ЛЮЛИН-1,2"))) { r.map { it.headsign }.toString() }
+    }
     var servicesBefore: Set<String>? = null
     for ((date, services) in days) {
+        // A stop's timetable: every departure of the day from a stop in the timetable of a row offered there.
+        run {
+            var departures = 0; val hidden = HashMap<String, Int>()
+            for ((route, all) in byRoute) {
+                val today = all.filter { it.service in services }.map { it.trip }
+                if (today.isEmpty()) continue
+                val calls = HashMap<Pair<String, String>, Set<Pair<String, Int>>>()
+                for (x in today) for (i in 0 until x.stops.lastIndex) {
+                    departures++
+                    val rows = rowsAt[route to codeOf[x.stops[i].id]!!].orEmpty()
+                    val shown = rows.any { r -> (x.tripId to i) in calls.getOrPut(r.headsign to r.pole) {
+                        RouteOfTheDay.scheduleAt(today, r.headsign, r.pole, r.way).map { it.trip.tripId to it.at }.toSet() } }
+                    if (!shown) hidden.merge("${all[0].name} → ${x.headsign}", 1, Int::plus)
+                }
+            }
+            val n = hidden.values.sum()
+            println("$label, $date: a stop's timetable — of $departures departures from stops, ${n} in no row's timetable" +
+                if (n > 0) ": " + hidden.entries.sortedByDescending { it.value }.take(12).joinToString("; ") { "${it.key} ${it.value}" } else "")
+            check("$label, $date: a stop's timetable — every departure in a row's timetable", n == 0) { "$n" }
+        }
         // N1 at БЛ. 472 Ж.К. МЛАДОСТ-4 towards Ж.К. ЛЮЛИН-1,2 under the date: the night before it (the owner, 25 Nov 2026).
         servicesBefore?.let { before ->
             val n1 = feed.filter { it.name == "N1" }

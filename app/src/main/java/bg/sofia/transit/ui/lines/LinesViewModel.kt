@@ -8,6 +8,7 @@ import bg.sofia.transit.data.db.entity.TransportType
 import bg.sofia.transit.data.db.entity.Trip
 import bg.sofia.transit.data.repository.GtfsRepository
 import bg.sofia.transit.data.repository.OtherDirection
+import bg.sofia.transit.util.LineOrder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -79,38 +80,9 @@ class LinesViewModel @Inject constructor(
     /** Per-route metadata for the Directions screen header. */
     suspend fun getRouteMeta(routeId: String) = repo.getRouteMeta(routeId)
 
-    /**
-     * Natural sort for route short names, so that "2" comes before "11" and
-     * "11" before "111", instead of the lexical order "1, 11, 12, ..., 2, 21,
-     * ...". Split each name into (letter prefix, number, letter suffix) and
-     * compare tuple-wise. Names without a number (rare) fall back to text.
-     * Ordering:
-     *   plain numeric first, ascending (1, 2, 3, ..., 11, 12, ..., 280)
-     *   then numeric with a letter suffix, grouped by their number (7, 7А)
-     *   then names starting with a letter, alphabetically (E186, M1, X50, Д1)
-     */
+    /** The Lines screen's order of lines: natural, by short name (LineOrder). */
     private val shortNameComparator: Comparator<Route> = Comparator { a, b ->
-        val ka = keyFor(a.routeShortName)
-        val kb = keyFor(b.routeShortName)
-        // First key: 0 = starts with a digit (plain numeric or numeric+suffix),
-        // 1 = starts with a letter. Plain numeric group comes first.
-        compareValuesBy(ka, kb, { it.group }, { it.number }, { it.prefix }, { it.suffix })
-    }
-
-    private data class SortKey(val group: Int, val prefix: String, val number: Int, val suffix: String)
-
-    private fun keyFor(name: String): SortKey {
-        val m = Regex("^([^0-9]*)(\\d+)(.*)$").matchEntire(name)
-        return if (m != null) {
-            val prefix = m.groupValues[1]
-            val number = m.groupValues[2].toIntOrNull() ?: Int.MAX_VALUE
-            val suffix = m.groupValues[3]
-            val group = if (prefix.isEmpty()) 0 else 1
-            SortKey(group, prefix, number, suffix)
-        } else {
-            // No digits at all: sort at the very end alphabetically.
-            SortKey(2, name, Int.MAX_VALUE, "")
-        }
+        LineOrder.compare(a.routeShortName, b.routeShortName)
     }
 
     fun selectRoute(route: Route) {
@@ -134,8 +106,8 @@ class LinesViewModel @Inject constructor(
         }
     }
 
-    /** Used by ScheduleFragment to look up the direction it was opened for. */
-    fun getSelectedDirection(): Trip? = selectedDirection
+    /** A stop's code ("0169"), for its window: its board gathers the stop's poles by it. */
+    suspend fun stopCode(stopId: String): String? = repo.getStopById(stopId)?.stopCode
 
     fun clearDirections() { _directions.value = LineDirections() }
     fun clearStops()      { _directionStops.value = emptyList() }

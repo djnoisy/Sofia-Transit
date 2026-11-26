@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A line's direction at a stop — the board's options ("Спирки по маршрута", "Разписание за тази спирка") and the
+# A line's direction at a stop — the board's "Спирки по маршрута", the lines of a stop's timetable and the
 # Lines screen's timetables and other directions (data/repository/RouteOfTheDay.kt; see direction/DirectionTests.kt):
 # on made-up trips, and on the bundled feed for DATES (YYYYMMDD, comma-separated; default today and the six days
 # after, in Sofia). With GTFS_DIR set to an unpacked static feed (e.g. today's, from

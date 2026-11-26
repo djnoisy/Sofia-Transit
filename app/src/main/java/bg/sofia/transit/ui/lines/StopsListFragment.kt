@@ -7,17 +7,20 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
-import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.data.db.dao.StopWithSequence
 import bg.sofia.transit.databinding.FragmentStopsListBinding
+import bg.sofia.transit.ui.board.StopBoardActivity
+import bg.sofia.transit.util.FileLogger
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class StopsListFragment : Fragment() {
+
+    private companion object { const val TAG = "StopsListFrag" }
 
     private var _binding: FragmentStopsListBinding? = null
     private val binding get() = _binding!!
@@ -67,16 +70,18 @@ class StopsListFragment : Fragment() {
         }
     }
 
+    /**
+     * A stop of the direction: the stop's window, on its timetable of this
+     * line and direction (the owner, 26 Nov 2026) — over the main one, with
+     * the stop's board and the other lines there a tab and a choice away.
+     */
     private fun openSchedule(stop: StopWithSequence) {
-        findNavController().navigate(
-            StopsListFragmentDirections.actionStopsListToSchedule(
-                routeId   = args.routeId,
-                routeName = args.routeName,
-                headsign  = args.headsign,
-                stopId    = stop.stopId,
-                stopName  = stop.stopName
-            )
-        )
+        viewLifecycleOwner.lifecycleScope.launch {
+            val code = vm.stopCode(stop.stopId)
+            val context = context ?: return@launch
+            FileLogger.i(TAG, "Timetable of ${args.routeId} towards '${args.headsign}' at ${stop.stopId} (code $code)")
+            StopBoardActivity.startOnTimetable(context, stop.stopId, stop.stopName, code, args.routeId, args.headsign)
+        }
     }
 
     override fun onDestroyView() {

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The board's action, in the stop's window's top bar while the board is
+     shown (StopArrivalsFragment): refresh, before the favourites. TalkBack
+     reads its title. -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@+id/actionRefresh"
+        android:icon="@drawable/ic_refresh"
+        android:title="Обнови"
+        android:orderInCategory="1"
+        app:showAsAction="always"/>
+</menu>

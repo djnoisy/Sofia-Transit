@@ -12,8 +12,8 @@ import bg.sofia.transit.util.FileLogger
 
 /**
  * The board's rows, a line and direction each; activating one calls
- * [onClick] — the options "Спирки по маршрута" and "Разписание за тази
- * спирка" (StopArrivalsFragment; the owner, 24 Nov 2026).
+ * [onClick] — its "Спирки по маршрута" (StopArrivalsFragment; the owner,
+ * 24 and 26 Nov 2026).
  */
 class ArrivalAdapter(
     private val onClick: (ArrivalInfo) -> Unit

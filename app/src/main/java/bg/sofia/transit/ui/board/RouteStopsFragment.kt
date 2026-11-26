@@ -19,14 +19,14 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 
 /**
- * "Спирки по маршрута" from a row of the "Виртуално табло" (the owner,
- * 24 Nov 2026): the stops of the route the row's direction takes through the
+ * "Спирки по маршрута" from a row of a stop's board (the "Табло" tab of the
+ * stop's window; the owner, 24 and 26 Nov 2026): the stops of the route the row's direction takes through the
  * board's stop (GtfsRepository.lineAtStop) — 111 towards БУЛ. НИКОЛА ПЕТКОВ
  * its short run's 22, not the full run's 41 — as the Lines screen lists a
  * direction's (StopOnRouteAdapter), the board's stop marked "тази спирка",
  * brought on screen and given TalkBack's focus, the minutes from it on (the
  * owner, 25 Nov 2026).
- * A stop opens its own board (the owner, 24 Nov 2026).
+ * A stop opens its own window, on its board (the owner, 24 Nov 2026).
  */
 @AndroidEntryPoint
 class RouteStopsFragment : Fragment() {

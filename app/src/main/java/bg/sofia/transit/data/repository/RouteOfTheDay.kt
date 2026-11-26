@@ -86,9 +86,15 @@ object RouteOfTheDay {
         busiest(trips.filter { it.tripId.startsWith(prefix) })
 
     /** Of [own], the route the most of them run along; see routeFor. */
-    private fun busiest(own: List<TodaysTrip>): TodaysTrip? =
-        own.sortedBy { it.tripId }.distinctBy { t -> t.stops.map { it.id } }
-            .map { r -> r to own.count { along(it, r) } }
+    private fun busiest(own: List<TodaysTrip>): TodaysTrip? = heaviest(own.map { it to 1 })
+
+    /**
+     * Of [own] — trips, each standing for as many as its number — the route
+     * the most of them run along (busiest, each trip counted as many times).
+     */
+    private fun heaviest(own: List<Pair<TodaysTrip, Int>>): TodaysTrip? =
+        own.map { it.first }.sortedBy { it.tripId }.distinctBy { t -> t.stops.map { it.id } }
+            .map { r -> r to own.sumOf { (t, n) -> if (along(t, r)) n else 0 } }
             .filter { it.second > 0 }
             .maxWithOrNull(compareBy<Pair<TodaysTrip, Int>> { it.second }
                 .thenBy { it.first.stops.size }
@@ -175,23 +181,90 @@ object RouteOfTheDay {
      * АЛ. МАЛИНОВ towards Ж.К. ЛЮЛИН-1,2 its 70 trips and the 11 short runs to
      * БУЛ. НИКОЛА ПЕТКОВ (the owner, 24 Nov 2026: no bus leaving a stop is to
      * be lost from the Lines screen). The way is the route of the direction
-     * through the stop (routeThrough); none on a day the direction does not
-     * call there, nor its short runs. In the order of [trips]; the caller
-     * sorts by time.
+     * through the stop (routeThrough); on a day the direction does not call
+     * there, [way] — the stop first — if given (a stop's timetable,
+     * directionsAt), else none of its short runs. In the order of [trips];
+     * the caller sorts by time.
      */
-    fun scheduleAt(trips: List<TodaysTrip>, headsign: String, stopId: String): List<Call> {
+    fun scheduleAt(trips: List<TodaysTrip>, headsign: String, stopId: String, way: List<Stop>? = null): List<Call> {
         val key = directionKey(headsign)
         val out = ArrayList<Call>()
         for (t in trips) if (directionKey(t.headsign) == key)
             t.stops.forEachIndexed { i, s -> if (s.id == stopId) out += Call(t, i, null) }
-        val route = routeThrough(trips, headsign, setOf(stopId)) ?: return out
-        val ahead = route.stops.subList(route.stops.indexOfFirst { it.id == stopId }, route.stops.size)
+        val ahead = routeThrough(trips, headsign, setOf(stopId))
+            ?.let { route -> route.stops.subList(route.stops.indexOfFirst { it.id == stopId }, route.stops.size) }
+            ?: way?.takeIf { it.firstOrNull()?.id == stopId }
+            ?: return out
         for (t in trips) {
             if (directionKey(t.headsign) == key) continue
             // Not where it ends: it leaves from nowhere there.
             for (i in 0 until t.stops.lastIndex)
                 if (t.stops[i].id == stopId && runsAhead(t.stops.subList(i, t.stops.size), ahead))
                     out += Call(t, i, t.headsign.ifBlank { t.stops.last().name.ifBlank { t.stops.last().id } })
+        }
+        return out
+    }
+
+    // ── A stop's timetable: the lines to choose from (the owner, 26 Nov 2026) ──
+
+    /**
+     * A line's direction a stop's timetable offers to choose: its headsign
+     * (of its busiest route there), the pole of the stop its trips leave from
+     * — the stop of its timetable (scheduleAt) — whether its trips only
+     * end there ("само слизане", as the board says), and the way on from the
+     * pole of its busiest route, for its timetable on a day none of its trips
+     * leaves there (scheduleAt's [way]): the others' trips leaving its way are
+     * not then lost (tram 22's runs from ДЕПО ИСКЪР to ГАРА ПОДУЯНЕ on days
+     * its runs to Ж.К. КРАСНА ПОЛЯНА do not pass by УЛ. ХЕМУС).
+     */
+    class AtStop(val headsign: String, val pole: String, val dropOffOnly: Boolean, val way: List<Stop>)
+
+    /**
+     * The directions of a line a stop's timetable offers (the owner, 26 Nov
+     * 2026: one line, one row; two only for two ways of its own). [runs]: the
+     * line's trips calling at the stop — at any of its [poles] (the bus and
+     * the trolley rows of one place) — each standing for as many trips, of all
+     * days, as its number (one a variant and headsign: GtfsRepository.linesAtStop).
+     *
+     * The direction most of them leave the stop towards first — its timetable
+     * marks the others' trips leaving its way (scheduleAt: 111 at
+     * МЕТРОСТАНЦИЯ АЛ. МАЛИНОВ towards Ж.К. ЛЮЛИН-1,2, with the short runs to
+     * БУЛ. НИКОЛА ПЕТКОВ) — then each other direction some of whose trips no
+     * timetable offered before has: leaving by another way (runsAhead) than
+     * any of the routes of the offered direction's trips leaving there — the
+     * day's route through the stop is one of them, which one is not known —
+     * a metro station, one stop for both ways, its two directions; or from
+     * another pole, its own direction's too; the busier first. Directions whose trips only end there
+     * are not offered while any leaves (a loop's end, as the board drops it);
+     * at a terminus none leaves: the direction most of them end there,
+     * drop-off only. Empty when none calls there.
+     */
+    fun directionsAt(runs: List<Pair<TodaysTrip, Int>>, poles: Set<String>): List<AtStop> {
+        // Where a trip leaves the stop: not where it ends, there is no way on.
+        fun leaves(t: TodaysTrip) = (0 until t.stops.lastIndex).firstOrNull { t.stops[it].id in poles }
+        fun byWeight(runs: List<Pair<TodaysTrip, Int>>) = runs.groupBy { directionKey(it.first.headsign) }.entries
+            .sortedWith(compareBy<Map.Entry<String, List<Pair<TodaysTrip, Int>>>>({ -it.value.sumOf { r -> r.second } }, { it.key }))
+        val leaving = runs.filter { leaves(it.first) != null }
+        if (leaving.isEmpty()) {
+            val own = byWeight(runs.filter { it.first.stops.lastOrNull()?.id in poles }).firstOrNull()?.value ?: return emptyList()
+            val route = heaviest(own) ?: return emptyList()
+            return listOf(AtStop(route.headsign, route.stops.last().id, dropOffOnly = true, way = route.stops.takeLast(1)))
+        }
+        val out = ArrayList<AtStop>()
+        // Of each offered, its direction and the ways on from its pole of the routes of its trips leaving there
+        // (the pole first): the day's route through the stop (routeThrough) is one of them, which one is not known.
+        val keys = ArrayList<String>(); val ways = ArrayList<List<List<Stop>>>()
+        fun from(t: TodaysTrip): List<Stop> = t.stops.subList(leaves(t)!!, t.stops.size)
+        fun shown(t: TodaysTrip, key: String): Boolean {
+            val rest = from(t)
+            return out.indices.any { j -> out[j].pole == rest[0].id && (keys[j] == key || ways[j].all { runsAhead(rest, it) }) }
+        }
+        for ((key, own) in byWeight(leaving)) while (true) {
+            val route = heaviest(own.filter { !shown(it.first, key) }) ?: break
+            val rest = from(route)
+            out += AtStop(route.headsign, rest[0].id, dropOffOnly = false, way = rest)
+            keys += key
+            ways += own.map { from(it.first) }.filter { it[0].id == rest[0].id }.distinctBy { w -> w.map { it.id } }
         }
         return out
     }
@@ -227,11 +300,12 @@ object RouteOfTheDay {
      * midnight last (00:15, not 24:15); a night line's under the next: the
      * night from Wednesday to Thursday under Thursday, its 23:32 first.
      * [dayBefore]: the line's trips of the day before the date, [day]: of the
-     * date. By time.
+     * date; [way]: as scheduleAt's. By time.
      */
-    fun timetableOfDate(dayBefore: List<TodaysTrip>, day: List<TodaysTrip>, headsign: String, stopId: String): List<TimetableTime> {
+    fun timetableOfDate(dayBefore: List<TodaysTrip>, day: List<TodaysTrip>, headsign: String, stopId: String,
+                        way: List<Stop>? = null): List<TimetableTime> {
         val out = ArrayList<TimetableTime>()
-        fun add(trips: List<TodaysTrip>, shift: Int) = scheduleAt(trips, headsign, stopId).forEach { c ->
+        fun add(trips: List<TodaysTrip>, shift: Int) = scheduleAt(trips, headsign, stopId, way).forEach { c ->
             c.trip.times.getOrNull(c.at)?.takeIf { it >= 0 }?.let { out += TimetableTime(it - shift, c.endsAt) }
         }
         if (mostlyAfterMidnight(dayBefore)) add(dayBefore, DAY_S)

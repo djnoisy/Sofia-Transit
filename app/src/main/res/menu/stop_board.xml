@@ -1,15 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The virtual board's actions, in its top bar (StopArrivalsFragment):
-     refresh, and add to or remove from the favourites (its title and icon
-     follow the stop's state). TalkBack reads their titles. -->
+<!-- A stop's window's action, in its top bar on both tabs (StopBoardActivity):
+     add to or remove from the favourites (its title and icon follow the
+     stop's state). TalkBack reads its title. -->
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item android:id="@+id/actionRefresh"
-        android:icon="@drawable/ic_refresh"
-        android:title="Обнови"
-        app:showAsAction="always"/>
     <item android:id="@+id/actionFavorite"
         android:icon="@drawable/ic_star_outline"
         android:title="Добави в любими"
+        android:orderInCategory="2"
         app:showAsAction="always"/>
 </menu>

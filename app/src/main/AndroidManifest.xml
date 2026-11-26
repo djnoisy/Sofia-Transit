@@ -66,17 +66,17 @@
             </intent-filter>
         </activity>
 
-        <!-- "Виртуално табло": a stop's arrivals, a window of its own. -->
+        <!-- "Спирка": a stop's board and timetables, a window of its own. -->
         <activity
             android:name=".ui.board.StopBoardActivity"
             android:exported="false"
-            android:label="Виртуално табло"/>
+            android:label="Спирка"/>
 
-        <!-- A board row's line: its route or its timetable, a window of its own. -->
+        <!-- A board row's line: its route through the stop, a window of its own. -->
         <activity
             android:name=".ui.board.LineWindowActivity"
             android:exported="false"
-            android:label="Линия"/>
+            android:label="Спирки по маршрута"/>
 
         <activity
             android:name=".ui.permissions.PermissionsActivity"

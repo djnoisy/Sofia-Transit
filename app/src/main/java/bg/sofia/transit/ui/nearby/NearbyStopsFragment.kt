@@ -16,8 +16,8 @@ import dagger.hilt.android.AndroidEntryPoint
  * ViewPager2 with two tabs: "Близки спирки" (nearby) and "Любими" (the
  * favourite stops; in place of "Търсене", the owner, 9 Nov 2026).
  *
- * A stop's arrivals open in a window of their own, "Виртуално табло"
- * (StopBoardActivity). "Настройки" and "Диагностика" are in the top app bar
+ * A stop opens in a window of its own, "Спирка" — its board and its
+ * timetables (StopBoardActivity). "Настройки" and "Диагностика" are in the top app bar
  * (MainActivity), on every screen.
  */
 @AndroidEntryPoint

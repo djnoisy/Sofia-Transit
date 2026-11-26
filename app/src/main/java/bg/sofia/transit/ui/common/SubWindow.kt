@@ -10,8 +10,8 @@ import androidx.core.view.children
 import androidx.core.view.updatePadding
 
 /**
- * A window of its own over the main one — "Виртуално табло"
- * (StopBoardActivity), and a line's route or timetable opened from it
+ * A window of its own over the main one — a stop's, "Спирка"
+ * (StopBoardActivity), and a line's route opened from its board
  * (LineWindowActivity): no navigation bar; in the top bar the back arrow and
  * the title, the window's heading for TalkBack, as in the main screens
  * (MainActivity).

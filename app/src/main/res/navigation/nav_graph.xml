@@ -68,21 +68,7 @@
         <argument android:name="routeName"  app:argType="string" android:defaultValue=""/>
         <!-- What tells one more route of a direction apart ("от ДЕПО ИСКЪР"); empty for a direction's own. -->
         <argument android:name="via"        app:argType="string" android:defaultValue=""/>
-
-        <action android:id="@+id/actionStopsListToSchedule"
-            app:destination="@id/scheduleFragment"/>
-    </fragment>
-
-    <fragment android:id="@+id/scheduleFragment"
-        android:name="bg.sofia.transit.ui.lines.ScheduleFragment"
-        android:label="Разписание"
-        tools:layout="@layout/fragment_schedule">
-
-        <argument android:name="routeId"   app:argType="string"/>
-        <argument android:name="routeName" app:argType="string"/>
-        <argument android:name="headsign"  app:argType="string"/>
-        <argument android:name="stopId"    app:argType="string"/>
-        <argument android:name="stopName"  app:argType="string"/>
+        <!-- A stop: its window, on the timetable of the direction (StopBoardActivity; the owner, 26 Nov 2026). -->
     </fragment>
 
     <!-- ── Journey ── -->
