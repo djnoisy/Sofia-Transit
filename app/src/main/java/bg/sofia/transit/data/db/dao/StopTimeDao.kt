@@ -70,9 +70,10 @@ interface StopTimeDao {
     """)
     suspend fun getScheduleForRouteAtStop(routeId: String, stopId: String): List<String>
 
-    /** Every trip calling at any of [stopIds], on any day, with its line and headsign (GtfsRepository.linesAtStop). */
+    /** Every trip calling at any of [stopIds], on any day, with its line, headsign and service (GtfsRepository.linesAtStop). */
     @Query("""
-        SELECT DISTINCT st.tripId AS tripId, t.routeId AS routeId, t.tripHeadsign AS headsign FROM stop_times st
+        SELECT DISTINCT st.tripId AS tripId, t.routeId AS routeId, t.tripHeadsign AS headsign, t.serviceId AS serviceId
+        FROM stop_times st
         JOIN trips t ON t.tripId = st.tripId
         WHERE st.stopId IN (:stopIds)
     """)
@@ -158,5 +159,6 @@ data class ScheduledArrival(
 data class TripAtStop(
     val tripId: String,
     val routeId: String,
-    val headsign: String?
+    val headsign: String?,
+    val serviceId: String
 )

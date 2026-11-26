@@ -966,8 +966,12 @@ class GtfsRepository @Inject constructor(
 
     /**
      * The lines a stop's timetable offers to choose (the owner, 26 Nov 2026):
-     * every line calling at any pole of the stop [stopId] (stopIdsOfSamePlace),
-     * on any day — the timetable's days are seven — once, by the direction most
+     * every line calling at any pole of the stop [stopId] (stopIdsOfSamePlace)
+     * on any of the timetable's days — from the day before yesterday (a night
+     * line's under yesterday) to six days on; not a diversion ended or still
+     * to come, which the feed keeps for weeks (review of 26 Nov 2026: 72
+     * lines at stops in the data of 5 Oct 2026; with none of those days in
+     * the data, any day's) — once, by the direction most
      * of its trips leave there towards, and again only for trips of its no
      * timetable offered has (RouteOfTheDay.directionsAt); in the Lines screen's
      * order: by kind, then by number. Each trip of a variant (the first two
@@ -983,7 +987,10 @@ class GtfsRepository @Inject constructor(
      */
     suspend fun linesAtStop(stopId: String, wanted: Pair<String, String>? = null): List<StopLine> {
         val poles = stopIdsOfSamePlace(stopId)
-        val calls = stopTimeDao.getTripsAtStops(poles)
+        val today = java.time.LocalDate.now(java.time.ZoneId.of("Europe/Sofia"))
+        val days = java.time.format.DateTimeFormatter.BASIC_ISO_DATE
+        val services = calendarDateDao.getActiveServicesBetween(today.minusDays(2).format(days), today.plusDays(6).format(days)).toSet()
+        val calls = stopTimeDao.getTripsAtStops(poles).filter { services.isEmpty() || it.serviceId in services }
         val routes = (calls.map { it.routeId } + listOfNotNull(wanted?.first)).distinct().mapNotNull { routeDao.getById(it) }
         // One trip of each variant and headsign, standing for as many as there are.
         val runsOf = calls.groupBy { it.routeId }.mapValues { (_, trips) ->

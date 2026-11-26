@@ -83,8 +83,8 @@ class StopBoardActivity : AppCompatActivity() {
     // The favourites, on both tabs (the board's "Обнови" is its own, StopArrivalsFragment).
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        // The board's "Обнови" first: added by super, from the menu providers
-        // (StopArrivalsFragment's, while it is shown).
+        // The board's "Обнови" (StopArrivalsFragment's menu provider, while it
+        // is shown) is added after this returns; first by its orderInCategory.
         super.onCreateOptionsMenu(menu)
         menuInflater.inflate(R.menu.stop_board, menu)
         return true

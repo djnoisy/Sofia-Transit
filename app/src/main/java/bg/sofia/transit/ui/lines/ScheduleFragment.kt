@@ -81,6 +81,7 @@ class ScheduleFragment : Fragment() {
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
         // A new view: opened afresh when shown (onResume), the focus given again.
+        openedHere = false
         focusGiven = false
         listed = null
 
@@ -100,9 +101,10 @@ class ScheduleFragment : Fragment() {
     }
 
     /**
-     * The drop-down list of the lines, once known: on screen "Автобус 111 →
-     * Ж.К. ЛЮЛИН-1,2", for TalkBack "… към …" (or "Автобус 84, само слизане",
-     * as the board says it); the one shown selected. Hidden, with its
+     * The drop-down list of the lines, once known: "Автобус 111 към Ж.К.
+     * ЛЮЛИН-1,2" (or "Автобус 84, само слизане", as the board says it) — "към"
+     * on screen too, not "→": the selection TalkBack announces is the item's
+     * text (review of 26 Nov 2026); the one shown selected. Hidden, with its
      * caption, while not known and when there is none.
      */
     private fun bindLines(lines: List<StopLine>?) {
@@ -130,27 +132,15 @@ class ScheduleFragment : Fragment() {
     }
 
     /**
-     * The lines, as shown and as said, in the app's own item layouts (as
-     * Настройки' drop-down list: not the platform's, whose row is a
-     * CheckedTextView — "не е отметнато" — and follows the system theme).
+     * The lines, in the app's own item layouts (as Настройки' drop-down list:
+     * not the platform's, whose row is a CheckedTextView — "не е отметнато" —
+     * and follows the system theme).
      */
-    private class LineChoices(context: Context, private val lines: List<StopLine>) :
-        ArrayAdapter<String>(context, R.layout.item_spinner_selected, lines.map { shown(it) }) {
-
+    private class LineChoices(context: Context, lines: List<StopLine>) :
+        ArrayAdapter<String>(context, R.layout.item_spinner_selected, lines.map { l ->
+            "${l.vehicleType} ${l.routeShortName}" + if (l.dropOffOnly) ", само слизане" else " към ${l.headsign}"
+        }) {
         init { setDropDownViewResource(R.layout.item_spinner_dropdown) }
-
-        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
-            super.getView(position, convertView, parent).also { it.contentDescription = said(lines[position]) }
-
-        override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View =
-            super.getDropDownView(position, convertView, parent).also { it.contentDescription = said(lines[position]) }
-
-        private companion object {
-            fun shown(l: StopLine) = "${l.vehicleType} ${l.routeShortName}" +
-                if (l.dropOffOnly) ", само слизане" else " → ${l.headsign}"
-            fun said(l: StopLine) = "${l.vehicleType} ${l.routeShortName}" +
-                if (l.dropOffOnly) ", само слизане" else " към ${l.headsign}"
-        }
     }
 
     /** The days the strip was built of. */
@@ -290,15 +280,23 @@ class ScheduleFragment : Fragment() {
         super.onResume()
         // Shown: its tab chosen again (the owner, 25 Nov 2026: opened afresh
         // each time it is shown), first shown, or after a new view (a
-        // rotation) — the focus not yet given — or left open overnight (Home,
+        // rotation), or left open overnight (Home,
         // the screen off): opened afresh, the focus given again (review of
         // 25 Nov 2026). Back from Home the same day: as it was left.
-        if (leftForTab || !focusGiven || vm.openedBeforeToday()) {
+        if (leftForTab || !openedHere || vm.openedBeforeToday()) {
             leftForTab = false
+            openedHere = true
             focusGiven = false
             vm.open()
         }
     }
+
+    /**
+     * Opened since this view was made — not whether the focus was given: with
+     * no time to come, it never is, and the day chosen was lost on every
+     * return (review of 26 Nov 2026).
+     */
+    private var openedHere = false
 
     /** The focus given on opening — once, not on every redraw. */
     private var focusGiven = false

@@ -196,13 +196,19 @@ fun main(args: Array<String>) {
     }
     val byRoute = feed.groupBy { it.route }
     // A stop's timetable (directionsAt; the owner, 26 Nov 2026): the rows offered at each stop — its code, all its
-    // poles — for each line calling there, of the line's trips of all days, one a variant and headsign, as
-    // GtfsRepository.linesAtStop gives them.
+    // poles — for each line calling there, of the line's trips running on the DATES (linesAtStop: from the day before
+    // yesterday to six days on), one a variant and headsign, as GtfsRepository.linesAtStop gives them; not of a
+    // diversion ended or still to come (review of 26 Nov 2026).
+    val window = days.flatMapTo(HashSet()) { it.second }
     val codeOf = HashMap<String, String>()
     for (x in feed) for (st in x.trip.stops) codeOf[st.id] = st.code.ifEmpty { st.id }
     val polesOf = codeOf.entries.groupBy({ it.value }, { it.key }).mapValues { it.value.toSet() }
     val rowsAt = HashMap<Pair<String, String>, List<RouteOfTheDay.AtStop>>()
-    for ((route, all) in byRoute) {
+    var stale = 0
+    for ((route, every) in byRoute) {
+        val all = every.filter { it.service in window }
+        stale += (every.flatMap { x -> x.trip.stops.map { codeOf[it.id]!! } }.toSet() -
+            all.flatMap { x -> x.trip.stops.map { codeOf[it.id]!! } }.toSet()).size
         for (code in all.flatMap { x -> x.trip.stops.map { codeOf[it.id]!! } }.toSet()) {
             val poles = polesOf[code]!!
             val runs = all.filter { x -> x.trip.stops.any { it.id in poles } }
@@ -213,7 +219,8 @@ fun main(args: Array<String>) {
     }
     val manyRows = rowsAt.filter { it.value.size > 1 }
     println("$label: a stop's timetable — ${rowsAt.size} lines at stops, ${manyRows.size} with more than one row, " +
-        "${rowsAt.count { r -> r.value.any { it.dropOffOnly } }} drop-off only, ${rowsAt.count { it.value.isEmpty() }} none")
+        "${rowsAt.count { r -> r.value.any { it.dropOffOnly } }} drop-off only, ${rowsAt.count { it.value.isEmpty() }} none; " +
+        "$stale only on other days, not offered")
     println("  more than one row, e.g.: " + manyRows.entries.take(15).joinToString("; ") { (k, v) ->
         "${byRoute[k.first]!![0].name} at ${k.second}: ${v.joinToString(" | ") { it.headsign }}" })
     check("$label: every line calling at a stop offered there", rowsAt.values.none { it.isEmpty() })
@@ -237,6 +244,7 @@ fun main(args: Array<String>) {
                 for (x in today) for (i in 0 until x.stops.lastIndex) {
                     departures++
                     val rows = rowsAt[route to codeOf[x.stops[i].id]!!].orEmpty()
+                    // (A stop of the day's is a stop of the window's.)
                     val shown = rows.any { r -> (x.tripId to i) in calls.getOrPut(r.headsign to r.pole) {
                         RouteOfTheDay.scheduleAt(today, r.headsign, r.pole, r.way).map { it.trip.tripId to it.at }.toSet() } }
                     if (!shown) hidden.merge("${all[0].name} → ${x.headsign}", 1, Int::plus)

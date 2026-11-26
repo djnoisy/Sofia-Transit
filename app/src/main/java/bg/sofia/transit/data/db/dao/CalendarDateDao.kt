@@ -23,6 +23,13 @@ interface CalendarDateDao {
     """)
     suspend fun getActiveServicesForDate(date: String): List<String>
 
+    /** The service_ids active on any date from [from] to [to] (YYYYMMDD), both included. */
+    @Query("""
+        SELECT DISTINCT serviceId FROM calendar_dates
+        WHERE date BETWEEN :from AND :to AND exceptionType = 1
+    """)
+    suspend fun getActiveServicesBetween(from: String, to: String): List<String>
+
     /** Returns dates (YYYYMMDD) for which we have schedule data. */
     @Query("""
         SELECT DISTINCT date FROM calendar_dates
