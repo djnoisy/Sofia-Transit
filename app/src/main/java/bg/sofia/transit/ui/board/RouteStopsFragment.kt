@@ -57,7 +57,7 @@ class RouteStopsFragment : Fragment() {
     private val hereId get() = args.getString(ARG_STOP_ID).orEmpty()
 
     /** The board's stop brought to the top once, not again on every redraw. */
-    private var focused = false
+    private var broughtHere = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, saved: Bundle?): View {
         _binding = FragmentStopsListBinding.inflate(inflater, container, false)
@@ -66,7 +66,7 @@ class RouteStopsFragment : Fragment() {
 
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
-        focused = saved != null
+        broughtHere = saved != null
 
         // As the Lines screen's list of a direction's stops: "Автобус 111 →
         // БУЛ. НИКОЛА ПЕТКОВ" on screen, "… към …" for TalkBack.
@@ -88,7 +88,7 @@ class RouteStopsFragment : Fragment() {
                 adapter.submitList(stops)
                 binding.tvStopCount.text = "${stops.size} спирки"
                 binding.tvStopCount.contentDescription = "${stops.size} спирки по маршрута"
-                if (!focused) { focused = true; bringHere(stops.indexOfFirst { it.stopId == hereId }) }
+                if (!broughtHere) { broughtHere = true; bringHere(stops.indexOfFirst { it.stopId == hereId }) }
             }
         }
         vm.load(args.getString(ARG_TRIP_ID).orEmpty())

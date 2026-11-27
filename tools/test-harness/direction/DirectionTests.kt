@@ -154,7 +154,7 @@ fun main(args: Array<String>) {
         check("a night line at 22:00: tomorrow, the night beginning tonight",
             RouteOfTheDay.openOn(listOf(nightDay, nightDay, nightDay), 1, 79_200) == 2)
         check("a night line at 01:00: today, its 01:32 to come", RouteOfTheDay.openOn(listOf(nightDay, nightDay, nightDay), 1, 3600) == 1)
-        check("the focus on opening: the first time to come — yesterday's 01:03 at 00:50, today's 14:00 at 10:00, none when all passed",
+        check("the hour brought to the top on opening: the first time to come — yesterday's 01:03 at 00:50, today's 14:00 at 10:00, none when all passed",
             RouteOfTheDay.firstToCome(m2, -1, 3000) == 90_180 && RouteOfTheDay.firstToCome(dayLine, 0, 36_000) == 50_400 &&
                 RouteOfTheDay.firstToCome(listOf(3600), 0, 7200) == null)
         check("no time to come in the three: none (today shown)",
