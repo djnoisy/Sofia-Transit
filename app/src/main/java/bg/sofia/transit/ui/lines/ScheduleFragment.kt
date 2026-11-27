@@ -35,8 +35,11 @@ import kotlinx.coroutines.launch
  *
  * The user browses by concrete date via a 7-day strip (today + 6 days; from
  * yesterday when it opens on yesterday), opened on the first day with a time
- * not yet passed, TalkBack's focus on its hour (ScheduleViewModel; the owner,
- * 25 Nov 2026) — each time the tab is shown again, and when a line is chosen.
+ * not yet passed, its hour at the top (ScheduleViewModel; the owner, 25 Nov
+ * 2026) — each time the tab is shown again, and when a line is chosen. Not
+ * TalkBack's focus moved there (the owner, 27 Nov 2026: it broke the reading
+ * of the screen, the tab opened was not heard): the first row a swipe from
+ * the date reaches is that hour.
  */
 @AndroidEntryPoint
 class ScheduleFragment : Fragment() {
@@ -47,8 +50,6 @@ class ScheduleFragment : Fragment() {
         private const val ARG_HEADSIGN = "headsign"
         /** The letters short runs are marked with, by where they end. */
         private const val MARK_LETTERS = "абвгдежзиклмнопрстуф"
-        /** After the window's opening, for TalkBack's own first focus to have come and gone. */
-        private const val FOCUS_DELAY_MS = 500L
 
         /**
          * The timetables at the stop [stopId], of the line [routeId] towards
@@ -80,9 +81,9 @@ class ScheduleFragment : Fragment() {
 
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
-        // A new view: opened afresh when shown (onResume), the focus given again.
+        // A new view: opened afresh when shown (onResume), brought to its hour again.
         openedHere = false
-        focusGiven = false
+        scrolled = false
         listed = null
 
         adapter = ScheduleAdapter()
@@ -121,8 +122,8 @@ class ScheduleFragment : Fragment() {
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
                 if (position == vm.selected) return
-                // A line chosen: its timetable opened, the focus on its first time to come.
-                focusGiven = false
+                // A line chosen: its timetable opened, at its first time to come.
+                scrolled = false
                 vm.select(position)
             }
 
@@ -213,14 +214,13 @@ class ScheduleFragment : Fragment() {
                     }
                 )
             }
-        // On opening: TalkBack's focus to the hour of the first time not yet
-        // passed — its times only, no day or date said (the owner, 25 Nov 2026).
-        // Only while shown — the tab the current one: else when it is (onResume).
-        val focusRow = state.focusOn?.takeIf { !focusGiven && !state.loading && isResumed }
+        // On opening: the hour of the first time not yet passed at the top
+        // (the owner, 25 Nov 2026) — no focus moved (27 Nov 2026).
+        val firstRow = state.scrollTo?.takeIf { !scrolled && !state.loading }
             ?.let { t -> groups.indexOfFirst { row -> row.minutes.any { it.seconds == t } } }?.takeIf { it >= 0 }
         adapter.submitList(groups)
         draws++
-        if (focusRow != null) { focusGiven = true; focusOnRow(focusRow) }
+        if (firstRow != null) { scrolled = true; scrollToRow(firstRow) }
         binding.tvLegend.text = marks.entries.joinToString("\n") { (end, mark) -> "$mark — до $end" }
         binding.tvLegend.visibility = if (marks.isEmpty() || state.loading) View.GONE else View.VISIBLE
 
@@ -244,25 +244,20 @@ class ScheduleFragment : Fragment() {
     }
 
     /**
-     * The row [pos] at the top, with TalkBack's focus — after the window's own
-     * first focus, as RouteStopsFragment brings the board's stop. Not if the
-     * list was drawn again meanwhile (a day tapped at once).
+     * The row [pos] at the top of the list, TalkBack's focus left where it
+     * is (the owner, 27 Nov 2026). Not if the list was drawn again meanwhile
+     * (a day tapped at once).
      */
-    private fun focusOnRow(pos: Int) {
+    private fun scrollToRow(pos: Int) {
         val rv = binding.rvSchedule
         val drawn = draws
         rv.post {
             if (drawn != draws) return@post
             (rv.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(pos, 0)
-            rv.postDelayed({
-                if (drawn != draws) return@postDelayed
-                _binding?.rvSchedule?.findViewHolderForAdapterPosition(pos)?.itemView
-                    ?.performAccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
-            }, FOCUS_DELAY_MS)
         }
     }
 
-    /** How many times the list was drawn: a focus asked for one drawing is not given on another. */
+    /** How many times the list was drawn: a row asked for one drawing is not brought on another. */
     private var draws = 0
 
     /** Left for the other tab (not with the window): opened afresh when shown again. */
@@ -279,26 +274,26 @@ class ScheduleFragment : Fragment() {
         super.onResume()
         // Shown: its tab chosen again (the owner, 25 Nov 2026: opened afresh
         // each time it is shown), first shown, or after a new view (a
-        // rotation), or left open overnight (Home,
-        // the screen off): opened afresh, the focus given again (review of
-        // 25 Nov 2026). Back from Home the same day: as it was left.
+        // rotation), or left open overnight (Home, the screen off): opened
+        // afresh, at its hour (review of 25 Nov 2026). Back from Home the
+        // same day: as it was left.
         if (leftForTab || !openedHere || vm.openedBeforeToday()) {
             leftForTab = false
             openedHere = true
-            focusGiven = false
+            scrolled = false
             vm.open()
         }
     }
 
     /**
-     * Opened since this view was made — not whether the focus was given: with
-     * no time to come, it never is, and the day chosen was lost on every
-     * return (review of 26 Nov 2026).
+     * Opened since this view was made — not whether it was brought to its
+     * hour: with no time to come, it never is, and the day chosen was lost on
+     * every return (review of 26 Nov 2026).
      */
     private var openedHere = false
 
-    /** The focus given on opening — once, not on every redraw. */
-    private var focusGiven = false
+    /** Brought to its first time to come on opening — once, not on every redraw. */
+    private var scrolled = false
 
     override fun onDestroyView() {
         super.onDestroyView()

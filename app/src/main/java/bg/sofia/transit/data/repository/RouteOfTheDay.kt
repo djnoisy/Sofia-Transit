@@ -328,9 +328,9 @@ object RouteOfTheDay {
     /**
      * Of the [times] of a timetable shown under the date [dayOffset] days
      * from today (0 today, -1 yesterday, 1 tomorrow), in order, the first not
-     * yet passed at [now] (seconds from today's midnight) — where the screen
-     * puts TalkBack's focus on opening (the owner, 25 Nov 2026); null when all
-     * have.
+     * yet passed at [now] (seconds from today's midnight) — the hour the
+     * screen brings to the top on opening (the owner, 25 Nov 2026; no focus
+     * moved there, 27 Nov 2026); null when all have.
      */
     fun firstToCome(times: List<Int>, dayOffset: Int, now: Int): Int? =
         times.firstOrNull { it >= now - dayOffset * DAY_S }

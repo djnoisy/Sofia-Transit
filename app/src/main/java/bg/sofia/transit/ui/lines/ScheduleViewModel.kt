@@ -27,10 +27,11 @@ data class ScheduleState(
     val noDataReason: String? = null,     // null when data is present
     /**
      * On opening: the first time not yet passed (ScheduledTime.seconds), its
-     * hour to get TalkBack's focus (RouteOfTheDay.firstToCome; the owner,
-     * 25 Nov 2026); null otherwise — a day tapped, or none to come.
+     * hour brought to the top of the list (RouteOfTheDay.firstToCome; the
+     * owner, 25 Nov 2026; no focus moved, 27 Nov 2026); null otherwise — a
+     * day tapped, or none to come.
      */
-    val focusOn: Int? = null
+    val scrollTo: Int? = null
 )
 
 /**
@@ -112,7 +113,7 @@ class ScheduleViewModel @Inject constructor(
 
     /**
      * Whether it is another day, in Sofia, than the one the timetable was
-     * opened on — the screen left open overnight, its "днес" and its focus of
+     * opened on — the screen left open overnight, its "днес" and its hour of
      * yesterday: to be opened afresh (ScheduleFragment.onResume).
      */
     fun openedBeforeToday(): Boolean =
@@ -146,14 +147,14 @@ class ScheduleViewModel @Inject constructor(
             val timetables = dates.map { repo.getScheduleForDirectionAtStop(routeId, headsign, stopId, it, way) }
             val open = RouteOfTheDay.openOn(timetables.map { t -> t.map { it.seconds } }, 1, now) ?: 1
             val times = timetables[open]
-            val focusOn = RouteOfTheDay.firstToCome(times.map { it.seconds }, open - 1, now)
+            val scrollTo = RouteOfTheDay.firstToCome(times.map { it.seconds }, open - 1, now)
             _state.value = ScheduleState(
                 days         = DateHelper.upcomingDays(7, fromYesterday = open == 0, today = moment.toLocalDate()),
                 selectedDate = dates[open],
                 times        = times,
                 loading      = false,
                 noDataReason = if (times.isEmpty()) "Няма курсове за тази дата" else null,
-                focusOn      = focusOn
+                scrollTo     = scrollTo
             )
         }
     }
@@ -164,7 +165,7 @@ class ScheduleViewModel @Inject constructor(
             selectedDate = date,
             loading = true,
             noDataReason = null,
-            focusOn = null
+            scrollTo = null
         )
         // The day chosen last is the one shown: a load for a day tapped
         // before is dropped (each reads all the line's trips of its day).

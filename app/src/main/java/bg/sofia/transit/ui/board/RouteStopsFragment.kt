@@ -4,7 +4,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
@@ -24,8 +23,9 @@ import kotlinx.coroutines.launch
  * board's stop (GtfsRepository.lineAtStop) — 111 towards БУЛ. НИКОЛА ПЕТКОВ
  * its short run's 22, not the full run's 41 — as the Lines screen lists a
  * direction's (StopOnRouteAdapter), the board's stop marked "тази спирка",
- * brought on screen and given TalkBack's focus, the minutes from it on (the
- * owner, 25 Nov 2026).
+ * brought to the top of the list — TalkBack's focus not moved there (the
+ * owner, 27 Nov 2026: it broke the reading of the screen) — the minutes from
+ * it on (the owner, 25 Nov 2026).
  * A stop opens its own window, on its board (the owner, 24 Nov 2026).
  */
 @AndroidEntryPoint
@@ -56,7 +56,7 @@ class RouteStopsFragment : Fragment() {
     private val headsign get() = args.getString(ARG_HEADSIGN).orEmpty()
     private val hereId get() = args.getString(ARG_STOP_ID).orEmpty()
 
-    /** The board's stop given the focus once, not again on every redraw. */
+    /** The board's stop brought to the top once, not again on every redraw. */
     private var focused = false
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, saved: Bundle?): View {
@@ -95,20 +95,14 @@ class RouteStopsFragment : Fragment() {
     }
 
     /**
-     * The board's stop at the top of the list, with TalkBack's focus — after
-     * the window's own first focus (on opening, TalkBack takes the first
-     * element), as JourneyFragment moves it to the stop to get off at.
+     * The board's stop at the top of the list, TalkBack's focus left where it
+     * is (the owner, 27 Nov 2026): the first stop a swipe from the heading
+     * reaches is it.
      */
     private fun bringHere(pos: Int) {
         if (pos < 0) return
         val rv = binding.rvStops
-        rv.post {
-            (rv.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(pos, 0)
-            rv.postDelayed({
-                _binding?.rvStops?.findViewHolderForAdapterPosition(pos)?.itemView
-                    ?.performAccessibilityAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
-            }, FOCUS_DELAY_MS)
-        }
+        rv.post { (rv.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(pos, 0) }
     }
 
     /** A stop's own board (the owner, 24 Nov 2026), by its code as Спирки opens it. */
@@ -127,5 +121,3 @@ class RouteStopsFragment : Fragment() {
     }
 }
 
-/** After the window's opening, for TalkBack's own first focus to have come and gone. */
-private const val FOCUS_DELAY_MS = 500L
