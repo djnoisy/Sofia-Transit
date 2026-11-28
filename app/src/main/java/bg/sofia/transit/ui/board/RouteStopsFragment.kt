@@ -96,8 +96,9 @@ class RouteStopsFragment : Fragment() {
 
     /**
      * The board's stop at the top of the list, TalkBack's focus left where it
-     * is (the owner, 27 Nov 2026): the first stop a swipe from the heading
-     * reaches is it.
+     * is (the owner, 27 Nov 2026) — as far as the list goes: near its end, the
+     * stop stays lower (no room added under the last one: the owner, 28 Nov
+     * 2026).
      */
     private fun bringHere(pos: Int) {
         if (pos < 0) return

@@ -38,8 +38,10 @@ import kotlinx.coroutines.launch
  * not yet passed, its hour at the top (ScheduleViewModel; the owner, 25 Nov
  * 2026) — each time the tab is shown again, and when a line is chosen. Not
  * TalkBack's focus moved there (the owner, 27 Nov 2026: it broke the reading
- * of the screen, the tab opened was not heard): the first row a swipe from
- * the date reaches is that hour.
+ * of the screen, the tab opened was not heard). Near the end of the list the
+ * hour cannot come to the top — the list ends — and an hour before it is the
+ * first a swipe from the date reaches; no room added under the last row to
+ * change that (the owner, 28 Nov 2026: "нестандартно").
  */
 @AndroidEntryPoint
 class ScheduleFragment : Fragment() {
