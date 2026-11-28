@@ -79,7 +79,9 @@ class RouteStopsFragment : Fragment() {
         super.onViewCreated(view, saved)
         listed = null
         drawn = null
-        restored = saved != null
+        // Only with stops shown before: else the list's place was used up
+        // on an empty layout, and the start stop is to be brought up still.
+        restored = saved != null && vm.state.value.stops != null
 
         adapter = StopOnRouteAdapter(onOpen = { stop -> openStop(stop) }, onStart = { pos -> vm.startAt(pos) })
         binding.rvStops.layoutManager = LinearLayoutManager(requireContext())
@@ -104,6 +106,8 @@ class RouteStopsFragment : Fragment() {
             // 28 Nov 2026).
             binding.tvStopCount.text = ""
             binding.tvStopCount.contentDescription = null
+            binding.tvEmpty.visibility = View.GONE
+            restored = false
             if (drawn != null) { drawn = null; adapter.submitList(emptyList(), 0) }
             return
         }

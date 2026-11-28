@@ -61,6 +61,8 @@ class RouteStopsViewModel @Inject constructor(
     private var boardTrip: String? = null
     private var loadJob: Job? = null
     private var stopsJob: Job? = null
+    /** Stops read already, by choice, on opening from a board: not read again for the one shown. */
+    private val read = HashMap<Int, List<StopWithSequence>>()
 
     /**
      * The directions of [routeId], once; from a board's row ([boardHeadsign],
@@ -93,7 +95,7 @@ class RouteStopsViewModel @Inject constructor(
                 // direction at all: that route, first, on its own.
                 val key = RouteOfTheDay.directionKey(boardHeadsign)
                 val same = choices.indices.filter { RouteOfTheDay.directionKey(choices[it].headsign) == key }
-                val calling = same.firstOrNull { i -> stopsOf(choices[i]).any { it.stopId == boardStopId } }
+                val calling = same.firstOrNull { i -> stopsOf(choices[i]).also { read[i] = it }.any { it.stopId == boardStopId } }
                 when {
                     calling != null -> selected = calling
                     same.isNotEmpty() -> {
@@ -132,7 +134,7 @@ class RouteStopsViewModel @Inject constructor(
         stopsJob?.cancel()
         stopsJob = viewModelScope.launch {
             val stops = if (index == boardChoice) attempt("Stops of $boardTrip") { repo.getStopsOfTrip(boardTrip!!) }.orEmpty()
-                else stopsOf(choice)
+                else read.remove(index) ?: stopsOf(choice)
             val start = boardStop?.let { b -> stops.indexOfFirst { it.stopId == b } }?.takeIf { it >= 0 } ?: 0
             _state.value = _state.value.copy(stops = stops, start = start)
         }
