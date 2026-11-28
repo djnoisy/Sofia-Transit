@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A line's route through a stop, opened from a row of a stop's board
-     (LineWindowActivity): a window of its own over the stop's — no navigation
-     bar; in the top bar the back arrow and the title, "Спирки по маршрута".
-     The list itself is RouteStopsFragment. -->
+<!-- A line's window, opened from Линии and from a row of a stop's board
+     (LineWindowActivity): a window of its own — no navigation bar; in the
+     top bar the back arrow and the title, the line: "Автобус 111" (the owner,
+     27 Nov 2026). The stops and the direction chosen are RouteStopsFragment. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"

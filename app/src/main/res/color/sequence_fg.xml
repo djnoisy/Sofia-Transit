@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The number of a stop along a line (bg_sequence_circle): on the fill for
+     the stop the travel times are counted from. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true" android:color="?attr/colorOnPrimary"/>
+    <item android:color="?attr/colorOnSurface"/>
+</selector>

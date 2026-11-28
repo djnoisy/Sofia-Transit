@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A stop along a line's direction: a card — its number in a circle, its
-     name (and "тази спирка" for the board's own, on a route opened from a
-     board), the minutes from the start — on a board's route, from its stop
-     on (StopOnRouteAdapter). Read as one by TalkBack (the adapter's
-     description on the card). -->
+<!-- A stop along a line's route: a card — its number in a circle, its name,
+     the travel time from the stop counted from (StopOnRouteAdapter). The
+     number is a button on screen: touched, its stop is the one counted from,
+     its circle filled (the owner, 27 Nov 2026); for TalkBack the card is one
+     element, read by the adapter's description, the same choice an action
+     of its ("Време на пътуване от тази спирка") — not a second element per
+     stop to swipe through (the owner chose so, to try). The rest of the card
+     opens the stop's window. -->
 <com.google.android.material.card.MaterialCardView
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -25,14 +28,16 @@
         <TextView android:id="@+id/tvSequence"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minWidth="40dp"
-            android:minHeight="40dp"
+            android:minWidth="48dp"
+            android:minHeight="48dp"
             android:padding="4dp"
             android:gravity="center"
             android:background="@drawable/bg_sequence_circle"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
             android:textSize="15sp"
             android:textStyle="bold"
-            android:textColor="?attr/colorOnSurface"
+            android:textColor="@color/sequence_fg"
             android:importantForAccessibility="no"/>
 
         <LinearLayout
@@ -50,16 +55,6 @@
                 android:textColor="?attr/colorOnSurface"
                 android:importantForAccessibility="no"/>
 
-            <!-- The stop a board's route was opened from (RouteStopsFragment). -->
-            <TextView android:id="@+id/tvHere"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="тази спирка"
-                android:textSize="14sp"
-                android:textStyle="bold"
-                android:textColor="?attr/colorPrimary"
-                android:visibility="gone"
-                android:importantForAccessibility="no"/>
         </LinearLayout>
 
         <TextView android:id="@+id/tvTime"

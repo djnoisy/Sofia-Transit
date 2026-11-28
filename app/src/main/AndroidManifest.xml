@@ -72,11 +72,12 @@
             android:exported="false"
             android:label="Спирка"/>
 
-        <!-- A board row's line: its route through the stop, a window of its own. -->
+        <!-- A line's window: its stops along a direction chosen in it; from
+             Линии and from a stop's board. Titled by the line ("Автобус 111"). -->
         <activity
             android:name=".ui.board.LineWindowActivity"
             android:exported="false"
-            android:label="Спирки по маршрута"/>
+            android:label="Линия"/>
 
         <activity
             android:name=".ui.permissions.PermissionsActivity"

@@ -426,7 +426,7 @@ class JourneyViewModel @Inject constructor(
             try {
                 val headsigns = gtfsRepo.getDirectionHeadsigns(choice.routeId)
                 if (headsigns.isEmpty()) {
-                    _error.emit("Няма данни за направленията на тази линия")
+                    _error.emit("Няма данни за посоките на тази линия")
                     return@launch
                 }
                 // Only one direction on record: nothing to determine.

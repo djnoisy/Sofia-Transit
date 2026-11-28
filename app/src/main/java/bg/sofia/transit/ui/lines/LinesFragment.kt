@@ -7,13 +7,14 @@ import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
-import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import bg.sofia.transit.R
 import bg.sofia.transit.data.db.entity.Route
 import bg.sofia.transit.data.db.entity.TransportType
 import bg.sofia.transit.databinding.FragmentLinesBinding
+import bg.sofia.transit.ui.board.LineWindowActivity
 import bg.sofia.transit.ui.common.Keyboard
+import bg.sofia.transit.util.VehicleLabels
 import bg.sofia.transit.util.LineSearch
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
@@ -211,6 +212,10 @@ class LinesFragment : Fragment() {
         super.onResume()
         // The keyboard may have gone while the screen was away.
         Keyboard.again(binding.rvRoutes)
+        // Back from a line's window — a window over this one, the view kept:
+        // TalkBack's focus on the line opened, as when it was a screen of
+        // the section (the view made anew, groupedRoutes above).
+        if (vm.groupedRoutes.value.isNotEmpty()) restoreFocusToLastSelected()
     }
 
     override fun onPause() {
@@ -219,17 +224,17 @@ class LinesFragment : Fragment() {
         Keyboard.hide(binding.etSearch)
     }
 
+    /**
+     * A line activated: its window, titled by it — "Автобус 111" — its
+     * stops along a direction chosen in it (LineWindowActivity; the owner,
+     * 27 Nov 2026: no screen of directions any more, no navigation bar).
+     * Back here, TalkBack's focus on it again (onResume).
+     */
     private fun openDirections(route: Route) {
         Keyboard.hide(binding.etSearch)
-        vm.selectRoute(route)
         vm.lastSelectedRouteId = route.routeId
-        findNavController().navigate(
-            LinesFragmentDirections.actionLinesToDirections(
-                routeId        = route.routeId,
-                routeShortName = route.routeShortName,
-                routeLongName  = route.routeLongName
-            )
-        )
+        val kind = VehicleLabels.singular(route.routeType, route.routeId in vm.trolleyRouteIds.value)
+        LineWindowActivity.open(requireContext(), route.routeId, route.routeShortName, "$kind ${route.routeShortName}")
     }
 
     override fun onDestroyView() {

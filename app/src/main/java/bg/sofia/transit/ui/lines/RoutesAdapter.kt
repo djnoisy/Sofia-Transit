@@ -75,7 +75,7 @@ class RoutesAdapter(
                 b.tvRouteName.text   = subtitle
                 // Short and speakable, without the redundant "линия" word.
                 b.root.contentDescription =
-                    "$label ${route.routeShortName}: $subtitle. Натиснете за направления."
+                    "$label ${route.routeShortName}: $subtitle. Натиснете за спирките по маршрута."
                 b.root.setOnClickListener { onClick(route) }
             } catch (e: Exception) {
                 FileLogger.e(TAG, "bind failed for ${route.routeId}", e)

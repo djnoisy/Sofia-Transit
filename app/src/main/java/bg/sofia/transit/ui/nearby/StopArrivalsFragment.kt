@@ -147,7 +147,7 @@ class StopArrivalsFragment : Fragment() {
             FileLogger.i(TAG, "Route of ${info.routeId} towards '${info.headsign}' " +
                 "from the board of $stopId: ${line?.let { "trip ${it.tripId} at ${it.stopId}" } ?: "none"}")
             if (line == null) Toast.makeText(context, "Маршрутът на линията не е известен", Toast.LENGTH_LONG).show()
-            else LineWindowActivity.openRoute(context, info.routeId, info.routeShortName,
+            else LineWindowActivity.openFromBoard(context, info.routeId, info.routeShortName, ArrivalAdapter.labelOf(info),
                 line.headsign, line.tripId, line.stopId)
         }
     }

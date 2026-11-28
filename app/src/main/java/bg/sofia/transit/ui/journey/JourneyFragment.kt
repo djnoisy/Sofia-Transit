@@ -424,12 +424,12 @@ class JourneyFragment : Fragment() {
             when {
                 directions.isEmpty() ->
                     Toast.makeText(requireContext(),
-                        "Няма данни за направленията на тази линия",
+                        "Няма данни за посоките на тази линия",
                         Toast.LENGTH_SHORT).show()
                 directions.size == 1 ->
                     vm.startJourney(choice, directions.first())
                 else -> AlertDialog.Builder(requireContext())
-                    .setTitle("Направление")
+                    .setTitle("Посока")
                     .setItems(directions.toTypedArray()) { _, which ->
                         vm.startJourney(choice, directions[which])
                     }

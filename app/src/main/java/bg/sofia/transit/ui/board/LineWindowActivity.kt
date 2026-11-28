@@ -10,11 +10,13 @@ import bg.sofia.transit.util.ThemeMode
 import dagger.hilt.android.AndroidEntryPoint
 
 /**
- * "Спирки по маршрута": the route a board row's line takes through the stop
- * (RouteStopsFragment), opened by activating the row (the owner, 24 Nov 2026;
- * straight, no choice offered, since the timetable is a tab of the stop's
- * window: the owner, 26 Nov 2026), in a window of its own over the stop's,
- * as that one is (SubWindow). Back returns to the stop's window.
+ * A line's window (the owner, 27 Nov 2026): its title the line itself —
+ * "Автобус 111", the window's heading for TalkBack — and its stops along a
+ * direction chosen in it (RouteStopsFragment). A window of its own, as a
+ * stop's is (SubWindow), no navigation bar — opened from Линии (a line
+ * activated; was its directions' screen, then its stops', in the section)
+ * and from a stop's board (a row activated: its direction, through the
+ * board's stop). Back returns to where it was opened from.
  */
 @AndroidEntryPoint
 class LineWindowActivity : AppCompatActivity() {
@@ -26,17 +28,16 @@ class LineWindowActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityLineWindowBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        SubWindow.setUp(this, binding.toolbar, binding.lineContainer, "Спирки по маршрута")
+        val routeId = intent.getStringExtra(EXTRA_ROUTE_ID)
+        SubWindow.setUp(this, binding.toolbar, binding.lineContainer,
+            intent.getStringExtra(EXTRA_TITLE) ?: "Линия ${intent.getStringExtra(EXTRA_ROUTE_NAME).orEmpty()}")
+        if (routeId == null) { finish(); return }
 
         if (savedInstanceState == null) {
-            val routeId = intent.getStringExtra(EXTRA_ROUTE_ID)
-            val stopId = intent.getStringExtra(EXTRA_STOP_ID)
-            val tripId = intent.getStringExtra(EXTRA_TRIP_ID)
-            if (routeId == null || stopId == null || tripId == null) { finish(); return }
             supportFragmentManager.beginTransaction()
                 .replace(binding.lineContainer.id, RouteStopsFragment.newInstance(routeId,
-                    intent.getStringExtra(EXTRA_ROUTE_NAME).orEmpty(), intent.getStringExtra(EXTRA_HEADSIGN).orEmpty(),
-                    tripId, stopId))
+                    intent.getStringExtra(EXTRA_HEADSIGN), intent.getStringExtra(EXTRA_TRIP_ID),
+                    intent.getStringExtra(EXTRA_STOP_ID)))
                 .commit()
         }
     }
@@ -49,14 +50,26 @@ class LineWindowActivity : AppCompatActivity() {
     companion object {
         private const val EXTRA_ROUTE_ID = "routeId"
         private const val EXTRA_ROUTE_NAME = "routeName"
+        private const val EXTRA_TITLE = "title"
         private const val EXTRA_HEADSIGN = "headsign"
         private const val EXTRA_STOP_ID = "stopId"
         private const val EXTRA_TRIP_ID = "tripId"
 
-        /** The stops of the route of [tripId], the direction's through the stop [stopId], marked there. */
-        fun openRoute(context: Context, routeId: String, routeName: String, headsign: String, tripId: String, stopId: String) {
+        /** The line [routeId] — [title]: "Автобус 111" — from Линии: its first direction, from its first stop. */
+        fun open(context: Context, routeId: String, routeName: String, title: String) {
             context.startActivity(Intent(context, LineWindowActivity::class.java)
-                .putExtra(EXTRA_ROUTE_ID, routeId).putExtra(EXTRA_ROUTE_NAME, routeName)
+                .putExtra(EXTRA_ROUTE_ID, routeId).putExtra(EXTRA_ROUTE_NAME, routeName).putExtra(EXTRA_TITLE, title))
+        }
+
+        /**
+         * The line [routeId] from a board's row: its direction [headsign], by
+         * the route of [tripId] through the board's stop [stopId] (its pole),
+         * counted from that stop.
+         */
+        fun openFromBoard(context: Context, routeId: String, routeName: String, title: String,
+                          headsign: String, tripId: String, stopId: String) {
+            context.startActivity(Intent(context, LineWindowActivity::class.java)
+                .putExtra(EXTRA_ROUTE_ID, routeId).putExtra(EXTRA_ROUTE_NAME, routeName).putExtra(EXTRA_TITLE, title)
                 .putExtra(EXTRA_HEADSIGN, headsign).putExtra(EXTRA_TRIP_ID, tripId).putExtra(EXTRA_STOP_ID, stopId))
         }
     }

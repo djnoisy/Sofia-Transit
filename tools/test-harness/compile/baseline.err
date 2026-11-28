@@ -519,6 +519,8 @@ app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unreso
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: AppCompatActivity
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: Bundle
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: Context
+app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: Context
+app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: Intent
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: Intent
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: android
@@ -533,20 +535,26 @@ app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unreso
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: intent
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: intent
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: intent
+app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: intent
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: layoutInflater
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: onCreate
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: setContentView
 app/src/main/java/bg/sofia/transit/ui/board/LineWindowActivity.kt: error: unresolved reference: supportFragmentManager
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: 'onCreateView' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: 'onDestroyView' overrides nothing
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: 'onItemSelected' overrides nothing
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: 'onNothingSelected' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: 'onViewCreated' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: suspend function 'collect' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: suspend function 'getRouteMeta' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: suspend function 'stopCode' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
-app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<List<StopWithSequence>> was expected
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<RouteStopsState> was expected
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: AdapterView
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: AdapterView
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: AdapterView
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: AndroidEntryPoint
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: ArrayAdapter
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: Bundle
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: Bundle
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: Fragment
@@ -555,6 +563,14 @@ app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unreso
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: LayoutInflater
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: LinearLayoutManager
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: LinearLayoutManager
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: R
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: ViewGroup
@@ -562,6 +578,9 @@ app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unreso
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: android
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: androidx
@@ -572,12 +591,12 @@ app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unreso
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: context
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: databinding
-app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: it
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: onDestroyView
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: onViewCreated
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: requireArguments
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: requireContext
-app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: viewLifecycleOwner
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: requireContext
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: setDropDownViewResource
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: unresolved reference: viewModels
@@ -589,7 +608,14 @@ app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variab
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'first' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'getDirectionsForRoute' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'getOtherDirectionsForRoute' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'getStopsForDirection' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'getStopsOfTrip' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unresolved reference: HiltViewModel
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unresolved reference: Inject
@@ -598,6 +624,7 @@ app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unres
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unresolved reference: inject
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unresolved reference: viewModelScope
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unresolved reference: viewModelScope
 app/src/main/java/bg/sofia/transit/ui/board/StopBoardActivity.kt: error: 'createFragment' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/board/StopBoardActivity.kt: error: 'getItemCount' overrides nothing
@@ -1210,74 +1237,6 @@ app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: un
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: unresolved reference: notifyItemRangeChanged
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/journey/UpcomingTripsAdapter.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: 'getItemCount' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: 'getItemViewType' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: 'onBindViewHolder' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: 'onCreateViewHolder' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: ItemDirectionBinding
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: ItemDirectionBinding
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: ItemDirectionHeadingBinding
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: ItemDirectionHeadingBinding
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: LayoutInflater
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: RecyclerView
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: RecyclerView
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: RecyclerView
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: RecyclerView
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: RecyclerView
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: RecyclerView
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: ViewGroup
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: databinding
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: databinding
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: notifyItemRangeInserted
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: unresolved reference: notifyItemRangeRemoved
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsAdapter.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: 'onCreateView' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: 'onDestroyView' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: 'onViewCreated' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: suspend function 'collectLatest' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: suspend function 'getRouteMeta' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: AndroidEntryPoint
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: Bundle
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: Bundle
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: DirectionsFragmentArgs
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: DirectionsFragmentDirections
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: Fragment
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: FragmentDirectionsBinding
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: FragmentDirectionsBinding
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: LayoutInflater
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: LinearLayoutManager
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: View
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: View
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: ViewGroup
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: activityViewModels
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: dagger
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: databinding
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: findNavController
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: navArgs
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: onDestroyView
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: onViewCreated
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: requireContext
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: viewLifecycleOwner
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: unresolved reference: viewLifecycleOwner
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/DirectionsFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: 'onCreateView' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: 'onDestroyView' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: 'onInitializeAccessibilityNodeInfo' overrides nothing
@@ -1303,7 +1262,6 @@ app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved 
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: LayoutInflater
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: LinearLayoutManager
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: LinearLayoutManager
-app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: LinesFragmentDirections
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: R
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: View
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: View
@@ -1332,15 +1290,14 @@ app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved 
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: databinding
-app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: findNavController
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: onDestroyView
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: onInitializeAccessibilityNodeInfo
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: onPause
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: onResume
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: onViewCreated
+app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: requireContext
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: requireContext
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: viewLifecycleOwner
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: viewLifecycleOwner
@@ -1358,11 +1315,7 @@ app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: cannot inf
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: suspend function 'collect' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: suspend function 'first' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: suspend function 'getDirectionsForRoute' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: suspend function 'getOtherDirectionsForRoute' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: suspend function 'getRouteSubtitles' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: suspend function 'getStopsForDirection' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: suspend function 'getStopsOfTrip' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: suspend function 'getTrolleyRouteIdsSet' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: this is an internal kotlinx.coroutines API that should not be used from outside of kotlinx.coroutines. No compatibility guarantees are provided. It is recommended to report your use-case of internal API to kotlinx.coroutines issue tracker, so stable API could be provided instead
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: type mismatch: inferred type is ([Error type: Cannot infer a lambda parameter type]) -> Unit but FlowCollector<List<Route>> was expected
@@ -1374,8 +1327,6 @@ app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: unresolved
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: unresolved reference: inject
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: unresolved reference: it
-app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: unresolved reference: viewModelScope
-app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: unresolved reference: viewModelScope
 app/src/main/java/bg/sofia/transit/ui/lines/LinesViewModel.kt: error: unresolved reference: viewModelScope
 app/src/main/java/bg/sofia/transit/ui/lines/RoutesAdapter.kt: error: 'getItemCount' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/lines/RoutesAdapter.kt: error: 'onBindViewHolder' overrides nothing
@@ -1562,20 +1513,30 @@ app/src/main/java/bg/sofia/transit/ui/lines/ScheduleViewModel.kt: error: unresol
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: 'getItemCount' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: 'onBindViewHolder' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: 'onCreateViewHolder' overrides nothing
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: cannot infer a type for this parameter. Please specify it explicitly.
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: ItemStopOnRouteBinding
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: ItemStopOnRouteBinding
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: LayoutInflater
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: RecyclerView
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: RecyclerView
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: View
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: ViewCompat
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: ViewCompat
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: ViewGroup
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: android
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: androidx
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: bindingAdapterPosition
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: bindingAdapterPosition
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: databinding
+app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: notifyItemRangeChanged
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: notifyItemRangeInserted
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: unresolved reference: notifyItemRangeRemoved
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: variable expected
@@ -1584,55 +1545,6 @@ app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: variab
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/lines/StopOnRouteAdapter.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: 'onCreateView' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: 'onDestroyView' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: 'onViewCreated' overrides nothing
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: suspend function 'collectLatest' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: suspend function 'getRouteMeta' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: suspend function 'stopCode' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: AndroidEntryPoint
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: Bundle
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: Bundle
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: Fragment
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: FragmentStopsListBinding
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: FragmentStopsListBinding
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: LayoutInflater
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: LinearLayoutManager
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: StopsListFragmentArgs
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: View
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: View
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: ViewGroup
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: activityViewModels
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: android
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: androidx
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: context
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: dagger
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: databinding
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: it
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: it
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: it
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: navArgs
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: onDestroyView
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: onViewCreated
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: requireContext
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: viewLifecycleOwner
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: viewLifecycleOwner
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: unresolved reference: viewLifecycleOwner
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: variable expected
-app/src/main/java/bg/sofia/transit/ui/lines/StopsListFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: 'areContentsTheSame' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: 'areItemsTheSame' overrides nothing
 app/src/main/java/bg/sofia/transit/ui/nearby/ArrivalAdapter.kt: error: 'getItemCount' overrides nothing

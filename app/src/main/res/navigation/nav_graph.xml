@@ -38,37 +38,8 @@
         android:label="Линии"
         tools:layout="@layout/fragment_lines">
 
-        <action android:id="@+id/actionLinesToDirections"
-            app:destination="@id/directionsFragment"/>
-    </fragment>
-
-    <fragment android:id="@+id/directionsFragment"
-        android:name="bg.sofia.transit.ui.lines.DirectionsFragment"
-        android:label="Направления"
-        tools:layout="@layout/fragment_directions">
-
-        <argument android:name="routeId"
-            app:argType="string"/>
-        <argument android:name="routeShortName"
-            app:argType="string"/>
-        <argument android:name="routeLongName"
-            app:argType="string" android:defaultValue=""/>
-
-        <action android:id="@+id/actionDirectionsToStopsList"
-            app:destination="@id/stopsListFragment"/>
-    </fragment>
-
-    <fragment android:id="@+id/stopsListFragment"
-        android:name="bg.sofia.transit.ui.lines.StopsListFragment"
-        android:label="Спирки по маршрут"
-        tools:layout="@layout/fragment_stops_list">
-
-        <argument android:name="routeId"    app:argType="string"/>
-        <argument android:name="headsign"   app:argType="string"/>
-        <argument android:name="routeName"  app:argType="string" android:defaultValue=""/>
-        <!-- What tells one more route of a direction apart ("от ДЕПО ИСКЪР"); empty for a direction's own. -->
-        <argument android:name="via"        app:argType="string" android:defaultValue=""/>
-        <!-- A stop: its window, on the timetable of the direction (StopBoardActivity; the owner, 26 Nov 2026). -->
+        <!-- A line: its window, its stops along a direction chosen in it
+             (LineWindowActivity; the owner, 27 Nov 2026). -->
     </fragment>
 
     <!-- ── Journey ── -->
