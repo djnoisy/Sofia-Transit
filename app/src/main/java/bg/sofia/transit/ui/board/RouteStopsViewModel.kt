@@ -42,8 +42,9 @@ data class RouteStopsState(
  * two main directions, then the others running today and the further routes
  * of each — "Други направления" before, one list now, no heading
  * (GtfsRepository.getDirectionsForRoute, getOtherDirectionsForRoute).
- * From a board's row: its direction chosen, by the route it takes through
- * the board's stop (GtfsRepository.lineAtStop), and that stop counted from.
+ * From a board's row: its direction chosen — of its routes, the one calling
+ * at the board's stop; else by the route it takes through the stop
+ * (GtfsRepository.lineAtStop) — and that stop counted from.
  */
 @HiltViewModel
 class RouteStopsViewModel @Inject constructor(
@@ -72,31 +73,38 @@ class RouteStopsViewModel @Inject constructor(
         boardStop = boardStopId
         boardTrip = boardTripId
         loadJob = viewModelScope.launch {
-            val choices = try {
-                // An import empties the tables before refilling them (as StopArrivalsViewModel).
-                if (!repo.dataReady.value) repo.dataReady.first { it }
-                val main = repo.getDirectionsForRoute(routeId)
-                main.map { RouteChoice(said(it.tripHeadsign, null), it.tripHeadsign.orEmpty(), null) } +
-                    repo.getOtherDirectionsForRoute(routeId, main).map { o ->
-                        RouteChoice(said(o.trip.tripHeadsign, o.via), o.trip.tripHeadsign.orEmpty(), o.trip.tripId, o.via != null)
-                    }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                FileLogger.w(TAG, "Directions of $routeId failed: ${e.message}")
-                emptyList()
-            }.toMutableList()
+            // An import empties the tables before refilling them (as StopArrivalsViewModel).
+            if (!repo.dataReady.value) repo.dataReady.first { it }
+            val main = attempt("Directions of $routeId") { repo.getDirectionsForRoute(routeId) }.orEmpty()
+            // Apart: the others failing, the main two are still offered (review of 28 Nov 2026).
+            val others = attempt("Other directions of $routeId") { repo.getOtherDirectionsForRoute(routeId, main) }.orEmpty()
+            val choices = (main.map { RouteChoice(said(it.tripHeadsign, null), it.tripHeadsign.orEmpty(), null) } +
+                others.map { o -> RouteChoice(said(o.trip.tripHeadsign, o.via), o.trip.tripHeadsign.orEmpty(), o.trip.tripId, o.via != null) })
+                .toMutableList()
             var selected = 0
-            if (boardTripId != null) {
-                // The board row's direction — of the choices without "от"/"през" first.
+            if (boardTripId != null && boardStopId != null) {
+                // The board row's direction: of its choices, the one whose own
+                // route calls at the board's stop — a further route, when that
+                // is what calls there (runs from ДЕПО ИСКЪР; review of 28 Nov
+                // 2026: else the main one was shown with the depot run's stops,
+                // and could not be shown with its own) — its own stops then.
+                // None calling there: the first of the direction (not a further
+                // route), with the route through the stop; none of the
+                // direction at all: that route, first, on its own.
                 val key = RouteOfTheDay.directionKey(boardHeadsign)
-                boardChoice = choices.indices.sortedBy { if (choices[it].further) 1 else 0 }
-                    .firstOrNull { RouteOfTheDay.directionKey(choices[it].headsign) == key } ?: -1
-                if (boardChoice < 0) {
-                    choices.add(0, RouteChoice(said(boardHeadsign, null), boardHeadsign.orEmpty(), boardTripId))
-                    boardChoice = 0
+                val same = choices.indices.filter { RouteOfTheDay.directionKey(choices[it].headsign) == key }
+                val calling = same.firstOrNull { i -> stopsOf(choices[i]).any { it.stopId == boardStopId } }
+                when {
+                    calling != null -> selected = calling
+                    same.isNotEmpty() -> {
+                        boardChoice = same.sortedBy { if (choices[it].further) 1 else 0 }.first()
+                        selected = boardChoice
+                    }
+                    else -> {
+                        choices.add(0, RouteChoice(said(boardHeadsign, null), boardHeadsign.orEmpty(), boardTripId))
+                        boardChoice = 0
+                    }
                 }
-                selected = boardChoice
             }
             FileLogger.i(TAG, "Directions of $routeId: ${choices.joinToString { it.label }}; shown ${choices.getOrNull(selected)?.label}")
             _state.value = RouteStopsState(choices = choices, selected = selected)
@@ -123,18 +131,27 @@ class RouteStopsViewModel @Inject constructor(
             ?: run { _state.value = _state.value.copy(stops = emptyList()); return }
         stopsJob?.cancel()
         stopsJob = viewModelScope.launch {
-            val stops = try {
-                val trip = if (index == boardChoice) boardTrip else choice.tripId
-                if (trip != null) repo.getStopsOfTrip(trip) else repo.getStopsForDirection(routeId, choice.headsign)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                FileLogger.w(TAG, "Stops of $routeId towards '${choice.headsign}' failed: ${e.message}")
-                emptyList()
-            }
+            val stops = if (index == boardChoice) attempt("Stops of $boardTrip") { repo.getStopsOfTrip(boardTrip!!) }.orEmpty()
+                else stopsOf(choice)
             val start = boardStop?.let { b -> stops.indexOfFirst { it.stopId == b } }?.takeIf { it >= 0 } ?: 0
             _state.value = _state.value.copy(stops = stops, start = start)
         }
+    }
+
+    /** The stops [choice] lists: a main direction's route of the day, another's trip; none when they cannot be read. */
+    private suspend fun stopsOf(choice: RouteChoice): List<StopWithSequence> =
+        attempt("Stops of $routeId towards '${choice.headsign}'") {
+            choice.tripId?.let { repo.getStopsOfTrip(it) } ?: repo.getStopsForDirection(routeId, choice.headsign)
+        }.orEmpty()
+
+    /** [what] read, or null — said in the log — when it fails. */
+    private suspend fun <T> attempt(what: String, read: suspend () -> T): T? = try {
+        read()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        FileLogger.w(TAG, "$what failed: ${e.message}")
+        null
     }
 
     /** A stop's code ("0169"), for its window: its board gathers the stop's poles by it. */

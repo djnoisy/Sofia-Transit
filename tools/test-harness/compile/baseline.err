@@ -612,11 +612,13 @@ app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variab
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsFragment.kt: error: variable expected
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'attempt' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'attempt' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'attempt' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'first' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'getDirectionsForRoute' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'getOtherDirectionsForRoute' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'getStopsForDirection' should be called only from a coroutine or another suspend function
-app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'getStopsOfTrip' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'stopsOf' should be called only from a coroutine or another suspend function
+app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: suspend function 'stopsOf' should be called only from a coroutine or another suspend function
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unresolved reference: HiltViewModel
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unresolved reference: Inject
 app/src/main/java/bg/sofia/transit/ui/board/RouteStopsViewModel.kt: error: unresolved reference: ViewModel
@@ -1292,6 +1294,7 @@ app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved 
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: androidx
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: dagger
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: databinding
+app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: isResumed
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: onDestroyView
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: onInitializeAccessibilityNodeInfo
 app/src/main/java/bg/sofia/transit/ui/lines/LinesFragment.kt: error: unresolved reference: onPause

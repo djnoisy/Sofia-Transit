@@ -125,8 +125,9 @@ class MainActivity : AppCompatActivity() {
             leaveSettingsAndDiagnostics()
             NavigationUI.onNavDestinationSelected(item, navController)
             // Marked whenever the section is now the one shown — also when it
-            // comes back on one of its own screens (a line's directions, its
-            // stops), which NavigationUI does not count: the bar stayed on
+            // comes back on one of its own screens (Линии had them: a line's
+            // directions, its stops; a window of their own since 27 Nov 2026),
+            // which NavigationUI does not count: the bar stayed on
             // the section left, and that one, tapped, did nothing — "it is
             // shown already" (the owner, 10 Nov 2026).
             isOnBackStack(item.itemId)

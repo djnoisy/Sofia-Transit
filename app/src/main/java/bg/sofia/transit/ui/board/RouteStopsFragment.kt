@@ -72,10 +72,14 @@ class RouteStopsFragment : Fragment() {
         return binding.root
     }
 
+    /** A view made anew (a rotation): the list keeps its own place — not brought to the start stop again. */
+    private var restored = false
+
     override fun onViewCreated(view: View, saved: Bundle?) {
         super.onViewCreated(view, saved)
         listed = null
         drawn = null
+        restored = saved != null
 
         adapter = StopOnRouteAdapter(onOpen = { stop -> openStop(stop) }, onStart = { pos -> vm.startAt(pos) })
         binding.rvStops.layoutManager = LinearLayoutManager(requireContext())
@@ -95,7 +99,12 @@ class RouteStopsFragment : Fragment() {
         bindChoices(state)
         val stops = state.stops
         if (stops == null) {
+            // Another direction loading: the old stops not left to open (with
+            // the new direction's timetable) nor their count said (review of
+            // 28 Nov 2026).
             binding.tvStopCount.text = ""
+            binding.tvStopCount.contentDescription = null
+            if (drawn != null) { drawn = null; adapter.submitList(emptyList(), 0) }
             return
         }
         binding.tvStopCount.text = "${stops.size} спирки"
@@ -108,7 +117,9 @@ class RouteStopsFragment : Fragment() {
             // the top — no focus moved (the owner, 27 Nov 2026).
             drawn = stops
             adapter.submitList(stops, state.start)
-            if (state.start > 0) {
+            val keepPlace = restored
+            restored = false
+            if (state.start > 0 && !keepPlace) {
                 val rv = binding.rvStops
                 rv.post { (rv.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(state.start, 0) }
             }

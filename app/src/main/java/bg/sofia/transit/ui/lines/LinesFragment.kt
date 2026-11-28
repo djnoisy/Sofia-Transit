@@ -65,7 +65,10 @@ class LinesFragment : Fragment() {
                 // away (survives in the shared VM), instead of always
                 // resetting to "all".
                 applyCurrentFilter()
-                restoreFocusToLastSelected()
+                // Only while shown: under a line's window the view stays, and
+                // routes sent again by an import would use up the line to
+                // come back to (review of 28 Nov 2026) — onResume then.
+                if (isResumed) restoreFocusToLastSelected()
             }
         }
 
@@ -212,9 +215,8 @@ class LinesFragment : Fragment() {
         super.onResume()
         // The keyboard may have gone while the screen was away.
         Keyboard.again(binding.rvRoutes)
-        // Back from a line's window — a window over this one, the view kept:
-        // TalkBack's focus on the line opened, as when it was a screen of
-        // the section (the view made anew, groupedRoutes above).
+        // Back from a line's window — a window over this one, the view kept —
+        // or the view made anew: TalkBack's focus on the line opened.
         if (vm.groupedRoutes.value.isNotEmpty()) restoreFocusToLastSelected()
     }
 

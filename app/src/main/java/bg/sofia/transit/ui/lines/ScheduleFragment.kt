@@ -140,7 +140,11 @@ class ScheduleFragment : Fragment() {
      */
     private class LineChoices(context: Context, lines: List<StopLine>) :
         ArrayAdapter<String>(context, R.layout.item_spinner_selected, lines.map { l ->
-            "${l.vehicleType} ${l.routeShortName}" + if (l.dropOffOnly) ", само слизане" else " към ${l.headsign}"
+            "${l.vehicleType} ${l.routeShortName}" + when {
+                l.dropOffOnly -> ", само слизане"
+                l.headsign.isBlank() || l.headsign == "—" -> ", посока без име"
+                else -> " към ${l.headsign}"
+            }
         }) {
         init { setDropDownViewResource(R.layout.item_spinner_dropdown) }
     }

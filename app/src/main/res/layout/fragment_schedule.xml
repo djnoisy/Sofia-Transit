@@ -12,7 +12,8 @@
         android:layout_height="wrap_content" android:minHeight="56dp"
         android:layout_marginHorizontal="4dp"
         android:layout_marginTop="4dp"
-        android:popupBackground="@drawable/bg_popup_outlined"/>
+        android:popupBackground="@drawable/bg_popup_outlined"
+        android:saveEnabled="false"/>
 
     <!-- 7-day date strip. Chips are laid out equally across the full width
          (each weight=1) so on a normal phone they read as fixed. The
